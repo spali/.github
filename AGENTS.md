@@ -159,7 +159,9 @@ the first in the order breaking-change, feature, fix, dependencies, other wins.
 5. With the owner's approval: `git tag <draft tag> origin/main && git push origin <draft tag>`.
    Use a lightweight tag.
 6. `gh run watch <run id>`; on failure use section 5.
-7. Verify: `gh release view <tag> --json isDraft,isLatest,assets`.
+7. Verify: `gh release view <tag> --json isDraft,isPrerelease,assets` and
+   `gh release list --json tagName,isLatest --jq '.[] | select(.isLatest) | .tagName'`
+   (`gh release view` has no `isLatest` field).
 
 ### 4.3 Release a version the labels do not give
 
