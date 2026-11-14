@@ -77,3 +77,32 @@ days_since() {
   now=${MONITOR_NOW:-$(date -u +%s)}
   printf '%d\n' $(((now - then_) / 86400))
 }
+
+# parse_failed CHECK REPO records an unreadable API response as check-failed.
+parse_failed() {
+  finding red check-failed "$2" "$1: cannot parse API response"
+}
+
+# paged CHECK REPO PATH FIELDS FILE reads all pages of PATH, keeps only FIELDS
+# (a jq object construction) and writes the JSON array to FILE.
+paged() {
+  local body trimmed
+  body=$(fetch "$1" "$2" "$3" --paginate) || return 1
+  if ! trimmed=$(jq -s "add // [] | map($4)" 2>/dev/null <<<"$body"); then
+    parse_failed "$1" "$2"
+    return 1
+  fi
+  printf '%s\n' "$trimmed" >"$5"
+}
+
+# json_out CHECK REPO OUTVAR JQ_ARGS... runs jq, stores its output in OUTVAR.
+# On failure records check-failed and returns 1.
+json_out() {
+  local check=$1 repo=$2 var=$3 json_result
+  shift 3
+  if ! json_result=$(jq "$@" 2>/dev/null); then
+    parse_failed "$check" "$repo"
+    return 1
+  fi
+  printf -v "$var" '%s' "$json_result"
+}
