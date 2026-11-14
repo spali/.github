@@ -32,15 +32,16 @@ main_at() {
 }
 
 @test "release: tag matches the draft and main" {
-  gh_respond 'release list *' "$FIXTURES/releases-draft-v1.0.0.json"
+  gh_respond 'api repos/spali/sandbox/releases --paginate' "$FIXTURES/releases-draft-v1.0.0.json"
   main_at abc
   GITHUB_REF_NAME=v1.0.0 GITHUB_SHA=abc run "$PREPARE" release
   [ "$status" -eq 0 ]
   [ "$(outputs)" = $'kind=release\nversion=1.0.0\ntag=v1.0.0\nsha=abc\npr=\ndraft-id=42' ]
+  grep -qx 'api repos/spali/sandbox/releases --paginate' "$GH_LOG"
 }
 
 @test "release: pre-release version from an exception draft" {
-  gh_respond 'release list *' "$FIXTURES/releases-draft-v2.0.0-rc.1.json"
+  gh_respond 'api repos/spali/sandbox/releases --paginate' "$FIXTURES/releases-draft-v2.0.0-rc.1.json"
   main_at abc
   GITHUB_REF_NAME=v2.0.0-rc.1 GITHUB_SHA=abc run "$PREPARE" release
   [ "$status" -eq 0 ]
@@ -48,7 +49,7 @@ main_at() {
 }
 
 @test "release: tag does not match the draft" {
-  gh_respond 'release list *' "$FIXTURES/releases-draft-v1.0.0.json"
+  gh_respond 'api repos/spali/sandbox/releases --paginate' "$FIXTURES/releases-draft-v1.0.0.json"
   main_at abc
   GITHUB_REF_NAME=v1.1.0 GITHUB_SHA=abc run --separate-stderr "$PREPARE" release
   [ "$status" -eq 1 ]
@@ -57,7 +58,7 @@ main_at() {
 }
 
 @test "release: no draft at all" {
-  gh_respond 'release list *' "$FIXTURES/releases-no-draft.json"
+  gh_respond 'api repos/spali/sandbox/releases --paginate' "$FIXTURES/releases-no-draft.json"
   main_at abc
   GITHUB_REF_NAME=v1.0.1 GITHUB_SHA=abc run --separate-stderr "$PREPARE" release
   [ "$status" -eq 1 ]
@@ -65,7 +66,7 @@ main_at() {
 }
 
 @test "release: tag on an older commit" {
-  gh_respond 'release list *' "$FIXTURES/releases-draft-v1.0.0.json"
+  gh_respond 'api repos/spali/sandbox/releases --paginate' "$FIXTURES/releases-draft-v1.0.0.json"
   main_at def
   GITHUB_REF_NAME=v1.0.0 GITHUB_SHA=abc run --separate-stderr "$PREPARE" release
   [ "$status" -eq 1 ]
@@ -105,4 +106,13 @@ main_at() {
   run --separate-stderr "$PREPARE" deploy
   [ "$status" -eq 1 ]
   [ "$stderr" = "error: usage: prepare.sh next|release|pr" ]
+}
+
+@test "release: finds the draft on a later page" {
+  { echo '[{"id":40,"tag_name":"v0.9.0","draft":false}]'; echo '[{"id":42,"tag_name":"v1.0.0","draft":true}]'; } |
+    gh_respond 'api repos/spali/sandbox/releases --paginate' -
+  main_at abc
+  GITHUB_REF_NAME=v1.0.0 GITHUB_SHA=abc run "$PREPARE" release
+  [ "$status" -eq 0 ]
+  grep -qx 'draft-id=42' "$GITHUB_OUTPUT"
 }

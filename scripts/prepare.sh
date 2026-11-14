@@ -31,10 +31,11 @@ prepare_release() {
   need_env GITHUB_REF_NAME GITHUB_SHA GH_REPO
   local tag=$GITHUB_REF_NAME releases found_id current main_sha
   # drafts are not found by tag name, only in the release list
-  releases=$(gh release list --limit 1000 --json tagName,isDraft,databaseId)
-  found_id=$(jq -r --arg tag "$tag" '.[] | select(.isDraft and .tagName == $tag) | .databaseId' <<<"$releases")
+  # (--paginate prints one array per page, jq -s add joins them)
+  releases=$(gh api "repos/$GH_REPO/releases" --paginate | jq -s 'add // []')
+  found_id=$(jq -r --arg tag "$tag" '.[] | select(.draft and .tag_name == $tag) | .id' <<<"$releases")
   if [[ -z $found_id ]]; then
-    current=$(jq -r '[.[] | select(.isDraft) | .tagName] | join(", ")' <<<"$releases")
+    current=$(jq -r '[.[] | select(.draft) | .tag_name] | join(", ")' <<<"$releases")
     if [[ -n $current ]]; then
       die "no draft release for $tag (current draft: $current)"
     fi
