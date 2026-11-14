@@ -53,13 +53,12 @@ check_alerts() {
     return 0
   fi
   err=$(<"$errf")
+  line=$(err_line "$errf")
   rm -f "$errf"
   if [[ $err == *'Vulnerability alerts are disabled.'* ]]; then
     finding red settings-alerts "$repo" "Dependabot alerts are off"
     return 0
   fi
-  line=$(grep -F -m1 -- '(HTTP ' <<<"$err" || true)
-  [[ -n $line ]] || line=$(grep -m1 -v '^[[:space:]]*$' <<<"$err" || true)
   finding red check-failed "$repo" "settings-alerts: $line"
 }
 

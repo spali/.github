@@ -184,3 +184,22 @@ gh_fail_raw() {
   [ "$status" -eq 1 ]
   [ "$(jq -r '.message' "$FINDINGS")" = "main-red: cannot parse API response" ]
 }
+
+@test "err_line prefers the HTTP line, else the first non-empty line" {
+  printf 'gh: hint\ngh: Forbidden (HTTP 403)\nmore\n' >"$BATS_TEST_TMPDIR/e1"
+  [ "$(err_line "$BATS_TEST_TMPDIR/e1")" = 'gh: Forbidden (HTTP 403)' ]
+  printf '\n\ngh: connection refused\nsecond\n' >"$BATS_TEST_TMPDIR/e2"
+  [ "$(err_line "$BATS_TEST_TMPDIR/e2")" = 'gh: connection refused' ]
+  : >"$BATS_TEST_TMPDIR/e3"
+  [ -z "$(err_line "$BATS_TEST_TMPDIR/e3")" ]
+}
+
+@test "disabled_workflows lists workflows disabled for inactivity" {
+  body='{"workflows":[{"name":"Sync","path":".github/workflows/sync.yml","state":"disabled_inactivity"},{"name":"B","path":"b.yml","state":"active"}]}'
+  disabled_workflows workflow-disabled spali/x out <<<"$body"
+  [ "$out" = 'Sync (.github/workflows/sync.yml) disabled by GitHub after 60 days of inactivity' ]
+  run --separate-stderr disabled_workflows workflow-disabled spali/x out <<<'<html>'
+  [ "$status" -eq 1 ]
+  [ -z "$stderr" ]
+  [ "$(jq -r .check "$FINDINGS")" = check-failed ]
+}
