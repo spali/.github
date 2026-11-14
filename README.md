@@ -16,6 +16,7 @@ version, checks, publishing, attestation) comes from here.
 - [Set up a new repository](#set-up-a-new-repository)
 - [Interface](#interface)
 - [Maintenance](#maintenance)
+- [Maintenance monitor](#maintenance-monitor)
 - [Troubleshooting](#troubleshooting)
 
 For AI agents: [AGENTS.md](AGENTS.md) has the same content as rules,
@@ -367,6 +368,71 @@ The release workflow must keep the tag filters of the examples: `-next` and
   release-drafter update adds or removes keys, update that list.
 - **A tag push runs the workflow files of the tagged commit**, so a fix here
   only applies to releases of commits that pin it.
+
+## Maintenance monitor
+
+The workflow `monitor.yml` runs every day at 05:17 UTC and on demand
+(`gh workflow run monitor.yml`). It only reads: it never changes anything on
+GitHub. It checks four groups (archived repositories are never checked):
+
+| Group | Repositories | Checks |
+|---|---|---|
+| Release flow and settings | central repositories (those that use this flow) | stale dev builds and `-next` pre-releases, orphan tags, several drafts, pin behind the latest release, merge/alert/PVR/Actions settings, rulesets |
+| Health | all non-fork, non-mirror repositories | red `main`, open Renovate pull requests, disabled workflows, Dependabot and code scanning alerts; `spali/.github` itself: no commit on `main` |
+| Forks and mirrors | forks, and mirror targets listed in `repos.yml` | upstream commits missing, sync workflow disabled, mirror refs behind the source |
+| Lists | all repositories | GitHub Lists that contradict the archive state, forks or mirrors; repositories without the release flow |
+
+**Levels.** `red` is something to fix, `info` is a hint, `skip` means "not
+applicable" (for example rulesets on private repositories of a Free account)
+and is only counted. The run **fails while any red finding is open**; GitHub's
+failed-run mail is the notification. The job summary lists all findings.
+
+**Thresholds.** A Renovate pull request is stale after 7 days.
+`spali/.github` is stale at 50 days without a commit on `main` (scheduled
+workflows of public repositories are disabled after 60 days). A pin is behind
+when a newer release of `spali/.github` is older than 7 days. A synced fork or
+mirror is behind after its `interval_hours` plus 24 h.
+
+**Ignore a finding** with a pull request that adds an entry to `ignores` in
+`repos.yml`; the reason is required:
+
+```yaml
+ignores:
+  - {repo: spali/example, check: renovate-stale, reason: waiting for upstream fix}
+```
+
+An ignore that matches nothing is reported (`ignore-unused`, info), so
+remove it when the cause is gone.
+
+**Control files.** `repos.yml` (public) holds the list names, mirrors, forks
+with their own sync workflow, and ignores. It must never name a private
+repository; the CI job `config` validates it and checks that every repository
+in it is public. Private entries go into a private control file with the same
+schema minus `lists`, in a private repository whose name is the secret
+`MONITOR_PRIVATE_REPO`, at the path `repos.yml`.
+
+**Privacy.** The logs and the summary show private repositories only as
+counts. To see the details, run the monitor locally with your own token:
+
+```sh
+GH_TOKEN=$(gh auth token) MONITOR_UNMASK=1 scripts/monitor.sh
+```
+
+(`MONITOR_PRIVATE_CONFIG=<file>` adds the private control file.)
+
+**Set up the read app** (once):
+
+1. Create a GitHub App with a name of your choice, no webhook, installable
+   only on this account. Repository permissions, all read-only: Metadata,
+   Contents, Actions, Administration, Pull requests, Dependabot alerts, Code
+   scanning alerts.
+2. Install it on all repositories, generate a private key.
+3. In `spali/.github` set the variable `MONITOR_APP_CLIENT_ID` (client id of
+   the app) and the secrets `MONITOR_APP_KEY` (the private key) and
+   `MONITOR_PRIVATE_REPO` (`owner/name` of the private control repository).
+
+If the app loses access to all repositories, the run ends red
+(`check-failed`), not green.
 
 ## Troubleshooting
 

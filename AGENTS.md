@@ -25,7 +25,15 @@ you should fix the document that is wrong.
   `@<40-char commit sha> # vX.Y.Z`;
 - put community health files (`FUNDING.yml`, `CONTRIBUTING.md`,
   `SECURITY.md`, issue templates, …) into `spali/.github` (they would become
-  defaults for every repository of the owner).
+  defaults for every repository of the owner);
+- make the maintenance monitor write or change anything on GitHub (only `GET`
+  requests and GraphQL queries);
+- print or commit the name of a private repository: not in `repos.yml`, logs,
+  summaries, PRs or commits (private entries live in the private control file);
+- let a check script write to stdout/stderr; check scripts write only to
+  `$FINDINGS`;
+- pass API JSON through argv (`jq --arg`/`--argjson`): responses can exceed the
+  argument limit; use files, pipes and `--slurpfile`.
 
 **Always**
 - use a Conventional Commits title for every pull request (section 4.1);
@@ -248,6 +256,30 @@ Only on the owner's explicit instruction: the owner disables the ruleset
 (Settings → Rules → Rulesets), the change is made, the owner enables it again.
 Do not do this yourself.
 
+### 4.9 Handle a monitor finding
+
+The workflow `monitor.yml` (daily, 05:17 UTC) fails while a red finding is
+open. Code: `scripts/monitor*.sh`; control file: `repos.yml`.
+
+1. Open the failed run and read the job summary. Each finding has a check id
+   (section 5), a repository and a detail. Private repositories only appear as
+   counts.
+2. For private details run locally:
+   `GH_TOKEN=$(gh auth token) MONITOR_UNMASK=1 scripts/monitor.sh`
+   (add `MONITOR_PRIVATE_CONFIG=<file>` for the private control file). Never
+   paste its output into a PR, commit or issue.
+3. Fix the cause (table in section 5). Settings changes need the owner's
+   approval (section 1).
+4. If the finding is accepted, open a PR that adds `{repo, check, reason}` to
+   `ignores` in `repos.yml` (public repositories only; private ones go to the
+   private control file). The reason is required. Remove an ignore that is
+   reported as `ignore-unused`.
+5. Re-run: `gh workflow run monitor.yml`.
+
+Never weaken or delete a check, widen a threshold, or add a "not applicable"
+answer just to get green. A check that cannot run is `check-failed`, not a
+pass.
+
 ## 5. Error catalog
 
 | Message (in run log) | Cause | Action |
@@ -280,6 +312,44 @@ Do not do this yourself.
 
 Delete a tag: `git push --delete origin vA && git tag -d vA`.
 
+### Monitor findings (check ids)
+
+Red unless marked info. The detail is in the job summary.
+
+| Check id | Meaning | Action |
+|---|---|---|
+| `devbuild-closed-pr` | a `-pr.N` pre-release exists for a closed pull request | `gh release delete <tag> --cleanup-tag --yes` |
+| `orphan-tag` | a `-next`/`-pr.N` tag without release | delete the tag (`git push --delete origin <tag>`) |
+| `several-drafts` | more than one draft release | ask the owner which to delete |
+| `next-stale` | `-next` pre-release older than the latest release | re-run the build on `main`, or delete it |
+| `pin-behind` | a caller pins a `spali/.github` release older than a newer one (older than 7 days) | merge or fix the Renovate PR |
+| `settings-merge` | merge options differ from README "Set up", step 6 | fix the setting (owner approval) |
+| `settings-alerts` | Dependabot alerts are off | enable them (owner approval) |
+| `settings-pvr` | private vulnerability reporting is off (public repo) | enable it (owner approval) |
+| `settings-actions` | default workflow permissions are not read-only, or Actions may approve PRs | fix the setting (owner approval) |
+| `ruleset-main` | the `main` ruleset is missing or differs (README step 7) | restore it (owner approval) |
+| `ruleset-tags` | the tag ruleset is missing or differs | restore it (owner approval) |
+| `main-red` | the latest run of a workflow on the default branch failed | fix the cause, re-run |
+| `renovate-stale` | a Renovate PR is open for more than 7 days | review and merge, or close it |
+| `workflow-disabled` | a workflow is disabled (inactivity) | enable it (`gh workflow enable`), push a commit if needed |
+| `dependabot-alert` | open alert; red for critical/high, info for low/medium | update or dismiss with a reason |
+| `code-scanning-alert` | open alert; red for critical/high, info for low/medium | fix or dismiss with a reason |
+| `self-stale` | no commit on `spali/.github` `main` for 50 days or more | commit something useful before GitHub disables the schedule at 60 days |
+| `fork-behind` (info) | a fork is behind its upstream | sync when you care |
+| `fork-sync-stale` | a fork with its own sync workflow misses upstream commits beyond `sync_interval_hours` + 24 h | check the sync workflow |
+| `fork-workflows-active` (info) | a fork runs its own workflows | disable them if unwanted |
+| `fork-delete-candidate` (info) | no own commits and no open upstream PR | consider deleting the fork |
+| `mirror-behind` | the mirror target lacks refs of its source beyond `interval_hours` + 24 h | check the mirror job in the mirror repository |
+| `list-none` (info) | a repository is in no list | add it to a list |
+| `list-contradiction` (info) | lists contradict each other or the archive state | fix the lists |
+| `list-mirror-missing` (info) | a mirror target is not in the mirrors list | add it to the list |
+| `list-archived` (info) | an archived repository is not in the archive list | move it |
+| `adoption` (info) | a repository does not use the release flow | adopt it (4.6) or ignore |
+| `check-failed` | a check could not run (API error, rate limit, bad response, empty inventory) | read the detail, fix access or the script; never ignore |
+| `config-invalid` | `repos.yml` or the private control file is invalid, or names an unknown list/check | fix the file |
+| `ignore-unused` (info) | an ignore matched no finding | remove it, or fix the typo |
+| `public-config-private-repo` | `repos.yml` names a private repository | remove it, move it to the private control file; the name is already public in the history, tell the owner |
+
 ## 6. Facts that are easy to get wrong
 
 - A tag push runs the workflow files **of the tagged commit**; a fix in
@@ -297,6 +367,24 @@ Delete a tag: `git push --delete origin vA && git tag -d vA`.
   `-rc.1`), so after an rc the next draft is computed from the last full release.
 - `GITHUB_*` environment variables cannot be overridden in `env:`.
 - A required status check whose job was skipped counts as passed.
+- Monitor, Free plan: rulesets on private repositories answer 403 `Upgrade to
+  GitHub Pro or make this repository public …` (not applicable). `vulnerability-alerts`
+  answers 404 `Vulnerability alerts are disabled.` when the setting is off (a
+  finding, not n/a). `private-vulnerability-reporting` answers a generic 404 on
+  private repositories: decide by `private` from the inventory, do not call it.
+  Not applicable are only the tested answers in `scripts/monitor-lib.sh`
+  (code scanning `no analysis found` or `not enabled`, `Dependabot alerts are
+  disabled for this repository`, the ruleset message above).
+- `gh` stderr can contain extra lines around the error (e.g. a missing scope
+  hint): the message is the line ending in `(HTTP nnn)`; n/a patterns match the
+  whole stderr.
+- Lists (GraphQL `user.lists`) contain private repositories for the owner's
+  token: treat them like the inventory and mask them.
+- A fork's own sync workflow is disabled after 60 days without repository
+  activity like any scheduled workflow of a public repository
+  (`disabled_inactivity`); the monitor reports it as `workflow-disabled`.
+- `git ls-remote` on mirror targets only compares the refs of the source; extra
+  refs in the target are fine.
 
 ## 7. Verify `spali/.github` locally
 
