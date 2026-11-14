@@ -136,6 +136,15 @@ run_entry() {
   [ "$(message dependabot-alert)" = "1 low" ]
 }
 
+@test "alerts without a known severity count as low" {
+  jq -nc '[{security_advisory: {severity: null}}, {security_advisory: {}}, {security_advisory: {severity: "weird"}}]' |
+    gh_respond "$DEP" -
+  run_script
+  [ "$(count dependabot-alert)" -eq 1 ]
+  [ "$(level dependabot-alert)" = info ]
+  [ "$(message dependabot-alert)" = "3 low" ]
+}
+
 @test "code scanning severity falls back to rule.severity" {
   jq -nc '[
     {rule: {security_severity_level: "critical", severity: "note"}},

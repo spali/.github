@@ -115,7 +115,7 @@ main() {
     check_workflows "$repo"
     check_alerts dependabot-alert "$repo" \
       "repos/$repo/dependabot/alerts?state=open&per_page=100" \
-      '.security_advisory.severity'
+      '((.security_advisory.severity // "low") | if IN("critical", "high", "medium", "low") then . else "low" end)'
     check_alerts code-scanning-alert "$repo" \
       "repos/$repo/code-scanning/alerts?state=open&per_page=100" \
       '(.rule.security_severity_level // ({error: "high", warning: "medium", note: "low"}[.rule.severity // ""]) // "low")'
