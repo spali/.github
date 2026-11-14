@@ -18,10 +18,11 @@ REPORT_JQ='
 $inv[0] as $inv | $cfg[0] as $cfg | . as $f
 | ($inv | map({key: .name, value: .private}) | from_entries) as $pm
 | ($inv | map(select(.private) | .name)) as $privs
-| (($privs | map(split("/")[1:] | join("/"))) + [] ) as $shorts
-| def bnd: "[A-Za-z0-9._-]";
+| ($privs | map(split("/")[1:] | join("/"))) as $shorts
+| def lb: "[A-Za-z0-9._-]";
+  def rb: "[A-Za-z0-9_-]";
   def esc: gsub("\\."; "\\.");
-  def maskstr($n): gsub("(?<!\(bnd))\($n | esc)(?!\(bnd))"; "<private>");
+  def maskstr($n): gsub("(?<!\(lb))\($n | esc)(?!\(rb))"; "[private]"; "i");
   def mask: if $unmask then . else reduce (($privs + $shorts)[]) as $n (.; maskstr($n)) end;
   def is_priv: . as $r | $r != null and ($unmask | not) and ((($pm | has($r)) | not) or $pm[$r]);
   def cell: mask | gsub("\\|"; "\\|") | gsub("[\\r\\n]+"; " ");
@@ -50,7 +51,7 @@ $inv[0] as $inv | $cfg[0] as $cfg | . as $f
        | ($pub | map(select(.check == $c)) | sort_by(.repo // "")) as $r
        | (if ($r | length) > 0 then
             "#### `\($c)`\n\n| repo | message |\n| --- | --- |\n"
-            + ($r | map("| \(.repo // "-") | \(.message | cell) |") | join("\n")) + "\n"
+            + ($r | map("| \(.repo // "-") | \(.message // "" | tostring | cell) |") | join("\n")) + "\n"
           else empty end),
          ($m[] | select(.check == $c) | .text + "\n"))
     end;
