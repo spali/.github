@@ -1,0 +1,6 @@
+# job.workflow_sha / job.workflow_ref (the called reusable workflow's own
+# commit) exist on GitHub but are not known to actionlint yet.
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      - 'property "workflow_(sha|ref|repository|file_path)" is not defined in object type'

@@ -1,0 +1,87 @@
+# Shared release-drafter configuration.
+#
+# Repositories load it from spali/.github through the reusable workflows
+# (config-name: spali/.github:release-drafter.yml@<sha>), see README.md.
+#
+# Pull request titles follow Conventional Commits
+# (https://www.conventionalcommits.org):
+#
+#   <type>[(<scope>)][!]: <description>
+#
+# The autolabeler turns the title into exactly one label; the categories
+# below sort the release notes by that label. To change where a pull request
+# ends up, change its label by hand (the autolabeler only adds labels, it
+# never removes one you set).
+
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+
+# Labels are set when a pull request is opened, reopened or its title edited.
+# Manually set labels are kept.
+sync-labels: false
+autolabeler:
+  # The first matching rule wins (stop-on-match), so the order matters.
+  # Any type with "!" is a breaking change: feat!:, fix(api)!:, chore(deps)!:
+  - labels: ['breaking-change']
+    stop-on-match: true
+    title:
+      - '/^\w+(\([^)]*\))?!: /'
+  # Dependency updates (Renovate): fix(deps):, chore(deps):, build(deps):
+  - labels: ['dependencies']
+    stop-on-match: true
+    title:
+      - '/^\w+\(deps\): /'
+  - labels: ['feature']
+    stop-on-match: true
+    title:
+      - '/^feat(\([^)]*\))?: /'
+  - labels: ['fix']
+    stop-on-match: true
+    title:
+      - '/^fix(\([^)]*\))?: /'
+  # Everything else: chore, ci, docs, refactor, perf, test, build, style, revert
+  - labels: ['other']
+    fallback: true
+
+# Each pull request is listed in the first category (top to bottom) whose
+# label it has (exclusive). The highest semver-increment of all listed pull
+# requests sets the next version.
+categories:
+  - title: 'Breaking Changes'
+    exclusive: true
+    semver-increment: major
+    when:
+      label: 'breaking-change'
+  - title: 'Features'
+    exclusive: true
+    semver-increment: minor
+    when:
+      label: 'feature'
+  - title: 'Fixes'
+    exclusive: true
+    semver-increment: patch
+    when:
+      label: 'fix'
+  - title: 'Dependencies'
+    exclusive: true
+    semver-increment: patch
+    when:
+      label: 'dependencies'
+  # Label "other" and pull requests without any of the labels above.
+  - title: 'Others'
+    exclusive: true
+    semver-increment: patch
+  - type: 'version-resolver'
+    semver-increment: patch
+
+change-template: '* $TITLE (#$NUMBER) $AUTHORS'
+change-authors-exclude-bots: true
+change-title-escapes: '\<*_&'
+template: |
+  $CHANGES
+
+  ## New Contributors
+
+  $NEW_CONTRIBUTORS
+
+  **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...$RESOLVED_TAG
