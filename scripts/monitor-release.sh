@@ -11,84 +11,135 @@ need_env FINDINGS INVENTORY CONFIG
 CENTRAL=spali/.github
 MIN_PIN_AGE_DAYS=7
 
-# paged CHECK REPO PATH prints all pages of PATH as one JSON array.
-paged() {
-  local body
-  body=$(fetch "$1" "$2" "$3" --paginate) || return 1
-  jq -s 'add // []' <<<"$body"
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+# parse_failed CHECK REPO records an unreadable API response.
+parse_failed() {
+  finding red check-failed "$2" "$1: cannot parse API response"
 }
 
-# check_releases REPO RELEASES PULLS TAGS prints findings (PULLS/TAGS empty = skip that check).
-check_releases() {
-  local repo=$1 releases=$2 pulls=$3 tags=$4 tag
-  local latest drafts
+# paged CHECK REPO PATH FIELDS FILE reads all pages of PATH, keeps only FIELDS
+# (a jq object construction) and writes the JSON array to FILE.
+paged() {
+  local body trimmed
+  body=$(fetch "$1" "$2" "$3" --paginate) || return 1
+  if ! trimmed=$(jq -s "add // [] | map($4)" 2>/dev/null <<<"$body"); then
+    parse_failed "$1" "$2"
+    return 1
+  fi
+  printf '%s\n' "$trimmed" >"$5"
+}
 
-  if [[ -n $pulls ]]; then
-    while IFS=$'\t' read -r tag number; do
-      finding red devbuild-closed-pr "$repo" "$tag: PR #$number is not open"
-    done < <(jq -r --argjson pulls "$pulls" \
+# json_out CHECK REPO OUTVAR JQ_ARGS... runs jq, stores its output in OUTVAR.
+# On failure records check-failed and returns 1.
+json_out() {
+  local check=$1 repo=$2 var=$3 result
+  shift 3
+  if ! result=$(jq "$@" 2>/dev/null); then
+    parse_failed "$check" "$repo"
+    return 1
+  fi
+  printf -v "$var" '%s' "$result"
+}
+
+# check_releases REPO prints findings from $WORK/{releases,pulls,tags}.json
+# (a missing pulls/tags file skips that check).
+# shellcheck disable=SC2016 # jq programs, $vars are jq variables
+check_releases() {
+  local repo=$1 rel=$WORK/releases.json lines tag number latest
+
+  if [[ -f $WORK/pulls.json ]] &&
+    json_out devbuild-closed-pr "$repo" lines -r --slurpfile pulls "$WORK/pulls.json" \
       '.[] | select(.tag_name | test("^v.+-pr\\.[0-9]+$")) |
        (.tag_name | capture("-pr\\.(?<n>[0-9]+)$").n) as $n |
-       select(($pulls | map(.number | tostring) | index($n)) == null) |
-       [.tag_name, $n] | @tsv' <<<"$releases")
+       select(($pulls[0] | map(.number | tostring) | index($n)) == null) |
+       [.tag_name, $n] | @tsv' "$rel"; then
+    while IFS=$'\t' read -r tag number; do
+      [[ -z $tag ]] || finding red devbuild-closed-pr "$repo" "$tag: PR #$number is not open"
+    done <<<"$lines"
   fi
 
-  if [[ -n $tags ]]; then
-    while IFS= read -r tag; do
-      finding red orphan-tag "$repo" "$tag has no release"
-    done < <(jq -r --argjson releases "$releases" \
+  if [[ -f $WORK/tags.json ]] &&
+    json_out orphan-tag "$repo" lines -r --slurpfile releases "$rel" \
       '.[] | .name | select(test("-next$|-pr\\.[0-9]+$")) |
-       select(. as $t | $releases | map(.tag_name) | index($t) | not)' <<<"$tags")
+       select(. as $t | $releases[0] | map(.tag_name) | index($t) | not)' "$WORK/tags.json"; then
+    while IFS= read -r tag; do
+      [[ -z $tag ]] || finding red orphan-tag "$repo" "$tag has no release"
+    done <<<"$lines"
   fi
 
-  drafts=$(jq -r '[.[] | select(.draft) | .tag_name] | if length > 1 then join(", ") else empty end' <<<"$releases")
-  [[ -z $drafts ]] || finding red several-drafts "$repo" "drafts: $drafts"
+  if json_out several-drafts "$repo" lines -r \
+    '[.[] | select(.draft) | .tag_name] | if length > 1 then join(", ") else empty end' "$rel" &&
+    [[ -n $lines ]]; then
+    finding red several-drafts "$repo" "drafts: $lines"
+  fi
 
-  latest=$(jq -r '[.[] | select(.draft == false and .prerelease == false)] |
-    max_by(.published_at) | if . then .tag_name else empty end' <<<"$releases")
-  if [[ -n $latest ]]; then
-    while IFS= read -r tag; do
-      finding red next-stale "$repo" "$tag is older than $latest"
-    done < <(jq -r '([.[] | select(.draft == false and .prerelease == false)] |
+  if json_out next-stale "$repo" latest -r \
+    '[.[] | select(.draft == false and .prerelease == false)] |
+     max_by(.published_at) | if . then .tag_name else empty end' "$rel" &&
+    [[ -n $latest ]] &&
+    json_out next-stale "$repo" lines -r \
+      '([.[] | select(.draft == false and .prerelease == false)] |
         max_by(.published_at) | .published_at) as $newest |
-      .[] | select(.tag_name | test("-next$")) |
-      select(.created_at < $newest) | .tag_name' <<<"$releases")
+       .[] | select(.tag_name | test("-next$")) |
+       select(.created_at < $newest) | .tag_name' "$rel"; then
+    while IFS= read -r tag; do
+      [[ -z $tag ]] || finding red next-stale "$repo" "$tag is older than $latest"
+    done <<<"$lines"
   fi
 }
 
 # check_pins REPO PINS LATEST_TAG LATEST_SHA prints one pin-behind finding.
 check_pins() {
   local repo=$1 pins=$2 tag=$3 sha=$4 list
-  list=$(jq -r --arg sha "$sha" \
+  if ! list=$(jq -r --arg sha "$sha" \
     '[.[] | select(.sha != $sha) | "\(.workflow) pinned to \(.version // .sha[0:7])"] |
-     unique | join(", ")' <<<"$pins")
+     unique | join(", ")' 2>/dev/null <<<"$pins"); then
+    parse_failed pin-behind "$repo"
+    return 0
+  fi
   [[ -z $list ]] || finding red pin-behind "$repo" "$list, latest $tag"
 }
 
 main() {
-  local repos repo pins releases pulls tags
-  local latest_tag='' latest_sha='' latest_published latest_json commit_json
+  local repos repo pins releases_ok latest_tag='' latest_sha='' latest_published latest_json commit_json
+  local trim_rel='{tag_name, draft, prerelease, created_at, published_at}'
 
   if latest_json=$(fetch pin-behind "$CENTRAL" "repos/$CENTRAL/releases/latest"); then
-    latest_tag=$(jq -r '.tag_name' <<<"$latest_json")
-    latest_published=$(jq -r '.published_at' <<<"$latest_json")
-    if commit_json=$(fetch pin-behind "$CENTRAL" "repos/$CENTRAL/commits/$latest_tag"); then
-      latest_sha=$(jq -r '.sha' <<<"$commit_json")
-      if [[ $(days_since "$latest_published") -lt $MIN_PIN_AGE_DAYS ]]; then
-        latest_sha=
+    if latest_tag=$(jq -er '.tag_name' 2>/dev/null <<<"$latest_json") &&
+      latest_published=$(jq -er '.published_at | select(test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T"))' 2>/dev/null <<<"$latest_json") &&
+      days_since "$latest_published" >/dev/null 2>&1; then
+      if commit_json=$(fetch pin-behind "$CENTRAL" "repos/$CENTRAL/commits/$latest_tag"); then
+        if latest_sha=$(jq -er '.sha' 2>/dev/null <<<"$commit_json"); then
+          if [[ $(days_since "$latest_published") -lt $MIN_PIN_AGE_DAYS ]]; then
+            latest_sha=
+          fi
+        else
+          latest_sha=
+          parse_failed pin-behind "$CENTRAL"
+        fi
       fi
+    else
+      parse_failed pin-behind "$CENTRAL"
     fi
   fi
 
-  repos=$(jq -r '.[] | select(.central) | .name' "$INVENTORY")
+  if ! repos=$(jq -r '.[] | select(.central) | .name' "$INVENTORY" 2>/dev/null); then
+    finding red check-failed - "release checks: cannot parse inventory"
+    return 0
+  fi
   while IFS= read -r repo; do
     [[ -n $repo ]] || continue
-    pins=$(jq -c --arg r "$repo" '.[] | select(.name == $r) | .pins' "$INVENTORY")
+    pins=$(jq -c --arg r "$repo" '[.[] | select(.name == $r) | (.pins // [])[]]' "$INVENTORY" 2>/dev/null) || pins='[]'
 
-    if releases=$(paged devbuild-closed-pr "$repo" "repos/$repo/releases?per_page=100"); then
-      pulls=$(paged devbuild-closed-pr "$repo" "repos/$repo/pulls?state=open&per_page=100") || pulls=
-      tags=$(paged orphan-tag "$repo" "repos/$repo/tags?per_page=100") || tags=
-      check_releases "$repo" "$releases" "$pulls" "$tags"
+    rm -f "$WORK"/*.json
+    releases_ok=
+    paged devbuild-closed-pr "$repo" "repos/$repo/releases?per_page=100" "$trim_rel" "$WORK/releases.json" && releases_ok=1
+    if [[ -n $releases_ok ]]; then
+      paged devbuild-closed-pr "$repo" "repos/$repo/pulls?state=open&per_page=100" '{number}' "$WORK/pulls.json" || true
+      paged orphan-tag "$repo" "repos/$repo/tags?per_page=100" '{name}' "$WORK/tags.json" || true
+      check_releases "$repo"
     fi
 
     [[ -z $latest_sha ]] || check_pins "$repo" "$pins" "$latest_tag" "$latest_sha"

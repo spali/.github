@@ -182,3 +182,46 @@ message() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].message' "$FIN
   run_script
   [[ "$(gh_calls)" != *spali/skip* ]]
 }
+
+@test "large releases response (over 200 KB) still yields findings" {
+  local body
+  body=$(head -c 3000 /dev/zero | tr '\0' x)
+  jq -n --arg b "$body" '[range(0; 100) as $i |
+    {tag_name: "v0.0.\($i)", draft: false, prerelease: false, body: $b,
+     assets: [range(0; 3) | {name: $b}], created_at: "2026-10-01T00:00:00Z", published_at: "2026-10-01T00:00:00Z"}]
+    + [{tag_name: "v1.0.0-pr.7", draft: false, prerelease: true, body: $b, created_at: "2026-11-01T00:00:00Z", published_at: "2026-11-01T00:00:00Z"}]' >"$BATS_TEST_TMPDIR/big.json"
+  [ "$(stat -c %s "$BATS_TEST_TMPDIR/big.json")" -gt 200000 ]
+  gh_respond '*spali/a/releases?per_page=100*' "$BATS_TEST_TMPDIR/big.json"
+  run_script
+  [ "$(count devbuild-closed-pr)" -eq 1 ]
+  [ "$(count check-failed)" -eq 0 ]
+}
+
+@test "malformed API response gives check-failed and quiet stderr" {
+  releases 'this is not json'
+  run_script
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(message check-failed)" = "devbuild-closed-pr: cannot parse API response" ]
+}
+
+@test "malformed tags response skips only orphan-tag" {
+  tags '{oops'
+  releases '[{"tag_name":"v1.0.0-pr.7","draft":false,"prerelease":true}]'
+  run_script
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(count devbuild-closed-pr)" -eq 1 ]
+}
+
+@test "inventory entry without pins is accepted" {
+  echo '[{"name":"spali/a","central":true}]' >"$INVENTORY"
+  run_script
+  [ ! -s "$FINDINGS" ]
+}
+
+@test "null published_at on the latest release gives check-failed" {
+  jq -cn '{tag_name: "v1.1.0", published_at: null}' | gh_respond '*spali/.github/releases/latest*' -
+  inventory '[{"workflow":"pr.yml","sha":"6f26c6b1dcac0797c52055241f0cfb74a797ebe3","version":"v1.0.0"}]'
+  run_script
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(count pin-behind)" -eq 0 ]
+}
