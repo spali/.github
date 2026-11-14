@@ -1,0 +1,23 @@
+{
+  "id": 27269153,
+  "name": "release tags",
+  "target": "tag",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "exclude": [
+        "refs/tags/v*-next",
+        "refs/tags/v*-pr.*"
+      ],
+      "include": [
+        "refs/tags/v*"
+      ]
+    }
+  },
+  "rules": [
+    {
+      "type": "update"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "id": 27269150,
+    "name": "main",
+    "target": "branch",
+    "enforcement": "active"
+  },
+  {
+    "id": 27269153,
+    "name": "release tags",
+    "target": "tag",
+    "enforcement": "active"
+  }
+]
