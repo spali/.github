@@ -95,7 +95,8 @@ cmd_merge() {
     + (["mirrors", "forks", "ignores"] | map({(.): (($pub[.] | mark(false)) + ($priv[.] | mark(true)))}) | add)'
 }
 
-# public-check FILE: every spali repo named in the file must be public.
+# public-check FILE: every spali repo named in the file (values and comments)
+# must be public.
 cmd_public_check() {
   local file=${1:-} json repo body failed=0
   [[ -n $file ]] || die "usage: public-check FILE"
@@ -107,8 +108,13 @@ cmd_public_check() {
     fi
     printf 'error: %s: %s is not a public repository\n' "$file" "$repo" >&2
     failed=1
-  done < <(jq -r '[(.mirrors // [])[].target, (.forks // [])[].repo, (.ignores // [])[].repo]
-    | map(select(type == "string" and startswith("spali/"))) | unique[]' <<<"$json")
+  done < <(
+    {
+      jq -r '[(.mirrors // [])[].target, (.forks // [])[].repo, (.ignores // [])[].repo]
+        | map(select(type == "string" and startswith("spali/")))[]' <<<"$json"
+      grep -Eo 'spali/[A-Za-z0-9._-]+' "$file" | sed 's/\.*$//' || true
+    } | sort -u
+  )
   return "$failed"
 }
 

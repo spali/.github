@@ -176,6 +176,15 @@ YAML
   [[ $stderr == *"error: $f: spali/y is not a public repository"* ]]
 }
 
+@test "public-check fails for a private repo named in a comment" {
+  f=$(printf '# kept by spali/secret-one.\nversion: 1\n' | mk comment.yml)
+  echo '{"private": true}' | gh_respond 'api repos/spali/secret-one' -
+  echo '{"private": false}' | gh_respond 'api repos/*' -
+  run --separate-stderr "$CONFIG" public-check "$f"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: $f: spali/secret-one is not a public repository" ]
+}
+
 @test "unknown command fails" {
   run --separate-stderr "$CONFIG" bogus
   [ "$status" -eq 1 ]
