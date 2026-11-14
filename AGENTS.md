@@ -338,12 +338,12 @@ Red unless marked info. The detail is in the job summary.
 | `fork-behind` (info) | a fork is behind its upstream | sync when you care |
 | `fork-sync-stale` | a fork with its own sync workflow misses upstream commits beyond `sync_interval_hours` + 24 h | check the sync workflow |
 | `fork-workflows-active` (info) | a fork runs its own workflows | disable them if unwanted |
-| `fork-delete-candidate` (info) | no own commits and no open upstream PR | consider deleting the fork |
+| `fork-delete-candidate` (info) | no own commits on the default branch, no open upstream PR from the fork, and every fork branch also exists upstream | consider deleting the fork |
 | `mirror-behind` | the mirror target lacks refs of its source beyond `interval_hours` + 24 h | check the mirror job in the mirror repository |
 | `list-none` (info) | a repository is in no list | add it to a list |
-| `list-contradiction` (info) | lists contradict each other or the archive state | fix the lists |
+| `list-contradiction` (info) | a repository is in both lists of an exclusive pair | fix the lists |
 | `list-mirror-missing` (info) | a mirror target is not in the mirrors list | add it to the list |
-| `list-archived` (info) | an archived repository is not in the archive list | move it |
+| `list-archived` (info) | an archived own repository is in a list other than the archive list | move it |
 | `adoption` (info) | a repository does not use the release flow | adopt it (4.6) or ignore |
 | `check-failed` | a check could not run (API error, rate limit, bad response, empty inventory) | read the detail, fix access or the script; never ignore |
 | `config-invalid` | `repos.yml` or the private control file is invalid, or names an unknown list/check | fix the file |
@@ -405,3 +405,9 @@ CI runs the same checks as the required checks `shellcheck`, `bats`,
   hand: `gh release delete <tag> --cleanup-tag --yes`).
 - A tag left over without a release is only cleaned up for `-next` and
   `-pr.N`; a leftover release tag `vX.Y.Z` fails the tag check as usual.
+- `mirror-behind` uses the target's last push time as grace: a quiet mirror
+  can be red for up to a day after an upstream change, and a mirror that still
+  pushes some refs daily stays green while other refs lag. This stays until
+  the mirror sync in `spali/.github` reports its own failed runs.
+- `pin-behind` does not run during the first 7 days after a new
+  `spali/.github` release.
