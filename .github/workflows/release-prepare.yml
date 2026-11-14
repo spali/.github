@@ -1,0 +1,119 @@
+# Reusable: decide what to release (first job of a repository's release.yml).
+#
+#   push to main               update the draft, then a "-next" pre-release
+#   workflow_dispatch on main  same, with an optional exception version
+#   push of a tag v*           release: the tag must be the draft's tag on main's head
+#   workflow_dispatch on a pull request branch   dev pre-release "-pr.<N>"
+#
+# Outputs feed the repository's build job and release-publish.yml.
+name: Release prepare
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Exception version for the draft (only on main), e.g. 2.0.0-rc.1
+        type: string
+        required: false
+        default: ""
+    outputs:
+      kind:
+        description: release, next or pr
+        value: ${{ jobs.prepare.outputs.kind }}
+      version:
+        description: Version without "v", e.g. 1.0.0, 1.0.0-next, 1.0.0-pr.77
+        value: ${{ jobs.prepare.outputs.version }}
+      tag:
+        description: Tag of the release, "v" + version
+        value: ${{ jobs.prepare.outputs.tag }}
+      sha:
+        description: Commit to build
+        value: ${{ jobs.prepare.outputs.sha }}
+      pr:
+        description: Pull request number (kind pr), otherwise empty
+        value: ${{ jobs.prepare.outputs.pr }}
+      draft-id:
+        description: ID of the draft release (kind release and next), otherwise empty
+        value: ${{ jobs.prepare.outputs.draft-id }}
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # update the draft release (drafts are only visible with write access)
+      pull-requests: read # find pull requests for the release notes and dev builds
+    outputs:
+      kind: ${{ steps.next.outputs.kind || steps.release.outputs.kind || steps.pr.outputs.kind }}
+      version: ${{ steps.next.outputs.version || steps.release.outputs.version || steps.pr.outputs.version }}
+      tag: ${{ steps.next.outputs.tag || steps.release.outputs.tag || steps.pr.outputs.tag }}
+      sha: ${{ steps.next.outputs.sha || steps.release.outputs.sha || steps.pr.outputs.sha }}
+      pr: ${{ steps.next.outputs.pr || steps.release.outputs.pr || steps.pr.outputs.pr }}
+      draft-id: ${{ steps.next.outputs.draft-id || steps.release.outputs.draft-id || steps.pr.outputs.draft-id }}
+    env:
+      ON_MAIN: ${{ github.ref == 'refs/heads/main' }}
+      ON_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push' }}
+      ON_BRANCH: ${{ startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Check the trigger
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ $ON_MAIN != true && $ON_TAG != true && $ON_BRANCH != true ]]; then
+            echo "error: run on main, on a pull request branch (workflow_dispatch) or push a tag v*"; exit 1
+          fi
+          if [[ -n $VERSION && $ON_MAIN != true ]]; then
+            echo "error: the version input only applies on main"; exit 1
+          fi
+      - name: Checkout shared scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: spali/.github
+          ref: ${{ job.workflow_sha }}
+          path: .release-flow
+          persist-credentials: false
+
+      - name: Update the draft
+        id: draft
+        if: env.ON_MAIN == 'true'
+        uses: release-drafter/release-drafter@978bb0b30c5ee8cdd332ced253758157150d43f0 # v7.10.0
+        with:
+          config-name: spali/.github:release-drafter.yml@${{ job.workflow_sha }}
+          commitish: main
+          version: ${{ inputs.version }}
+      - name: Next pre-release
+        id: next
+        if: env.ON_MAIN == 'true'
+        env:
+          DRAFT_VERSION: ${{ steps.draft.outputs.resolved_version }}
+          DRAFT_ID: ${{ steps.draft.outputs.id }}
+        run: .release-flow/scripts/prepare.sh next
+
+      - name: Release
+        id: release
+        if: env.ON_TAG == 'true'
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: .release-flow/scripts/prepare.sh release
+
+      - name: Resolve the draft version
+        id: dry
+        if: env.ON_BRANCH == 'true'
+        uses: release-drafter/release-drafter@978bb0b30c5ee8cdd332ced253758157150d43f0 # v7.10.0
+        with:
+          config-name: spali/.github:release-drafter.yml@${{ job.workflow_sha }}
+          commitish: main
+          dry-run: true
+      - name: Dev pre-release
+        id: pr
+        if: env.ON_BRANCH == 'true'
+        env:
+          DRAFT_VERSION: ${{ steps.dry.outputs.resolved_version }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: .release-flow/scripts/prepare.sh pr
