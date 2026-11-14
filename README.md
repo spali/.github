@@ -18,6 +18,9 @@ version, checks, publishing, attestation) comes from here.
 - [Maintenance](#maintenance)
 - [Troubleshooting](#troubleshooting)
 
+For AI agents: [AGENTS.md](AGENTS.md) has the same content as rules,
+procedures, an error catalog and the reasons behind each design decision.
+
 ## How it works
 
 ```mermaid
