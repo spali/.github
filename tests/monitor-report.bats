@@ -90,7 +90,7 @@ J
 @test "private repo shows only a count" {
   run "$REPORT"
   [ "$status" -eq 1 ]
-  ! grep -q secret-repo <<<"$output"
+  [[ $output != *secret-repo* ]]
   grep -q 'main-red: 1 private repo(s)' <<<"$output"
 }
 
@@ -100,7 +100,7 @@ J
 J
   run "$REPORT"
   [ "$status" -eq 1 ]
-  ! grep -q archived-thing <<<"$output"
+  [[ $output != *archived-thing* ]]
   grep -q 'main-red: 1 private repo(s)' <<<"$output"
 }
 
@@ -110,8 +110,8 @@ J
 J
   run "$REPORT"
   [ "$status" -eq 1 ]
-  ! grep -q secret-repo <<<"$output"
-  [[ $output == *"https://api.github.com/repos/<private>/rulesets"* ]]
+  [[ $output != *secret-repo* ]]
+  [[ $output == *"https://api.github.com/repos/[private]/rulesets"* ]]
 }
 
 @test "short names mask on word boundaries only" {
@@ -119,7 +119,7 @@ J
 {"level":"red","check":"check-failed","repo":null,"message":"secret-repo-x and my.secret-repo, (secret-repo)"}
 J
   run "$REPORT"
-  [[ $output == *"secret-repo-x and my.secret-repo, (<private>)"* ]]
+  [[ $output == *"secret-repo-x and my.secret-repo, ([private])"* ]]
 }
 
 @test "MONITOR_UNMASK=1 shows private details locally" {
@@ -132,7 +132,7 @@ J
 @test "MONITOR_UNMASK is ignored in Actions" {
   MONITOR_UNMASK=1 GITHUB_ACTIONS=true run "$REPORT"
   [ "$status" -eq 1 ]
-  ! grep -q secret-repo <<<"$output"
+  [[ $output != *secret-repo* ]]
   grep -q 'main-red: 1 private repo(s)' <<<"$output"
 }
 
@@ -157,5 +157,25 @@ J
   [ "$status" -eq 1 ]
   [ -z "$output" ]
   grep -q '## Maintenance monitor' "$GITHUB_STEP_SUMMARY"
-  ! grep -q secret-repo "$GITHUB_STEP_SUMMARY"
+  run ! grep -q secret-repo "$GITHUB_STEP_SUMMARY"
+}
+
+@test "names followed by a dot, and case variants, are masked" {
+  findings <<'J'
+{"level":"red","check":"check-failed","repo":null,"message":"a spali/secret-repo. b https://github.com/spali/secret-repo.git c secret-repo. d Spali/Secret-Repo e SECRET-REPO"}
+J
+  run "$REPORT"
+  [ "$status" -eq 1 ]
+  [[ ${output,,} != *secret-repo* ]]
+  [[ $output == *"a [private]. b https://github.com/[private].git c [private]. d [private] e [private] |"* ]]
+}
+
+@test "a non-string message does not leak through stderr" {
+  findings <<'J'
+{"level":"red","check":"check-failed","repo":null,"message":{"url":"spali/secret-repo"}}
+J
+  run --separate-stderr "$REPORT"
+  [ "$status" -eq 1 ]
+  [[ $stderr != *secret-repo* ]]
+  [[ $output != *secret-repo* ]]
 }
