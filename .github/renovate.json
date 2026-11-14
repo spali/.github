@@ -1,0 +1,21 @@
+{
+  "extends": [
+    "config:recommended",
+    ":disableDependencyDashboard",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "packageRules": [
+    {
+      "description": "Automerge GitHub Actions updates within the same major version (new SHA, minor, patch) once all checks are green",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["digest", "minor", "patch"],
+      "automerge": true
+    },
+    {
+      "description": "Automerge patch updates of all other dependencies once all checks are green",
+      "matchUpdateTypes": ["patch"],
+      "automerge": true
+    }
+  ],
+  "platformAutomerge": false
+}
