@@ -91,8 +91,17 @@ EOS
 
 @test "invalid public config is red and the run continues" {
   printf 'version: 2\n' >"$MONITOR_PUBLIC_CONFIG"
+  cat >"$BATS_TEST_TMPDIR/private.yml" <<'EOS'
+version: 1
+ignores:
+  - repo: spali/secret-repo
+    check: adoption
+    reason: private on purpose
+EOS
+  export MONITOR_PRIVATE_CONFIG="$BATS_TEST_TMPDIR/private.yml"
   run "$MONITOR"
   [ "$status" -eq 1 ]
+  [[ $output != *"cannot be merged"* ]]
   [[ $output == *"config-invalid"* ]]
   [[ $output == *"repos.yml: "*"version must be 1"* ]]
 }
@@ -109,4 +118,22 @@ EOS
   [ "$status" -eq 1 ]
   [[ $output == *"public-config-private-repo"* ]]
   [[ $output != *"secret-repo"* ]]
+}
+
+@test "large inventory still reports a public config naming a private repo" {
+  jq -c '.[] | . + {pad: ("x" * 100000)}' "$FIX/inventory.json" |
+    jq -s . >"$BATS_TEST_TMPDIR/inventory.json"
+  [ "$(stat -c %s "$BATS_TEST_TMPDIR/inventory.json")" -gt 200000 ]
+  cat >"$MONITOR_PUBLIC_CONFIG" <<'EOS'
+version: 1
+ignores:
+  - repo: spali/secret-repo
+    check: adoption
+    reason: oops
+EOS
+  run --separate-stderr "$MONITOR"
+  [ "$status" -eq 1 ]
+  [[ $output == *"public-config-private-repo: 1 private repo(s)"* ]]
+  [[ $output != *"secret-repo"* ]]
+  [ -z "$stderr" ]
 }

@@ -29,7 +29,7 @@ else
   line=$(head -n1 <<<"$err")
   line=${line#error: }
   line=${line#"$PUBLIC": }
-  finding red config-invalid - "repos.yml: $line"
+  finding red config-invalid - "repos.yml: ${line:-invalid}"
   merge_public=$WORK/empty.json
   printf '%s\n' "$EMPTY_CONFIG" >"$merge_public"
 fi
