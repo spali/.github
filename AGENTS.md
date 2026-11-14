@@ -29,7 +29,8 @@ you should fix the document that is wrong.
 
 **Always**
 - use a Conventional Commits title for every pull request (section 4.1);
-- merge with **rebase**;
+- merge with **rebase** (squash is allowed too; the squash commit takes the PR
+  title, so the title must be final before merging);
 - run the tests of `spali/.github` before you change it (section 7);
 - write repository content (code, docs, commits, PRs, release notes) in English;
 - verify a claim against a real run or the code before you report it.
@@ -202,8 +203,10 @@ resets the draft; repeat.
 4. Renovate config with `helpers:pinGitHubActionDigests`.
 5. Labels: the five `gh label create … --force` commands in README section
    "Set up a new repository".
-6. With the owner's approval: Actions settings (read-only token, no PR
-   approval) and the two rulesets from the README; list the repository's own
+6. With the owner's approval: repository settings (rebase and squash only,
+   delete branch on merge, squash title = PR title, Dependabot alerts, private
+   vulnerability reporting, unused features off), Actions settings (read-only
+   token, no PR approval) and the two rulesets from the README; list the repository's own
    required checks plus `pr / check`. Create the rulesets after the check names
    exist (after the first PR ran).
 7. First release: a repository without a published release has no baseline;
