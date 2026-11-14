@@ -17,6 +17,7 @@ comment_author='github-actions[bot]'
 load_assets() {
   files=("$ASSETS_DIR"/*)
   [[ -e ${files[0]} ]] || die "no release assets found in $ASSETS_DIR"
+  need_files "$ASSETS_DIR"
 }
 
 # delete_releases deletes all releases (and tags) whose tag matches the glob.
@@ -29,6 +30,17 @@ delete_releases() {
         gh release delete "$tag" --cleanup-tag --yes
       fi
     done
+}
+
+# delete_leftover_tag deletes the tag $TAG if it exists without a release
+# (call it after deleting the releases): "gh release create --target" would
+# otherwise reuse the old tag and ignore the target commit.
+delete_leftover_tag() {
+  # matching-refs matches by prefix (v1.0.0-pr.7 also finds v1.0.0-pr.77)
+  if gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" |
+    jq -e --arg ref "refs/tags/$TAG" 'any(.[]; .ref == $ref)' >/dev/null; then
+    gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$TAG"
+  fi
 }
 
 publish_release() {
@@ -52,6 +64,8 @@ publish_release() {
   gh release upload "$TAG" "${files[@]}" --clobber
   gh api -X PATCH "repos/$GH_REPO/releases/$DRAFT_ID" \
     -F draft=false -f tag_name="$TAG" -F prerelease="$prerelease" -f make_latest="$latest"
+  # the -next pre-release was the build of this version
+  delete_releases '*-next'
 }
 
 publish_next() {
@@ -64,17 +78,28 @@ publish_next() {
     printf '\nPre-release of the next version, built from %s.\n' "$SHA"
   } >"$notes"
   delete_releases '*-next'
+  delete_leftover_tag
   gh release create "$TAG" "${files[@]}" --target "$SHA" --prerelease --latest=false \
     --title "$TAG" --notes-file "$notes"
 }
 
 publish_pr() {
   need_env TAG SHA PR ASSETS_DIR GH_REPO GITHUB_SERVER_URL
-  local body comment_id
+  local body comment_id state
   load_assets
   delete_releases "*-pr.$PR"
+  delete_leftover_tag
   gh release create "$TAG" "${files[@]}" --target "$SHA" --prerelease --latest=false \
     --title "$TAG" --notes "Dev build of #$PR at $SHA, not for production use."
+
+  # the cleanup of a pull request closed during the build ran before the
+  # release existed
+  state=$(gh pr view "$PR" --json state | jq -r .state)
+  if [[ $state == CLOSED || $state == MERGED ]]; then
+    gh release delete "$TAG" --cleanup-tag --yes
+    printf '::warning::pull request #%s is %s, deleted the dev build %s\n' "$PR" "${state,,}" "$TAG"
+    return
+  fi
 
   body=$(mktemp)
   printf '%s\nDev build of this pull request at %s: %s/%s/releases/tag/%s\n\nNot for production use. It is deleted when the pull request is closed.\n' \

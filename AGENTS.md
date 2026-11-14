@@ -167,7 +167,8 @@ the first in the order breaking-change, feature, fix, dependencies, other wins.
 ### 4.3 Release a version the labels do not give
 
 `gh workflow run Release --ref main -f version=<semver without v>` (for
-example `2.0.0-rc.1`, `1.0.0`). Wait for that run to succeed; the draft now
+example `2.0.0-rc.1`, `1.0.0`). No build metadata (`+…`), no `-next` suffix,
+no `-pr.`: the tag would not start the release workflow. Wait for that run to succeed; the draft now
 has tag `v<version>`. Continue with 4.2 from step 3. A merge before the tag
 resets the draft; repeat.
 
@@ -256,11 +257,17 @@ Do not do this yourself.
 | `the draft is not up to date for main at X` | tagged before the main run finished | wait for it, `gh run rerun <id>` (tag stays) |
 | `main moved to X while building Y` | merge during the release build | delete tag, redo 4.2 |
 | `release N is no longer the draft for vA` | draft published/changed meanwhile | inspect releases, report to owner |
+| `several draft releases for vA (ids …)` | duplicate drafts (e.g. created by hand) | ask the owner which to delete, then `gh run rerun <id>` |
+| `version must be SemVer without "v" …` | bad exception version | dispatch again with a valid version (4.3) |
+| `version must not end in -next or contain -pr. …` | exception version uses a reserved suffix | choose another suffix (e.g. `-rc.1`) |
 | `the version input only applies on main` | dispatch with version on a branch | run on `main` |
 | `run the dev build on a pull request branch, not main` | dev build dispatched on main | use the PR branch |
 | `branch X has no open pull request to main` | no PR or fork PR | open a PR from that branch |
 | `run on main, on a pull request branch …` | unsupported trigger (e.g. dispatch on a tag) | use a supported trigger |
 | `no release assets found in …` | build uploaded nothing | fix the build/upload path |
+| `release assets must be files, … is a directory` | build uploaded a directory | upload the files flat |
+| `output … must be a single line` | a value for a step output contains a newline | fix the value's source |
+| `##[warning]pull request #N is closed/merged, deleted the dev build …` | PR closed during a dev build | expected, nothing to do |
 | checkout of `job-workflow-sha-unavailable` fails | GitHub gave no `job.workflow_sha` | report to owner; do not unpin |
 | `Unknown JSON field` from `gh` | a script uses a field `gh` does not have | fix the script, test against real `gh` |
 | Draft says "could not find a previous published release" | new repository without release | 4.6 step 7 |
@@ -300,10 +307,8 @@ CI runs the same checks as the required checks `shellcheck`, `bats`,
 
 ## 8. Known limitations (accepted for now)
 
-- The exception `version` input is not validated (use plain SemVer without `v`).
-- Several drafts with the same tag are not handled.
-- A tag left without its release is reused by the next `-next`/dev build.
-- Build files in subdirectories of the artifact fail the upload.
-- A dev build published while its PR is being closed is not cleaned up
-  (delete it by hand: `gh release delete <tag> --cleanup-tag --yes`).
-- The old `-next` stays after a release until the next merge.
+- A dev build can still be left behind if its pull request is closed in the
+  moment between the state check and the end of the publish job (delete it by
+  hand: `gh release delete <tag> --cleanup-tag --yes`).
+- A tag left over without a release is only cleaned up for `-next` and
+  `-pr.N`; a leftover release tag `vX.Y.Z` fails the tag check as usual.

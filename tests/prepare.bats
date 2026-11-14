@@ -116,7 +116,7 @@ ok_run='{"workflow_runs":[{"path":".github/workflows/release.yml","event":"push"
 @test "unknown subcommand" {
   run --separate-stderr "$PREPARE" deploy
   [ "$status" -eq 1 ]
-  [ "$stderr" = "error: usage: prepare.sh next|release|pr" ]
+  [ "$stderr" = "error: usage: prepare.sh next|release|pr|version" ]
 }
 
 @test "release: finds the draft on a later page" {
@@ -145,4 +145,43 @@ ok_run='{"workflow_runs":[{"path":".github/workflows/release.yml","event":"push"
   main_run abc '{"workflow_runs":[{"path":".github/workflows/release.yml","event":"workflow_dispatch","conclusion":"success"}]}'
   GITHUB_REF_NAME=v1.0.0 GITHUB_SHA=abc run "$PREPARE" release
   [ "$status" -eq 0 ]
+}
+
+@test "release: several drafts with the tag" {
+  gh_respond 'api repos/spali/sandbox/releases --paginate' "$FIXTURES/releases-two-drafts-v1.0.0.json"
+  main_at abc
+  main_run abc "$ok_run"
+  GITHUB_REF_NAME=v1.0.0 GITHUB_SHA=abc run --separate-stderr "$PREPARE" release
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: several draft releases for v1.0.0 (ids 44, 42); delete all but one, then re-run this run" ]
+  [ -z "$(outputs)" ]
+}
+
+@test "version: empty is fine" {
+  VERSION= run "$PREPARE" version
+  [ "$status" -eq 0 ]
+  [ -z "$(outputs)" ]
+}
+
+@test "version: accepts SemVer" {
+  for v in 1.0.0 0.1.2 10.20.30 2.0.0-rc.1 1.0.0-alpha.beta-1 1.0.0-0a.1; do
+    VERSION=$v run "$PREPARE" version
+    [ "$status" -eq 0 ] || { echo "rejected $v"; false; }
+  done
+}
+
+@test "version: rejects anything else" {
+  for v in v1.0.0 1.0 1.0.0.0 01.0.0 1.0.0- 1.0.0-rc..1 1.0.0-01 1.0.0+build.5 ' 1.0.0' $'1.0.0\nx'; do
+    VERSION=$v run --separate-stderr "$PREPARE" version
+    [ "$status" -eq 1 ] || { echo "accepted $v"; false; }
+    [ "$stderr" = "error: version must be SemVer without \"v\" and without build metadata (e.g. 2.0.0-rc.1), got: $v" ]
+  done
+}
+
+@test "version: rejects the suffixes of the pre-releases" {
+  for v in 1.0.0-next 1.0.0-pr.5 1.0.0-rc.1-next 1.0.0-x-pr.1; do
+    VERSION=$v run --separate-stderr "$PREPARE" version
+    [ "$status" -eq 1 ] || { echo "accepted $v"; false; }
+    [ "$stderr" = "error: version must not end in -next or contain -pr. (reserved for pre-releases), got: $v" ]
+  done
 }

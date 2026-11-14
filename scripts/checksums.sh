@@ -7,6 +7,7 @@ source "$(dirname "$0")/lib.sh"
 dir=${1:-}
 files=()
 if [[ -d $dir ]]; then
+  need_files "$dir"
   rm -f "$dir/checksums.txt"
   while IFS= read -r -d '' file; do
     files+=("$(basename "$file")")

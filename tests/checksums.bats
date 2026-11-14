@@ -35,3 +35,12 @@ setup() {
   [ "$status" -eq 1 ]
   [ "$stderr" = "error: no release assets found in $BATS_TEST_TMPDIR/missing" ]
 }
+
+@test "fails on a directory in the assets" {
+  echo a >"$DIST/a.zip"
+  mkdir "$DIST/sub"
+  run --separate-stderr "$CHECKSUMS" "$DIST"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: release assets must be files, $DIST/sub is a directory" ]
+  [ ! -e "$DIST/checksums.txt" ]
+}
