@@ -25,29 +25,32 @@ jobs:
       - name: Label from the title
         uses: release-drafter/release-drafter/autolabeler@978bb0b30c5ee8cdd332ced253758157150d43f0 # v7.10.0
         with:
-          config-name: spali/.github:release-drafter.yml@${{ job.workflow_sha }}
+          config-name: spali/.github:release-drafter.yml@${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
 
   check:
     name: check
     needs: label
-    # also runs when label was skipped (synchronize, labeled, unlabeled)
-    if: always() && github.event.action != 'closed' && needs.label.result != 'failure'
+    # also runs when label was skipped (synchronize, labeled, unlabeled);
+    # never skipped otherwise, a skipped required check counts as passed
+    if: always() && github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
     steps:
-      - name: Check the shared workflow ref
+      - name: Check the label job
         env:
-          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          LABEL_RESULT: ${{ needs.label.result }}
         run: |
-          test -n "$WORKFLOW_SHA" || { echo "error: job.workflow_sha unavailable"; exit 1; }
+          if [[ $LABEL_RESULT == failure || $LABEL_RESULT == cancelled ]]; then
+            echo "error: labeling the pull request failed, re-run the jobs"; exit 1
+          fi
       - name: Checkout shared scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: spali/.github
-          ref: ${{ job.workflow_sha }}
+          ref: ${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
           path: .release-flow
           persist-credentials: false
       - name: Check title and labels
@@ -70,7 +73,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: spali/.github
-          ref: ${{ job.workflow_sha }}
+          ref: ${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
           path: .release-flow
           persist-credentials: false
       - name: Delete dev builds of this pull request

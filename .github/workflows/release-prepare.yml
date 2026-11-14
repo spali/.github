@@ -47,6 +47,7 @@ jobs:
     permissions:
       contents: write # update the draft release (drafts are only visible with write access)
       pull-requests: read # find pull requests for the release notes and dev builds
+      actions: read # check that the run on main updated the draft before a release
     outputs:
       kind: ${{ steps.next.outputs.kind || steps.release.outputs.kind || steps.pr.outputs.kind }}
       version: ${{ steps.next.outputs.version || steps.release.outputs.version || steps.pr.outputs.version }}
@@ -73,7 +74,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: spali/.github
-          ref: ${{ job.workflow_sha }}
+          ref: ${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
           path: .release-flow
           persist-credentials: false
 
@@ -82,7 +83,7 @@ jobs:
         if: env.ON_MAIN == 'true'
         uses: release-drafter/release-drafter@978bb0b30c5ee8cdd332ced253758157150d43f0 # v7.10.0
         with:
-          config-name: spali/.github:release-drafter.yml@${{ job.workflow_sha }}
+          config-name: spali/.github:release-drafter.yml@${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
           commitish: main
           version: ${{ inputs.version }}
       - name: Next pre-release
@@ -106,7 +107,7 @@ jobs:
         if: env.ON_BRANCH == 'true'
         uses: release-drafter/release-drafter@978bb0b30c5ee8cdd332ced253758157150d43f0 # v7.10.0
         with:
-          config-name: spali/.github:release-drafter.yml@${{ job.workflow_sha }}
+          config-name: spali/.github:release-drafter.yml@${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
           commitish: main
           dry-run: true
       - name: Dev pre-release

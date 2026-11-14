@@ -18,10 +18,18 @@ if ! [[ ${PR_TITLE:-} =~ $pattern ]]; then
 fi
 
 labels=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
-for label in "${release_labels[@]}"; do
+# order of the release notes sections: the first label found decides
+found=()
+for label in breaking-change feature fix dependencies other; do
   if grep -qxF "$label" <<<"$labels"; then
-    exit 0
+    found+=("$label")
   fi
 done
-joined=$(printf '%s, ' "${release_labels[@]}")
-die "PR has none of the labels ${joined%, }"
+if ((${#found[@]} == 0)); then
+  joined=$(printf '%s, ' "${release_labels[@]}")
+  die "PR has none of the labels ${joined%, }"
+fi
+if ((${#found[@]} > 1)); then
+  joined=$(printf '%s, ' "${found[@]}")
+  echo "::warning::PR has several release labels (${joined%, }): the release notes use ${found[0]}. Remove the labels that do not apply."
+fi

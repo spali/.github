@@ -33,6 +33,7 @@ jobs:
     permissions:
       contents: write # update the draft release
       pull-requests: read
+      actions: read # the tag check waits for the run on main
     uses: spali/.github/.github/workflows/release-prepare.yml@SHA # vX.Y.Z
     with:
       version: ${{ inputs.version }}

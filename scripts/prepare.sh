@@ -6,7 +6,7 @@
 #                       env: DRAFT_VERSION, DRAFT_ID, GITHUB_SHA
 #   prepare.sh release  on a pushed tag: the tag must be the draft's tag and
 #                       point to the current head of main
-#                       env: GITHUB_REF_NAME, GITHUB_SHA, GH_REPO
+#                       env: GITHUB_REF_NAME, GITHUB_SHA, GH_REPO, GITHUB_WORKFLOW_REF
 #   prepare.sh pr       dev build of the pull request of the current branch
 #                       env: GITHUB_REF_NAME, GITHUB_SHA, DRAFT_VERSION, GH_REPO
 set -euo pipefail
@@ -28,7 +28,7 @@ prepare_next() {
 }
 
 prepare_release() {
-  need_env GITHUB_REF_NAME GITHUB_SHA GH_REPO
+  need_env GITHUB_REF_NAME GITHUB_SHA GH_REPO GITHUB_WORKFLOW_REF
   local tag=$GITHUB_REF_NAME releases found_id current main_sha
   # drafts are not found by tag name, only in the release list
   # (--paginate prints one array per page, jq -s add joins them)
@@ -44,6 +44,15 @@ prepare_release() {
   main_sha=$(gh api "repos/$GH_REPO/commits/main" --jq .sha)
   if [[ $GITHUB_SHA != "$main_sha" ]]; then
     die "tag $tag points to $GITHUB_SHA but main is at $main_sha; delete the tag and tag main again"
+  fi
+  # the draft is only up to date once this workflow ran successfully for
+  # main's head (the run on main updates the draft)
+  local workflow=${GITHUB_WORKFLOW_REF#*/*/}
+  workflow=${workflow%@*}
+  if ! gh api "repos/$GH_REPO/actions/runs?branch=main&head_sha=$main_sha&per_page=100" |
+    jq -e --arg path "$workflow" 'any(.workflow_runs[];
+      .path == $path and (.event == "push" or .event == "workflow_dispatch") and .conclusion == "success")' >/dev/null; then
+    die "the draft is not up to date for main at $main_sha: no successful run of $workflow for it yet; wait for it, then re-run this run"
   fi
   emit release "${tag#v}" "$GITHUB_SHA" "" "$found_id"
 }

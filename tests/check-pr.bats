@@ -59,3 +59,17 @@ labels() {
   [ "$status" -eq 1 ]
   [ "$stderr" = "error: PR_NUMBER is required" ]
 }
+
+@test "warns about several release labels" {
+  stub_gh
+  labels '["breaking-change","feature"]'
+  PR_TITLE='feat: y' run "$CHECK"
+  [ "$status" -eq 0 ]
+  [ "$output" = "::warning::PR has several release labels (breaking-change, feature): the release notes use breaking-change. Remove the labels that do not apply." ]
+}
+
+@test "no warning with one release label" {
+  PR_TITLE='fix: y' run "$CHECK"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}

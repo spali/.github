@@ -11,6 +11,7 @@ set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
 comment_marker='<!-- release-flow:pr-dev -->'
+comment_author='github-actions[bot]'
 
 # load_assets sets the global array "files" to the files in $ASSETS_DIR.
 load_assets() {
@@ -31,9 +32,19 @@ delete_releases() {
 }
 
 publish_release() {
-  need_env TAG VERSION DRAFT_ID ASSETS_DIR GH_REPO
-  local prerelease=false latest=true
+  need_env TAG VERSION SHA DRAFT_ID ASSETS_DIR GH_REPO
+  local prerelease=false latest=true state main_sha
   load_assets
+  # the build took a while: the draft must still be this release's draft and
+  # main must not have moved on (the draft's notes follow main)
+  state=$(gh api "repos/$GH_REPO/releases/$DRAFT_ID" | jq -r '"\(.draft) \(.tag_name)"')
+  if [[ $state != "true $TAG" ]]; then
+    die "release $DRAFT_ID is no longer the draft for $TAG (draft=${state% *}, tag ${state#* })"
+  fi
+  main_sha=$(gh api "repos/$GH_REPO/commits/main" --jq .sha)
+  if [[ $main_sha != "$SHA" ]]; then
+    die "main moved to $main_sha while building $SHA, the draft now describes main; delete the tag and release again"
+  fi
   if [[ $VERSION == *-* ]]; then
     prerelease=true
     latest=false
@@ -68,8 +79,10 @@ publish_pr() {
   body=$(mktemp)
   printf '%s\nDev build of this pull request at %s: %s/%s/releases/tag/%s\n\nNot for production use. It is deleted when the pull request is closed.\n' \
     "$comment_marker" "$SHA" "$GITHUB_SERVER_URL" "$GH_REPO" "$TAG" >"$body"
-  comment_id=$(gh api "repos/$GH_REPO/issues/$PR/comments" --paginate \
-    --jq ".[] | select(.body | contains(\"$comment_marker\")) | .id" | head -n 1)
+  # only our own comment: anyone can post a comment containing the marker
+  comment_id=$(gh api "repos/$GH_REPO/issues/$PR/comments" --paginate |
+    jq -rs --arg marker "$comment_marker" --arg bot "$comment_author" \
+      'add // [] | map(select(.user.login == $bot and (.body | contains($marker)))) | first | .id // empty')
   if [[ -n $comment_id ]]; then
     gh api -X PATCH "repos/$GH_REPO/issues/comments/$comment_id" -F body=@"$body" >/dev/null
   else
