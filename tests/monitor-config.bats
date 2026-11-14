@@ -190,3 +190,43 @@ YAML
   [ "$status" -eq 1 ]
   [[ $stderr == "error: "* ]]
 }
+
+@test "unknown lists key and wrong list types fail" {
+  f=$(
+    mk bad.yml <<'YAML'
+version: 1
+lists:
+  mirror: x
+  exclusiv: []
+  archive: [a]
+  mirrors: 3
+  forks: x
+  exclusive: [[a, b], [c], [d, 1], x]
+YAML
+  )
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"error: $f: lists: unknown key mirror"* ]]
+  [[ $stderr == *"lists: unknown key exclusiv"* ]]
+  [[ $stderr == *"lists.archive must be a string"* ]]
+  [[ $stderr == *"lists.mirrors must be a string"* ]]
+  [[ $stderr == *"lists.forks must be a list of strings"* ]]
+  [[ $stderr == *"lists.exclusive[1] must be a pair of strings"* ]]
+  [[ $stderr == *"lists.exclusive[2] must be a pair of strings"* ]]
+  [[ $stderr == *"lists.exclusive[3] must be a pair of strings"* ]]
+  [[ $stderr != *"exclusive[0]"* ]]
+}
+
+@test "lists.exclusive must be a list" {
+  f=$(printf 'version: 1\nlists: {exclusive: x}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"lists.exclusive must be a list"* ]]
+}
+
+@test "ignoring check-failed fails" {
+  f=$(printf 'version: 1\nignores:\n  - {repo: spali/x, check: check-failed, reason: r}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: $f: ignores[0].check: check-failed cannot be ignored" ]
+}

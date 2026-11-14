@@ -35,6 +35,20 @@ if type != "object" then "top level must be a mapping" else
     | "unknown key \(.)"),
   (if $private and has("lists") then "lists is not allowed in the private file" else empty end),
   (if has("lists") and (.lists | type) != "object" then "lists must be a mapping" else empty end),
+  (if (.lists | type) == "object" then
+     (.lists | keys[] | select(IN("exclusive", "archive", "mirrors", "forks") | not)
+       | "lists: unknown key \(.)"),
+     (.lists | to_entries[] | select(.key == "archive" or .key == "mirrors")
+       | select(.value | type != "string") | "lists.\(.key) must be a string"),
+     (.lists | if has("forks") and (.forks | type == "array" and all(type == "string") | not)
+       then "lists.forks must be a list of strings" else empty end),
+     (.lists | if has("exclusive") then
+        (if (.exclusive | type) != "array" then "lists.exclusive must be a list"
+         else (.exclusive | to_entries[]
+           | select(.value | type == "array" and length == 2 and all(type == "string") | not)
+           | "lists.exclusive[\(.key)] must be a pair of strings") end)
+      else empty end)
+   else empty end),
   (if has("mirrors") and (.mirrors | type) != "array" then "mirrors must be a list" else empty end),
   (if has("forks") and (.forks | type) != "array" then "forks must be a list" else empty end),
   (if has("ignores") and (.ignores | type) != "array" then "ignores must be a list" else empty end),
@@ -60,6 +74,7 @@ if type != "object" then "top level must be a mapping" else
     | if type != "object" then "\($p) must be a mapping" else
         (if has("repo") | not then "\($p).repo is required" else repo_err("\($p).repo"; .repo) end),
         (if has("check") | not then "\($p).check is required"
+         elif .check == "check-failed" then "\($p).check: check-failed cannot be ignored"
          elif (.check as $c | $checks | any(. == $c)) | not then "\($p).check: unknown check \(.check | tostring)"
          else empty end),
         (if (.reason | type) == "string" and (.reason | test("\\S")) then empty
