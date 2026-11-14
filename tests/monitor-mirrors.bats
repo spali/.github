@@ -65,12 +65,36 @@ level() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) |
   [ "$(message mirror-behind)" = "2 refs differ, last push 2026-11-01T00:00:00Z" ]
 }
 
-@test "differing ref within the grace period is fine" {
-  inventory false 2026-11-13T12:00:00Z
+@test "differing ref 30 hours after the last push is fine" {
+  inventory false 2026-11-13T06:00:00Z
   refs refs/heads/main:1 | git_respond "$SRC" -
   refs refs/heads/main:9 | git_respond "$TGT" -
   run_script
   [ ! -s "$FINDINGS" ]
+}
+
+@test "differing ref 49 hours after the last push is red" {
+  inventory false 2026-11-12T11:00:00Z
+  refs refs/heads/main:1 | git_respond "$SRC" -
+  refs refs/heads/main:9 | git_respond "$TGT" -
+  run_script
+  [ "$(count mirror-behind)" -eq 1 ]
+}
+
+@test "empty public target differs" {
+  refs refs/heads/main:1 | git_respond "$SRC" -
+  git_respond "$TGT" /dev/null
+  run_script
+  [ "$(message mirror-behind)" = "1 refs differ, last push 2026-11-01T00:00:00Z" ]
+}
+
+@test "empty private target differs" {
+  inventory true 2026-11-01T00:00:00Z
+  refs refs/heads/main:1 | git_respond "$SRC" -
+  echo '[]' | gh_respond '*matching-refs/heads --paginate' -
+  echo '[]' | gh_respond '*matching-refs/tags --paginate' -
+  run_script
+  [ "$(message mirror-behind)" = "1 refs differ, last push 2026-11-01T00:00:00Z" ]
 }
 
 @test "mirror with extra target refs only is fine" {

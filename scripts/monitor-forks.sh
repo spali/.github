@@ -67,7 +67,7 @@ check_delete_candidate() {
   fb=$(mktemp)
   pb=$(mktemp)
   # shellcheck disable=SC2064 # expand now
-  trap "rm -f '$prs' '$fb' '$pb'" RETURN
+  trap "rm -f '$prs' '$fb' '$pb'; trap - RETURN" RETURN
   paged fork-delete-candidate "$repo" "repos/$parent/pulls?state=open&per_page=100" \
     '{head: (.head.repo.full_name // "")}' "$prs" || return 0
   json_out fork-delete-candidate "$repo" mine --arg r "$repo" \

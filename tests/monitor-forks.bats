@@ -69,6 +69,20 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
   [ ! -s "$FINDINGS" ]
 }
 
+@test "synced fork with a commit missing 178 hours is within the grace" {
+  synced
+  respond_jq "$BEHIND" '{ahead_by: 1, commits: [{commit: {committer: {date: "2026-11-07T02:00:00Z"}}}]}'
+  run_script
+  [ ! -s "$FINDINGS" ]
+}
+
+@test "synced fork with a commit missing 193 hours is red" {
+  synced
+  respond_jq "$BEHIND" '{ahead_by: 1, commits: [{commit: {committer: {date: "2026-11-06T11:00:00Z"}}}]}'
+  run_script
+  [ "$(count fork-sync-stale)" -eq 1 ]
+}
+
 @test "unsynced fork behind is info" {
   respond_jq "$BEHIND" '{ahead_by: 4, commits: [{commit: {committer: {date: "2026-01-01T00:00:00Z"}}}]}'
   run_script
