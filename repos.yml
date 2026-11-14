@@ -8,8 +8,7 @@ lists:
   archive: "🗃️ My stack Archive"
   mirrors: "👀  Mirrors"
   forks: ["▶️ Constribution forks", "♻️ Customization forks"]
-# Mirrors kept in sync by a private mirror repository. spali/xmlstar-code is listed there
-# but does not exist (404), so it is left out.
+# Mirrors kept in sync by a private mirror repository.
 mirrors:
   - target: spali/esp-idf
     source: https://github.com/espressif/esp-idf.git
@@ -20,6 +19,9 @@ mirrors:
     interval_hours: 24
   - target: spali/live-build
     source: https://anonscm.debian.org/git/debian-live/live-build.git
+    interval_hours: 24
+  - target: spali/xmlstar-code
+    source: https://git.code.sf.net/p/xmlstar/code
     interval_hours: 24
 # Forks with their own sync workflow.
 forks:
