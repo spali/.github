@@ -1,0 +1,82 @@
+# .github/workflows/release.yml of a repository using the shared release flow,
+# with a build that is not Go: replace the "Build" step with your own build.
+# Replace SHA with the commit of the spali/.github release you use.
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+      - "!v*-next"
+      - "!v*-pr.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exception version for the draft, only on main (e.g. 2.0.0-rc.1). Empty: computed from the labels."
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  prepare:
+    permissions:
+      contents: write # update the draft release
+      pull-requests: read
+    uses: spali/.github/.github/workflows/release-prepare.yml@SHA # vX.Y.Z
+    with:
+      version: ${{ inputs.version }}
+
+  # The only repository specific job: build the files to release from
+  # needs.prepare.outputs.sha with needs.prepare.outputs.version and upload
+  # them as the artifact "release-assets". Do not create checksums.txt.
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - name: Build
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          mkdir -p dist
+          printf '%s\n' "$VERSION" >VERSION
+          tar -czf "dist/app_${VERSION}.tar.gz" VERSION
+      - name: Upload the release assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build]
+    permissions:
+      contents: write # create and edit releases
+      pull-requests: write # comment the dev build link
+      id-token: write # sign the attestation
+      attestations: write # store the attestation
+      artifact-metadata: write # create the artifact storage record
+    uses: spali/.github/.github/workflows/release-publish.yml@SHA # vX.Y.Z
+    with:
+      kind: ${{ needs.prepare.outputs.kind }}
+      version: ${{ needs.prepare.outputs.version }}
+      tag: ${{ needs.prepare.outputs.tag }}
+      sha: ${{ needs.prepare.outputs.sha }}
+      pr: ${{ needs.prepare.outputs.pr }}
+      draft-id: ${{ needs.prepare.outputs.draft-id }}

@@ -1,0 +1,19 @@
+# .github/workflows/pr.yml of a repository using the shared release flow.
+# Replace SHA with the commit of the spali/.github release you use.
+name: Pull request
+
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize, labeled, unlabeled, closed]
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  pr:
+    permissions:
+      contents: write # delete dev pre-releases of closed pull requests
+      pull-requests: write # add labels
+    uses: spali/.github/.github/workflows/pr.yml@SHA # vX.Y.Z
