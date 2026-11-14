@@ -43,6 +43,15 @@ finding() {
     >>"$FINDINGS"
 }
 
+# err_line FILE prints the line of a gh stderr file that names the failure:
+# the one containing "(HTTP ", else the first non-empty line.
+err_line() {
+  local line
+  line=$(grep -F -m1 -- '(HTTP ' "$1" || true)
+  [[ -n $line ]] || line=$(grep -m1 -v '^[[:space:]]*$' "$1" || true)
+  printf '%s\n' "$line"
+}
+
 # fetch CHECK REPO ARGS... runs gh api ARGS. Success: prints the body.
 # Known n/a answer: skip finding, returns 2. Anything else: red check-failed
 # finding, returns 1. Writes nothing to stderr and nothing to stdout on failure.
@@ -56,6 +65,7 @@ fetch() {
     return 0
   fi
   err=$(<"$errf")
+  line=$(err_line "$errf")
   rm -f "$errf"
   for pattern in "${NA_PATTERNS[@]}"; do
     if [[ $err == *"$pattern"* ]]; then
@@ -64,8 +74,6 @@ fetch() {
       return 2
     fi
   done
-  line=$(grep -F -m1 -- '(HTTP ' <<<"$err" || true)
-  [[ -n $line ]] || line=$(grep -m1 -v '^[[:space:]]*$' <<<"$err" || true)
   finding red check-failed "$repo" "$check: $line"
   return 1
 }
@@ -105,4 +113,12 @@ json_out() {
     return 1
   fi
   printf -v "$var" '%s' "$json_result"
+}
+
+# disabled_workflows CHECK REPO OUTVAR reads a workflows API body on stdin and
+# stores one line per workflow GitHub disabled for inactivity in OUTVAR.
+disabled_workflows() {
+  json_out "$1" "$2" "$3" -r '
+    .workflows // [] | .[] | select(.state == "disabled_inactivity") |
+    "\(.name) (\(.path)) disabled by GitHub after 60 days of inactivity"'
 }

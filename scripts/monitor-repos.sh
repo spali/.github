@@ -35,12 +35,11 @@ workflow_pins() {
   errf=$(mktemp)
   if ! listing=$(gh api "repos/$repo/contents/.github/workflows?ref=$branch" 2>"$errf"); then
     err=$(<"$errf")
+    line=$(err_line "$errf")
     rm -f "$errf"
     if [[ $err == *'(HTTP 404)'* || $err == *'This repository is empty.'* ]]; then
       return 0
     fi
-    line=$(grep -F -m1 -- '(HTTP ' <<<"$err" || true)
-    [[ -n $line ]] || line=$(grep -m1 -v '^[[:space:]]*$' <<<"$err" || true)
     finding red check-failed "$repo" "inventory: $line"
     return 1
   fi

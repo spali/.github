@@ -39,9 +39,7 @@ check_workflows() {
   local repo=$1 synced=$2 body found line n
   body=$(fetch workflow-disabled "$repo" "repos/$repo/actions/workflows?per_page=100") || return 0
   if [[ -n $synced ]]; then
-    json_out workflow-disabled "$repo" found -r '
-      .workflows // [] | .[] | select(.state == "disabled_inactivity") |
-      "\(.name) (\(.path)) disabled by GitHub after 60 days of inactivity"' <<<"$body" || return 0
+    disabled_workflows workflow-disabled "$repo" found <<<"$body" || return 0
     while IFS= read -r line; do
       [[ -z $line ]] || finding red workflow-disabled "$repo" "$line"
     done <<<"$found"
