@@ -401,8 +401,9 @@ ignores:
   - {repo: spali/example, check: renovate-stale, reason: waiting for upstream fix}
 ```
 
-An ignore that matches nothing is reported (`ignore-unused`, info), so
-remove it when the cause is gone.
+Ignores for private repositories go into the private control file. An
+ignore that matches nothing is reported (`ignore-unused`, info), so remove it
+when the cause is gone.
 
 **Control files.** `repos.yml` (public) holds the list names, mirrors, forks
 with their own sync workflow, and ignores. It must never name a private
