@@ -1,0 +1,81 @@
+# Reusable: label and check pull requests, clean up dev builds of closed ones.
+#
+# Call it from a workflow triggered by pull_request_target with the types
+# opened, reopened, edited, synchronize, labeled, unlabeled, closed.
+# pull_request_target is required so that pull requests from forks can be
+# labeled; this workflow never checks out or runs code from the pull request.
+name: Pull request
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  label:
+    name: label
+    if: contains(fromJSON('["opened", "reopened", "edited"]'), github.event.action)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write # add labels
+    steps:
+      - name: Label from the title
+        uses: release-drafter/release-drafter/autolabeler@978bb0b30c5ee8cdd332ced253758157150d43f0 # v7.10.0
+        with:
+          config-name: spali/.github:release-drafter.yml@${{ job.workflow_sha }}
+
+  check:
+    name: check
+    needs: label
+    # also runs when label was skipped (synchronize, labeled, unlabeled)
+    if: always() && github.event.action != 'closed' && needs.label.result != 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check the shared workflow ref
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          test -n "$WORKFLOW_SHA" || { echo "error: job.workflow_sha unavailable"; exit 1; }
+      - name: Checkout shared scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: spali/.github
+          ref: ${{ job.workflow_sha }}
+          path: .release-flow
+          persist-credentials: false
+      - name: Check title and labels
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: .release-flow/scripts/check-pr.sh
+
+  cleanup:
+    name: cleanup
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # delete dev pre-releases and their tags
+    steps:
+      - name: Checkout shared scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: spali/.github
+          ref: ${{ job.workflow_sha }}
+          path: .release-flow
+          persist-credentials: false
+      - name: Delete dev builds of this pull request
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: .release-flow/scripts/cleanup-pr.sh
