@@ -237,6 +237,11 @@ resets the draft; repeat.
    --generate-notes`. Interface changes → new major version. Renovate then
    updates the pins in the repositories.
 
+Updating release-drafter (a Renovate PR): compare the top-level keys of its
+`drafter/schema.json` and `autolabeler/schema.json` at the new version with
+`known_keys` in `tests/release-drafter-config.bats` and update the list.
+release-drafter ignores unknown keys without a warning.
+
 ### 4.8 Emergency change of `main` without a PR
 
 Only on the owner's explicit instruction: the owner disables the ruleset

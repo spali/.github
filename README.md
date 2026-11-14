@@ -362,7 +362,9 @@ The release workflow must keep the tag filters of the examples: `-next` and
   Breaking changes of the interface: new major version and update the callers.
 - **release-drafter and other actions** are pinned by commit and updated by
   Renovate here. actionlint in CI is pinned in `ci.yml` (`go run …@vX`) and
-  updated by hand.
+  updated by hand. release-drafter silently ignores unknown config keys, so
+  `tests/release-drafter-config.bats` lists the keys of its schema: when a
+  release-drafter update adds or removes keys, update that list.
 - **A tag push runs the workflow files of the tagged commit**, so a fix here
   only applies to releases of commits that pin it.
 

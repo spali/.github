@@ -66,3 +66,23 @@ LIST
   [ "$(yq '.tag-template' "$CONFIG")" = 'v$RESOLVED_VERSION' ]
   [ "$(yq '.name-template' "$CONFIG")" = 'v$RESOLVED_VERSION' ]
 }
+
+# Top-level keys of drafter/schema.json and autolabeler/schema.json of
+# release-drafter v7.10.0 (the version pinned in release-prepare.yml and
+# pr.yml). Unknown keys are silently ignored by release-drafter.
+known_keys='_extends autolabeler categories category-template change-author-template
+change-authors-final-separator change-authors-separator change-body-escapes change-template
+change-title-escapes commitish exclude-contributors exclude-labels exclude-paths
+filter-by-commitish filter-by-range footer group-changes header history-limit include-labels
+include-paths include-pre-releases latest name-template new-contributor-template
+no-changes-template no-contributors-template no-new-contributor-template prerelease
+prerelease-identifier pull-request-limit replacers sort-by sort-direction sync-labels
+tag-prefix tag-template template version-resolver version-template'
+
+@test "config uses only keys release-drafter knows" {
+  unknown=()
+  for key in $(yq 'keys | .[]' "$CONFIG"); do
+    [[ " ${known_keys//$'\n'/ } " == *" $key "* ]] || unknown+=("$key")
+  done
+  [ "${#unknown[@]}" -eq 0 ] || { echo "unknown keys: ${unknown[*]}"; false; }
+}
