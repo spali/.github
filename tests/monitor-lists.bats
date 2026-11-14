@@ -137,6 +137,51 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(count list-none)" -eq 0 ]
 }
 
+@test "fork gets no list-none while a fork list is missing" {
+  jq -n '[{name: "spali/a", private: false, fork: false, central: true},
+    {name: "spali/f", private: false, fork: true, central: true}]' >"$INVENTORY"
+  lists '[{name: "🚀 My stack", items: [["spali/a", false]]}, {name: "🗃️ My stack Archive", items: []}, {name: "👀  Mirrors", items: []}, {name: "▶️ Constribution forks", items: []}]'
+  run_script
+  [ "$(count config-invalid)" -eq 1 ]
+  [ "$(count list-none)" -eq 0 ]
+}
+
+@test "without configured fork lists a fork in no list is plain list-none" {
+  echo '{"lists": {"exclusive": []}, "mirrors": []}' >"$CONFIG"
+  inv spali/f false true true
+  all_lists '.'
+  run_script
+  [ "$(message list-none)" = "in no list" ]
+}
+
+@test "spali/.github is not counted for adoption" {
+  jq -n '[{name: "spali/.github", private: false, fork: false, central: false}]' >"$INVENTORY"
+  all_lists '(.[0].items = [["spali/.github", false]])'
+  run_script
+  [ "$(count adoption)" -eq 0 ]
+}
+
+@test "more than one page of items is check-failed and skips list checks" {
+  inv spali/b false false false
+  jq -nc '{data: {user: {lists: {pageInfo: {hasNextPage: false}, nodes: [{name: "🚀 My stack",
+    items: {pageInfo: {hasNextPage: true}, nodes: []}}]}}}}' | gh_respond '*graphql*' -
+  run_script
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(message check-failed)" = "lists: more than 50 lists or 100 items in a list, not all read" ]
+  [ "$(count list-none)" -eq 0 ]
+  [ "$(count config-invalid)" -eq 0 ]
+  [ "$(count adoption)" -eq 1 ]
+}
+
+@test "more than one page of lists is check-failed and skips list checks" {
+  inv spali/b false false false
+  jq -nc '{data: {user: {lists: {pageInfo: {hasNextPage: true}, nodes: []}}}}' | gh_respond '*graphql*' -
+  run_script
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(count list-none)" -eq 0 ]
+  [ "$(count adoption)" -eq 1 ]
+}
+
 @test "adoption is one line with public names sorted" {
   jq -n '[{name: "spali/z", private: false, fork: false, central: false},
     {name: "spali/b", private: false, fork: false, central: false},
@@ -166,6 +211,7 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   run_script
   [ "$(count check-failed)" -eq 1 ]
   [ "$(level check-failed)" = red ]
+  [ "$(message check-failed)" = "list-none: gh: Resource not accessible (HTTP 403)" ]
   [ "$(count list-none)" -eq 0 ]
   [ "$(count adoption)" -eq 1 ]
 }
