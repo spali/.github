@@ -11,13 +11,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 need_env FINDINGS INVENTORY CONFIG
 
 OWNER=spali
-QUERY='query { user(login: "spali") { lists(first: 50) { nodes { name items(first: 100) { nodes { ... on Repository { nameWithOwner isArchived } } } } } } }'
+QUERY='query { user(login: "spali") { lists(first: 50) { pageInfo { hasNextPage } nodes { name items(first: 100) { pageInfo { hasNextPage } nodes { ... on Repository { nameWithOwner isArchived } } } } } } }'
 
 # Reads the lists once into FILE as [{name, items: [{repo, archived}]}], own
 # repositories only. Returns 1 when the lists are unavailable.
 fetch_lists() {
   local body trimmed
   body=$(GH_TOKEN="${LISTS_TOKEN:-${GH_TOKEN:-}}" fetch list-none - graphql -f query="$QUERY") || return 1
+  if jq -e '[.data.user.lists | .pageInfo.hasNextPage, (.nodes[].items.pageInfo.hasNextPage)] | any(. == true)' \
+    >/dev/null 2>&1 <<<"$body"; then
+    finding red check-failed - "lists: more than 50 lists or 100 items in a list, not all read"
+    return 1
+  fi
   if ! trimmed=$(jq --arg o "$OWNER/" '
       [.data.user.lists.nodes[] | {name, items: [.items.nodes[] |
         select((.nameWithOwner // "") | startswith($o)) |
@@ -42,8 +47,9 @@ list_findings() {
     def row($l; $c; $r; $m): [$l, $c, $r, $m] | @tsv;
     ($missing[] | row("red"; "config-invalid"; "-"; "list \"\(.)\" not found on GitHub")),
     ((($cl.forks // []) | all(.[]; ok(.))) as $forks_ok |
+      (($cl.forks // []) | length > 0) as $forks_set |
       $inv[0][] | . as $i | inlists($i.name) as $in |
-      if $i.fork then
+      if $i.fork and $forks_set then
         if $forks_ok and (($cl.forks // []) | all(.[]; . as $f | ($in | index($f)) == null))
         then row("info"; "list-none"; $i.name; "fork in none of the fork lists") else empty end
       elif ($in | length) == 0 then row("info"; "list-none"; $i.name; "in no list")
@@ -69,7 +75,7 @@ check_adoption() {
   local out
   if ! out=$(jq -r --slurpfile cfg "$CONFIG" '
       ([$cfg[0].mirrors // [] | .[].target]) as $m |
-      [.[] | select(.fork == false and .central == false and ([.name] | inside($m) | not))] |
+      [.[] | select(.name != "spali/.github" and .fork == false and .central == false and ([.name] | inside($m) | not))] |
       (map(select(.private | not) | .name) | sort | join(", ")) as $pub |
       (map(select(.private)) | length) as $priv |
       select(length > 0) |
