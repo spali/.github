@@ -9,18 +9,22 @@ source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 
 need_env FINDINGS
 
+# Only the ::add-mask:: lines may reach the public log (fd 3 is the real
+# stderr); whatever the tools print is discarded.
+exec 3>&2 2>/dev/null
+
 OWNER=spali
-PIN_RE='uses: spali/\.github/\.github/workflows/([^@]+)@([0-9a-f]{40})( # (v[^ ]+))?'
+PIN_RE='^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+spali/\.github/\.github/workflows/([^@]+)@([0-9a-f]{40})( # (v[^ ]+))?'
 
 # list_repos prints the owned, non-archived repositories as one JSON array.
 list_repos() {
   local raw
   if [[ ${GITHUB_ACTIONS:-} == true ]]; then
     raw=$(fetch check-failed - installation/repositories --paginate) || return 1
-    jq -s 'map(.repositories) | add // []' <<<"$raw"
+    jq -s 'map(.repositories) | add // []' <<<"$raw" || { parse_failed inventory -; return 1; }
   else
     raw=$(fetch check-failed - 'user/repos?affiliation=owner' --paginate) || return 1
-    jq -s 'add // []' <<<"$raw"
+    jq -s 'add // []' <<<"$raw" || { parse_failed inventory -; return 1; }
   fi
 }
 
@@ -48,8 +52,8 @@ workflow_pins() {
       "repos/$repo/contents/.github/workflows/$name?ref=$branch") || continue
     while IFS= read -r match; do
       [[ $match =~ $PIN_RE ]] || continue
-      jq -cn --arg workflow "${BASH_REMATCH[1]}" --arg sha "${BASH_REMATCH[2]}" \
-        --arg version "${BASH_REMATCH[4]}" \
+      jq -cn --arg workflow "${BASH_REMATCH[2]}" --arg sha "${BASH_REMATCH[3]}" \
+        --arg version "${BASH_REMATCH[5]}" \
         '{workflow: $workflow, sha: $sha, version: (if $version == "" then null else $version end)}'
     done < <(grep -E -- "$PIN_RE" <<<"$raw" || true)
   done <<<"$names"
@@ -65,7 +69,7 @@ main() {
     '[.[] | select(.owner.login == $owner and .archived == false)]' <<<"$repos")
 
   if [[ ${GITHUB_ACTIONS:-} == true ]]; then
-    jq -r '.[] | select(.private) | "::add-mask::" + .full_name, "::add-mask::" + .name' <<<"$repos" >&2
+    jq -r '.[] | select(.private) | "::add-mask::" + .full_name, "::add-mask::" + .name' <<<"$repos" >&3
   fi
 
   if [[ $(jq length <<<"$repos") -eq 0 ]]; then

@@ -191,3 +191,44 @@ JSON
   run --separate-stderr "$SCRIPT"
   [ -z "$stderr" ]
 }
+
+@test "listing that is not JSON is a red parse failure, prints [] and leaves stderr empty" {
+  printf '<html><body>Bad gateway</body></html>\n' | gh_respond '*user/repos*' -
+  run --separate-stderr "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[]' ]
+  [ -z "$stderr" ]
+  [ "$(wc -l <"$FINDINGS")" -eq 1 ]
+  [ "$(jq -r '.level + "|" + .check + "|" + .message' "$FINDINGS")" = 'red|check-failed|inventory: cannot parse API response' ]
+}
+
+@test "listing that is not JSON in Actions leaves stderr empty" {
+  printf '<html></html>\n' | gh_respond '*installation/repositories*' -
+  GITHUB_ACTIONS=true run --separate-stderr "$SCRIPT"
+  [ "$output" = '[]' ]
+  [ -z "$stderr" ]
+  [ "$(jq -r .check "$FINDINGS")" = check-failed ]
+}
+
+@test "unparsable workflow directory listing leaves stderr empty" {
+  user_repos "$(repo spali/a)"
+  printf 'not json\n' | gh_respond '*contents/.github/workflows?ref=main' -
+  run --separate-stderr "$SCRIPT"
+  [ -z "$stderr" ]
+}
+
+@test "a commented-out uses line is not a pin" {
+  user_repos "$(repo spali/a)"
+  gh_respond '*contents/.github/workflows?ref=main' - <<'JSON'
+[{"name":"pr.yml","type":"file"}]
+JSON
+  gh_respond '*contents/.github/workflows/pr.yml?ref=main' - <<'YML'
+jobs:
+  pr:
+    # uses: spali/.github/.github/workflows/pr.yml@6f26c6b1dcac0797c52055241f0cfb74a797ebe3 # v1.0.0
+    steps:
+      - uses: spali/.github/.github/workflows/x.yml@6f26c6b1dcac0797c52055241f0cfb74a797ebe3 # v1.0.0
+YML
+  run --separate-stderr "$SCRIPT"
+  [ "$(jq -c '.[0].pins | map(.workflow)' <<<"$output")" = '["x.yml"]' ]
+}
