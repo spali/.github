@@ -57,7 +57,7 @@ check_mirror() {
   src=$(mktemp)
   tgt=$(mktemp)
   # shellcheck disable=SC2064 # expand now
-  trap "rm -f '$src' '$tgt'" RETURN
+  trap "rm -f '$src' '$tgt'; trap - RETURN" RETURN
   if ! ls_remote "$source" "$src"; then
     finding red check-failed "$target" "mirror-behind: cannot read source"
     return 0
@@ -68,7 +68,7 @@ check_mirror() {
     finding red check-failed "$target" "mirror-behind: cannot read target"
     return 0
   fi
-  n=$(awk 'NR == FNR {t[$1] = $2; next} t[$1] != $2 {n++} END {print n + 0}' "$tgt" "$src")
+  n=$(awk 'FILENAME == ARGV[1] {t[$1] = $2; next} t[$1] != $2 {n++} END {print n + 0}' "$tgt" "$src")
   ((n > 0)) || return 0
   age=$(((${MONITOR_NOW:-$(date -u +%s)} - $(date -u -d "$pushed" +%s)) / 3600))
   if ((age > hours + 24)); then
