@@ -77,6 +77,11 @@ jobs:
           ref: ${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
           path: .release-flow
           persist-credentials: false
+      - name: Check the version input
+        if: env.ON_MAIN == 'true'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: .release-flow/scripts/prepare.sh version
 
       - name: Update the draft
         id: draft

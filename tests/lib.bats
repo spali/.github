@@ -54,3 +54,11 @@ setup() {
   [ "$status" -eq 1 ]
   [ "$stderr" = "release not found" ]
 }
+
+@test "out rejects a value with a newline" {
+  export GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"
+  run --separate-stderr bash -c "source '$SCRIPTS/lib.sh'; out version \$'1.0.0\ntag=v9'"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: output version must be a single line" ]
+  [ ! -s "$GITHUB_OUTPUT" ]
+}

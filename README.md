@@ -120,6 +120,7 @@ suffix (`2.0.0-rc.1`) is published as a pre-release, otherwise as Latest.
 After every merge to `main` a pre-release `vX.Y.Z-next` (the draft's version)
 is built from that commit with the draft's notes. All older `-next`
 pre-releases and their tags are deleted first, so there is always at most one.
+Publishing a release deletes the `-next` pre-release too.
 
 ### Dev builds of pull requests
 
@@ -173,6 +174,9 @@ For a version the labels would not give (a release candidate, a planned 1.0.0, �
    gh workflow run Release --ref main -f version=2.0.0-rc.1
    ```
    The draft is now `v2.0.0-rc.1` (and the `-next` pre-release follows it).
+   The version is SemVer without `v` and without build metadata (`+…`); `-next`
+   at the end and `-pr.` anywhere are reserved for pre-releases. Other values
+   fail before the draft changes.
 2. Push exactly that tag on the head of `main` as in [make a release](#make-a-release).
    If something was merged in between, the draft is back at the computed
    version and the tag check fails: start again from step 1.
@@ -209,6 +213,7 @@ The run log names the reason:
 | `the draft is not up to date for main at X` | You tagged before the Release run on `main` finished. Wait until it is green, then re-run the failed run (`gh run rerun <id>`), the tag can stay. |
 | `main moved to X while building Y` | A merge happened during the build. Delete the tag, check the draft, tag the head of `main` again. |
 | `release N is no longer the draft for vA` | The draft was published or changed meanwhile. Check the releases page. |
+| `several draft releases for vA (ids …)` | Delete all but one of the drafts, then re-run the failed run. |
 
 Delete a tag: `git push --delete origin vA && git tag -d vA`.
 
@@ -373,4 +378,7 @@ The release workflow must keep the tag filters of the examples: `-next` and
 | `error: the version input only applies on main` | Start the workflow with `version` only on `main`. |
 | `error: branch X has no open pull request to main` | Dev builds need an open pull request from a branch of this repository. |
 | `error: no release assets found in dist` | The build job uploaded nothing as `release-assets`. |
+| `error: release assets must be files, dist/x is a directory` | Upload the files flat, without directories. |
+| `error: version must …` | The exception version is not allowed, see [release a different version](#release-a-different-version). |
+| Warning `pull request #N is closed, deleted the dev build …` | The pull request was closed during a dev build; nothing to do. |
 | Attestation skipped with a notice | Private repository, see [attestation](#attestation). |

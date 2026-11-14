@@ -9,6 +9,8 @@
 #                       env: GITHUB_REF_NAME, GITHUB_SHA, GH_REPO, GITHUB_WORKFLOW_REF
 #   prepare.sh pr       dev build of the pull request of the current branch
 #                       env: GITHUB_REF_NAME, GITHUB_SHA, DRAFT_VERSION, GH_REPO
+#   prepare.sh version  checks the exception version input (empty is fine)
+#                       env: VERSION
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 source "$(dirname "$0")/lib.sh"
@@ -33,7 +35,10 @@ prepare_release() {
   # drafts are not found by tag name, only in the release list
   # (--paginate prints one array per page, jq -s add joins them)
   releases=$(gh api "repos/$GH_REPO/releases" --paginate | jq -s 'add // []')
-  found_id=$(jq -r --arg tag "$tag" '.[] | select(.draft and .tag_name == $tag) | .id' <<<"$releases")
+  found_id=$(jq -r --arg tag "$tag" '[.[] | select(.draft and .tag_name == $tag) | .id] | join(", ")' <<<"$releases")
+  if [[ $found_id == *,* ]]; then
+    die "several draft releases for $tag (ids $found_id); delete all but one, then re-run this run"
+  fi
   if [[ -z $found_id ]]; then
     current=$(jq -r '[.[] | select(.draft) | .tag_name] | join(", ")' <<<"$releases")
     if [[ -n $current ]]; then
@@ -71,9 +76,25 @@ prepare_pr() {
   emit pr "$DRAFT_VERSION-pr.$number" "$GITHUB_SHA" "$number" ""
 }
 
+# check_version accepts SemVer 2.0.0 without build metadata ("+..." would not
+# match the tag filters of release.yml) and without the pre-release suffixes
+# that release.yml excludes from its tag filters.
+check_version() {
+  local version=${VERSION:-} id='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+  [[ -n $version ]] || return 0
+  local re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-'"$id"'(\.'"$id"')*)?$'
+  if [[ ! $version =~ $re ]]; then
+    die "version must be SemVer without \"v\" and without build metadata (e.g. 2.0.0-rc.1), got: $version"
+  fi
+  if [[ $version == *-next || $version == *-pr.* ]]; then
+    die "version must not end in -next or contain -pr. (reserved for pre-releases), got: $version"
+  fi
+}
+
 case ${1:-} in
 next) prepare_next ;;
 release) prepare_release ;;
 pr) prepare_pr ;;
-*) die "usage: prepare.sh next|release|pr" ;;
+version) check_version ;;
+*) die "usage: prepare.sh next|release|pr|version" ;;
 esac

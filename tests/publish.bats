@@ -124,3 +124,66 @@ draft_state() { # draft tag_name main_sha
   [ "$stderr" = "error: main moved to def while building abc, the draft now describes main; delete the tag and release again" ]
   [ -z "$(calls_matching 'release upload')" ]
 }
+
+@test "fails on a directory in the assets and publishes nothing" {
+  mkdir "$ASSETS_DIR/sub"
+  TAG=v1.0.0-next VERSION=1.0.0-next DRAFT_ID=42 run --separate-stderr "$PUBLISH" next
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: release assets must be files, $ASSETS_DIR/sub is a directory" ]
+  [ -z "$(calls_matching 'release')" ]
+}
+
+@test "release: deletes the -next pre-releases after publishing" {
+  draft_state true v1.0.0 abc
+  TAG=v1.0.0 VERSION=1.0.0 DRAFT_ID=42 run "$PUBLISH" release
+  [ "$status" -eq 0 ]
+  [ "$(calls_matching 'release delete')" = $'release delete v1.0.0-next --cleanup-tag --yes\nrelease delete v0.9.0-next --cleanup-tag --yes' ]
+  [ "$(grep -n 'release delete v1.0.0-next' "$GH_LOG" | cut -d: -f1)" -gt "$(grep -n 'api -X PATCH' "$GH_LOG" | cut -d: -f1)" ]
+}
+
+@test "release: a failed publish keeps the -next pre-releases" {
+  draft_state true v1.0.0 abc
+  gh_fail 'api -X PATCH *' 'HTTP 500'
+  TAG=v1.0.0 VERSION=1.0.0 DRAFT_ID=42 run "$PUBLISH" release
+  [ "$status" -eq 1 ]
+  [ -z "$(calls_matching 'release delete')" ]
+}
+
+@test "next: deletes a leftover tag without release before creating" {
+  echo '[{"ref":"refs/tags/v1.1.0-next"}]' | gh_respond 'api repos/spali/sandbox/git/matching-refs/tags/v1.1.0-next' -
+  TAG=v1.1.0-next VERSION=1.1.0-next DRAFT_ID=42 run "$PUBLISH" next
+  [ "$status" -eq 0 ]
+  [ "$(calls_matching 'api -X DELETE')" = "api -X DELETE repos/spali/sandbox/git/refs/tags/v1.1.0-next" ]
+  [ "$(grep -n 'release create' "$GH_LOG" | cut -d: -f1)" -gt "$(grep -n 'api -X DELETE' "$GH_LOG" | cut -d: -f1)" ]
+}
+
+@test "pr: deletes only the exact leftover tag" {
+  echo '[{"ref":"refs/tags/v1.0.0-pr.7"},{"ref":"refs/tags/v1.0.0-pr.77"}]' |
+    gh_respond 'api repos/spali/sandbox/git/matching-refs/tags/v1.0.0-pr.7' -
+  TAG=v1.0.0-pr.7 VERSION=1.0.0-pr.7 PR=7 run "$PUBLISH" pr
+  [ "$status" -eq 0 ]
+  [ "$(calls_matching 'api -X DELETE')" = "api -X DELETE repos/spali/sandbox/git/refs/tags/v1.0.0-pr.7" ]
+}
+
+@test "pr: no leftover tag, nothing to delete" {
+  echo '[{"ref":"refs/tags/v1.0.0-pr.77"}]' | gh_respond 'api repos/spali/sandbox/git/matching-refs/tags/v1.0.0-pr.7' -
+  TAG=v1.0.0-pr.7 VERSION=1.0.0-pr.7 PR=7 run "$PUBLISH" pr
+  [ "$status" -eq 0 ]
+  [ -z "$(calls_matching 'api -X DELETE')" ]
+}
+
+@test "pr: deletes the dev build again when the pull request was closed meanwhile" {
+  for state in CLOSED MERGED; do
+    : >"$GH_LOG"
+    : >"$GH_RESPONSES"
+    printf '%s\n' v0.9.0 | gh_respond 'release list *' -
+    echo "{\"state\":\"$state\"}" | gh_respond 'pr view 77 --json state' -
+    TAG=v1.0.0-pr.77 VERSION=1.0.0-pr.77 PR=77 run "$PUBLISH" pr
+    [ "$status" -eq 0 ]
+    [ "$(calls_matching 'release delete')" = "release delete v1.0.0-pr.77 --cleanup-tag --yes" ]
+    [ "$(grep -n 'release delete' "$GH_LOG" | cut -d: -f1)" -gt "$(grep -n 'release create' "$GH_LOG" | cut -d: -f1)" ]
+    [ -z "$(calls_matching 'pr comment')" ]
+    [ -z "$(calls_matching 'api -X PATCH')" ]
+    [[ $output == *"::warning::pull request #77 is ${state,,}, deleted the dev build v1.0.0-pr.77"* ]]
+  done
+}
