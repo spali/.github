@@ -1,0 +1,28 @@
+# Control file of the daily maintenance monitor. Public: never name a private
+# repository here (private entries live in the monitor's private config).
+version: 1
+lists:
+  exclusive:
+    - ["🚀 My stack", "🗃️ My stack Archive"]
+    - ["▶️ Constribution forks", "♻️ Customization forks"]
+  archive: "🗃️ My stack Archive"
+  mirrors: "👀  Mirrors"
+  forks: ["▶️ Constribution forks", "♻️ Customization forks"]
+# Mirrors kept in sync by a private mirror repository. spali/xmlstar-code is listed there
+# but does not exist (404), so it is left out.
+mirrors:
+  - target: spali/esp-idf
+    source: https://github.com/espressif/esp-idf.git
+    interval_hours: 24
+    script: mirrors/esp-idf.sh
+  - target: spali/knx.js
+    source: https://bitbucket.org/ekarak/knx.js
+    interval_hours: 24
+  - target: spali/live-build
+    source: https://anonscm.debian.org/git/debian-live/live-build.git
+    interval_hours: 24
+# Forks with their own sync workflow.
+forks:
+  - repo: spali/homeassistant-keba # weekly "Rebase Upstream" workflow
+    sync_interval_hours: 168
+ignores: []
