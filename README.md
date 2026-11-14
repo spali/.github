@@ -101,8 +101,13 @@ before you tag.
 A pushed tag `vX.Y.Z` (or `vX.Y.Z-<suffix>`) starts the release. It only
 continues if
 
-1. a **draft** with exactly this tag exists, and
-2. the tag points to the **head of `main`** (the commit the draft was computed from).
+1. a **draft** with exactly this tag exists,
+2. the tag points to the **head of `main`**, and
+3. the Release run for that commit on `main` finished successfully (so the
+   draft was computed from it).
+
+Before publishing, the draft and the head of `main` are checked again: a merge
+during the build stops the release.
 
 Otherwise nothing is built and the run fails with the reason. A version with a
 suffix (`2.0.0-rc.1`) is published as a pre-release, otherwise as Latest.
@@ -143,7 +148,9 @@ All commands run in the repository you release, with the [GitHub CLI](https://cl
 
 ### Make a release
 
-1. Open the releases page (`gh release list`) and read the draft `vX.Y.Z`.
+1. Wait until the Release run of the last merge to `main` is green
+   (`gh run list --workflow Release --branch main --limit 1`): it updates the draft.
+   Open the releases page (`gh release list`) and read the draft `vX.Y.Z`.
    Wrong section or version? See [fix the release notes](#fix-where-a-pull-request-appears-in-the-release-notes).
 2. Optionally add text to the draft (e.g. migration notes for breaking changes).
 3. Tag the head of `main` with exactly the draft's tag and push it:
@@ -180,7 +187,9 @@ For a version the labels would not give (a release candidate, a planned 1.0.0, �
 
 ### Fix where a pull request appears in the release notes
 
-- Before merging: fix the title, or change the label on the pull request.
+- Before merging: fix the title **and remove the old label** (labels are only
+  added, never removed automatically), or just change the label. The check
+  warns when a pull request has several release labels.
 - After merging: change the label on the merged pull request, then update the
   draft by starting the release workflow on `main`:
   `gh workflow run Release --ref main`.
@@ -194,13 +203,16 @@ The run log names the reason:
 | `no draft release for vA (current draft: vB)` | Wrong tag. Delete it, push `vB`. |
 | `no draft release for vA (no draft exists, …)` | Nothing merged since the last release. Delete the tag. |
 | `tag vA points to X but main is at Y` | Something was merged after you tagged, or you tagged an old commit. Check the draft again, delete the tag, tag the head of `main`. |
+| `the draft is not up to date for main at X` | You tagged before the Release run on `main` finished. Wait until it is green, then re-run the failed run (`gh run rerun <id>`), the tag can stay. |
+| `main moved to X while building Y` | A merge happened during the build. Delete the tag, check the draft, tag the head of `main` again. |
+| `release N is no longer the draft for vA` | The draft was published or changed meanwhile. Check the releases page. |
 
 Delete a tag: `git push --delete origin vA && git tag -d vA`.
 
 ### Verify a release
 
 ```sh
-gh release download vX.Y.Z --repo spali/<repo> --pattern '<file>'
+gh release download vX.Y.Z --repo spali/<repo> --pattern '<file>' --pattern checksums.txt
 gh attestation verify <file> --repo spali/<repo>
 # stricter: the file was attested by the shared publish workflow
 gh attestation verify <file> --repo spali/<repo> \
@@ -225,8 +237,11 @@ Works for any language. Steps 1–4 are files, 5–8 are settings.
    - [`release-go.yml`](examples/caller/release-go.yml): Go with goreleaser.
 
    Replace every `SHA # vX.Y.Z` with the commit and tag of the latest release
-   of this repository: `gh release view --repo spali/.github --json tagName`
-   and `git ls-remote https://github.com/spali/.github refs/tags/<tag>`.
+   of this repository:
+   ```sh
+   tag=$(gh release view --repo spali/.github --json tagName --jq .tagName)
+   gh api repos/spali/.github/commits/$tag --jq .sha   # the SHA to pin
+   ```
 2. **Build job:** see [interface](#interface). It builds from
    `needs.prepare.outputs.sha` with `needs.prepare.outputs.version` and
    uploads the files as the artifact `release-assets`. No `checksums.txt`.
@@ -245,9 +260,11 @@ Works for any language. Steps 1–4 are files, 5–8 are settings.
    release that first draft (or an [exception version](#release-a-different-version)).
 5. **Labels:**
    ```sh
-   for l in breaking-change:b60205 dependencies:0366d6 feature:a2eeef fix:d73a4a other:cfd3d7; do
-     gh label create "${l%%:*}" --color "${l##*:}" --force
-   done
+   gh label create breaking-change --color b60205 --force --description "Breaking change, next major version"
+   gh label create dependencies --color 0366d6 --force --description "Dependency update"
+   gh label create feature --color a2eeef --force --description "New feature, next minor version"
+   gh label create fix --color d73a4a --force --description "Bug fix"
+   gh label create other --color cfd3d7 --force --description "Maintenance, docs, CI, refactoring"
    ```
 6. **Actions settings:** Settings → Actions → General: workflow permissions
    *Read repository contents*, do not allow GitHub Actions to create or approve
@@ -285,7 +302,7 @@ Works for any language. Steps 1–4 are files, 5–8 are settings.
 `release.yml` in a repository has three jobs: `prepare` and `publish` call this
 repository, `build` is the repository's own.
 
-**`release-prepare.yml`** (needs `contents: write`, `pull-requests: read`)
+**`release-prepare.yml`** (needs `contents: write`, `pull-requests: read`, `actions: read`)
 
 | Input | |
 |---|---|

@@ -22,15 +22,23 @@ calls_matching() {
   grep "^$1" "$GH_LOG" || true
 }
 
+# draft_state registers the current state of draft 42 and main's head.
+draft_state() { # draft tag_name main_sha
+  printf '{"draft":%s,"tag_name":"%s"}\n' "$1" "$2" | gh_respond 'api repos/spali/sandbox/releases/4[23]' -
+  echo "$3" | gh_respond 'api repos/spali/sandbox/commits/main --jq .sha' -
+}
+
 @test "release: uploads to the draft and publishes it as latest" {
+  draft_state true v1.0.0 abc
   TAG=v1.0.0 VERSION=1.0.0 DRAFT_ID=42 run "$PUBLISH" release
   [ "$status" -eq 0 ]
   [ "$(calls_matching 'release upload')" = "release upload v1.0.0 $FILES --clobber" ]
   [ "$(calls_matching 'api -X PATCH')" = "api -X PATCH repos/spali/sandbox/releases/42 -F draft=false -f tag_name=v1.0.0 -F prerelease=false -f make_latest=true" ]
-  [ "$(sed -n 1p "$GH_LOG")" = "release upload v1.0.0 $FILES --clobber" ]
+  [ "$(calls_matching 'release upload' | wc -l)" -eq 1 ]
 }
 
 @test "release: a version with a suffix becomes a pre-release, not latest" {
+  draft_state true v2.0.0-rc.1 abc
   TAG=v2.0.0-rc.1 VERSION=2.0.0-rc.1 DRAFT_ID=43 run "$PUBLISH" release
   [ "$status" -eq 0 ]
   [ "$(calls_matching 'api -X PATCH')" = "api -X PATCH repos/spali/sandbox/releases/43 -F draft=false -f tag_name=v2.0.0-rc.1 -F prerelease=true -f make_latest=false" ]
@@ -67,13 +75,23 @@ calls_matching() {
   [[ $body == *"https://github.com/spali/sandbox/releases/tag/v1.0.0-pr.77"* ]]
 }
 
-@test "pr: updates an existing dev build comment" {
-  echo 991 | gh_respond 'api repos/spali/sandbox/issues/77/comments --paginate --jq *' -
+@test "pr: updates the existing dev build comment of the bot" {
+  echo '[{"id":990,"user":{"login":"someone"},"body":"hi"},{"id":991,"user":{"login":"github-actions[bot]"},"body":"<!-- release-flow:pr-dev -->\nold"}]' |
+    gh_respond 'api repos/spali/sandbox/issues/77/comments --paginate' -
   TAG=v1.0.0-pr.77 VERSION=1.0.0-pr.77 PR=77 run "$PUBLISH" pr
   [ "$status" -eq 0 ]
   [ -z "$(calls_matching 'pr comment')" ]
   patch=$(calls_matching 'api -X PATCH')
   [[ $patch == "api -X PATCH repos/spali/sandbox/issues/comments/991 -F body=@"* ]]
+}
+
+@test "pr: ignores a marker comment written by someone else" {
+  echo '[{"id":990,"user":{"login":"attacker"},"body":"<!-- release-flow:pr-dev -->\nevil link"}]' |
+    gh_respond 'api repos/spali/sandbox/issues/77/comments --paginate' -
+  TAG=v1.0.0-pr.77 VERSION=1.0.0-pr.77 PR=77 run "$PUBLISH" pr
+  [ "$status" -eq 0 ]
+  [ -z "$(calls_matching 'api -X PATCH')" ]
+  [[ $(calls_matching 'pr comment') == "pr comment 77 --body-file "* ]]
 }
 
 @test "unknown subcommand" {
@@ -88,4 +106,21 @@ calls_matching() {
   [ "$status" -eq 1 ]
   [ "$stderr" = "error: no release assets found in $ASSETS_DIR" ]
   [ -z "$(calls_matching 'release')" ]
+}
+
+@test "release: the draft was published or retagged meanwhile" {
+  draft_state false v1.0.0 abc
+  TAG=v1.0.0 VERSION=1.0.0 DRAFT_ID=42 run --separate-stderr "$PUBLISH" release
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: release 42 is no longer the draft for v1.0.0 (draft=false, tag v1.0.0)" ]
+  [ -z "$(calls_matching 'release upload')" ]
+  [ -z "$(calls_matching 'api -X PATCH')" ]
+}
+
+@test "release: main moved on while building" {
+  draft_state true v1.0.0 def
+  TAG=v1.0.0 VERSION=1.0.0 DRAFT_ID=42 run --separate-stderr "$PUBLISH" release
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: main moved to def while building abc, the draft now describes main; delete the tag and release again" ]
+  [ -z "$(calls_matching 'release upload')" ]
 }

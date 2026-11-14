@@ -6,6 +6,7 @@ setup() {
   load helpers/gh-stub
   stub_gh
   export GH_REPO=spali/sandbox GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"
+  export GITHUB_WORKFLOW_REF=spali/sandbox/.github/workflows/release.yml@refs/tags/v1.0.0
   : >"$GITHUB_OUTPUT"
   PREPARE="$BATS_TEST_DIRNAME/../scripts/prepare.sh"
   FIXTURES="$BATS_TEST_DIRNAME/fixtures"
@@ -18,6 +19,14 @@ outputs() {
 main_at() {
   echo "$1" | gh_respond 'api repos/spali/sandbox/commits/main --jq .sha' -
 }
+
+# main_run registers the runs of the release workflow for main's head.
+main_run() { # sha json
+  echo "$2" | gh_respond "api repos/spali/sandbox/actions/runs?branch=main&head_sha=$1&per_page=100" -
+}
+
+ok_run='{"workflow_runs":[{"path":".github/workflows/release.yml","event":"push","conclusion":"success"}]}'
+
 
 @test "next: pre-release from the draft version" {
   DRAFT_VERSION=1.0.0 DRAFT_ID=42 GITHUB_SHA=abc run "$PREPARE" next
@@ -34,6 +43,7 @@ main_at() {
 @test "release: tag matches the draft and main" {
   gh_respond 'api repos/spali/sandbox/releases --paginate' "$FIXTURES/releases-draft-v1.0.0.json"
   main_at abc
+  main_run abc "$ok_run"
   GITHUB_REF_NAME=v1.0.0 GITHUB_SHA=abc run "$PREPARE" release
   [ "$status" -eq 0 ]
   [ "$(outputs)" = $'kind=release\nversion=1.0.0\ntag=v1.0.0\nsha=abc\npr=\ndraft-id=42' ]
@@ -43,6 +53,7 @@ main_at() {
 @test "release: pre-release version from an exception draft" {
   gh_respond 'api repos/spali/sandbox/releases --paginate' "$FIXTURES/releases-draft-v2.0.0-rc.1.json"
   main_at abc
+  main_run abc "$ok_run"
   GITHUB_REF_NAME=v2.0.0-rc.1 GITHUB_SHA=abc run "$PREPARE" release
   [ "$status" -eq 0 ]
   [ "$(outputs)" = $'kind=release\nversion=2.0.0-rc.1\ntag=v2.0.0-rc.1\nsha=abc\npr=\ndraft-id=43' ]
@@ -112,7 +123,26 @@ main_at() {
   { echo '[{"id":40,"tag_name":"v0.9.0","draft":false}]'; echo '[{"id":42,"tag_name":"v1.0.0","draft":true}]'; } |
     gh_respond 'api repos/spali/sandbox/releases --paginate' -
   main_at abc
+  main_run abc "$ok_run"
   GITHUB_REF_NAME=v1.0.0 GITHUB_SHA=abc run "$PREPARE" release
   [ "$status" -eq 0 ]
   grep -qx 'draft-id=42' "$GITHUB_OUTPUT"
+}
+
+@test "release: the draft is not updated for main's head yet" {
+  gh_respond 'api repos/spali/sandbox/releases --paginate' "$FIXTURES/releases-draft-v1.0.0.json"
+  main_at abc
+  main_run abc '{"workflow_runs":[{"path":".github/workflows/release.yml","event":"push","conclusion":null},{"path":".github/workflows/other.yml","event":"push","conclusion":"success"}]}'
+  GITHUB_REF_NAME=v1.0.0 GITHUB_SHA=abc run --separate-stderr "$PREPARE" release
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: the draft is not up to date for main at abc: no successful run of .github/workflows/release.yml for it yet; wait for it, then re-run this run" ]
+  [ -z "$(outputs)" ]
+}
+
+@test "release: a successful dispatch run on main counts" {
+  gh_respond 'api repos/spali/sandbox/releases --paginate' "$FIXTURES/releases-draft-v1.0.0.json"
+  main_at abc
+  main_run abc '{"workflow_runs":[{"path":".github/workflows/release.yml","event":"workflow_dispatch","conclusion":"success"}]}'
+  GITHUB_REF_NAME=v1.0.0 GITHUB_SHA=abc run "$PREPARE" release
+  [ "$status" -eq 0 ]
 }
