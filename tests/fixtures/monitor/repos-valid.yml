@@ -1,0 +1,20 @@
+version: 1
+lists:
+  exclusive:
+    - ["🚀 My stack", "🗃️ My stack Archive"]
+    - ["▶️ Constribution forks", "♻️ Customization forks"]
+  archive: "🗃️ My stack Archive"
+  mirrors: "👀  Mirrors"
+  forks: ["▶️ Constribution forks", "♻️ Customization forks"]
+mirrors:
+  - target: spali/mirror-a
+    source: https://example.org/a.git
+    interval_hours: 24
+    script: mirrors/a.sh
+forks:
+  - repo: spali/fork-a
+    sync_interval_hours: 168
+ignores:
+  - repo: spali/old-thing
+    check: main-red
+    reason: archived soon

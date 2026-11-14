@@ -38,6 +38,20 @@ jobs:
       - name: Run tests
         run: bats tests/
 
+  config:
+    name: config
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Validate repos.yml
+        run: scripts/monitor-config.sh validate repos.yml
+      - name: Check that repos.yml names only public repositories
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/monitor-config.sh public-check repos.yml
+
   actionlint:
     name: actionlint
     runs-on: ubuntu-latest
