@@ -148,3 +148,39 @@ gh_fail_raw() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+@test "parse_failed records a check-failed finding" {
+  parse_failed settings-merge spali/x
+  [ "$(jq -r '[.level, .check, .repo, .message] | join("|")' "$FINDINGS")" = "red|check-failed|spali/x|settings-merge: cannot parse API response" ]
+}
+
+@test "paged reads all pages and keeps only the given fields" {
+  printf '[{"a":1,"x":"big"}]\n[{"a":2,"x":"big"}]\n' | gh_respond '*repos/spali/x/things*' -
+  paged main-red spali/x 'repos/spali/x/things?per_page=100' '{a}' "$BATS_TEST_TMPDIR/out.json"
+  [ "$(jq -c . "$BATS_TEST_TMPDIR/out.json")" = '[{"a":1},{"a":2}]' ]
+  [ ! -s "$FINDINGS" ]
+}
+
+@test "paged records check-failed for unparsable JSON and a failing call" {
+  echo 'not json' | gh_respond '*repos/spali/x/bad*' -
+  run paged main-red spali/x 'repos/spali/x/bad' '{a}' "$BATS_TEST_TMPDIR/out.json"
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.message' "$FINDINGS")" = "main-red: cannot parse API response" ]
+  : >"$FINDINGS"
+  gh_fail '*repos/spali/x/boom*' 'boom (HTTP 500)'
+  run paged main-red spali/x 'repos/spali/x/boom' '{a}' "$BATS_TEST_TMPDIR/out.json"
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.check' "$FINDINGS")" = check-failed ]
+}
+
+@test "json_out stores jq output in the variable" {
+  json_out main-red spali/x result -r '.a' <<<'{"a":"v"}'
+  [ "$result" = v ]
+  [ ! -s "$FINDINGS" ]
+}
+
+@test "json_out records check-failed on a jq failure" {
+  run json_out main-red spali/x result -r '.a' <<<'not json'
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.message' "$FINDINGS")" = "main-red: cannot parse API response" ]
+}

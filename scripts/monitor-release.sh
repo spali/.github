@@ -14,35 +14,6 @@ MIN_PIN_AGE_DAYS=7
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-# parse_failed CHECK REPO records an unreadable API response.
-parse_failed() {
-  finding red check-failed "$2" "$1: cannot parse API response"
-}
-
-# paged CHECK REPO PATH FIELDS FILE reads all pages of PATH, keeps only FIELDS
-# (a jq object construction) and writes the JSON array to FILE.
-paged() {
-  local body trimmed
-  body=$(fetch "$1" "$2" "$3" --paginate) || return 1
-  if ! trimmed=$(jq -s "add // [] | map($4)" 2>/dev/null <<<"$body"); then
-    parse_failed "$1" "$2"
-    return 1
-  fi
-  printf '%s\n' "$trimmed" >"$5"
-}
-
-# json_out CHECK REPO OUTVAR JQ_ARGS... runs jq, stores its output in OUTVAR.
-# On failure records check-failed and returns 1.
-json_out() {
-  local check=$1 repo=$2 var=$3 result
-  shift 3
-  if ! result=$(jq "$@" 2>/dev/null); then
-    parse_failed "$check" "$repo"
-    return 1
-  fi
-  printf -v "$var" '%s' "$result"
-}
-
 # check_releases REPO prints findings from $WORK/{releases,pulls,tags}.json
 # (a missing pulls/tags file skips that check).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
