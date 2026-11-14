@@ -1,0 +1,5 @@
+[
+  {"name":"spali/pub","private":false,"fork":false,"default_branch":"main","pushed_at":"2026-11-01T00:00:00Z","central":true,"pins":[],"parent":null},
+  {"name":"spali/other","private":false,"fork":false,"default_branch":"main","pushed_at":"2026-11-01T00:00:00Z","central":true,"pins":[],"parent":null},
+  {"name":"spali/secret-repo","private":true,"fork":false,"default_branch":"main","pushed_at":"2026-11-01T00:00:00Z","central":true,"pins":[],"parent":null}
+]

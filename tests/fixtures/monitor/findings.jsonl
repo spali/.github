@@ -1,0 +1,4 @@
+{"level":"red","check":"settings-merge","repo":"spali/pub","message":"merge commits allowed"}
+{"level":"red","check":"main-red","repo":"spali/secret-repo","message":"CI failed: https://api.github.com/repos/spali/secret-repo/actions/runs"}
+{"level":"info","check":"list-none","repo":"spali/other","message":"not in a list | really"}
+{"level":"skip","check":"code-scanning-alert","repo":"spali/pub","message":"no analysis found"}
