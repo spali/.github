@@ -139,8 +139,8 @@ repositories; there the step is skipped with a notice.
 
 Each repository has two rulesets, without any bypass (also not for the owner):
 
-- `main`: changes only through pull requests (no review required), required
-  checks must pass, no force push, no deletion.
+- `main`: changes only through pull requests (no review required, merge by
+  rebase or squash), required checks must pass, no force push, no deletion.
 - release tags `v*` (except `v*-next`, `v*-pr.*`): cannot be moved. Deleting
   is allowed, so a tag that failed the tag check can be removed. **Never delete
   the tag of a published release.**
@@ -269,13 +269,21 @@ Works for any language. Steps 1–4 are files, 5–8 are settings.
    gh label create fix --color d73a4a --force --description "Bug fix"
    gh label create other --color cfd3d7 --force --description "Maintenance, docs, CI, refactoring"
    ```
-6. **Actions settings:** Settings → Actions → General: workflow permissions
-   *Read repository contents*, do not allow GitHub Actions to create or approve
-   pull requests.
+6. **Repository settings:** merge with rebase or squash only (the squash
+   commit takes the pull request title), delete branches after merge,
+   Dependabot alerts and private vulnerability reporting on. Actions: workflow
+   permissions *Read repository contents*, GitHub Actions may not create or
+   approve pull requests.
    ```sh
+   gh api -X PATCH repos/spali/<repo> -F allow_merge_commit=false \
+     -F allow_squash_merge=true -F allow_rebase_merge=true -F delete_branch_on_merge=true \
+     -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=COMMIT_MESSAGES
+   gh api -X PUT repos/spali/<repo>/vulnerability-alerts
+   gh api -X PUT repos/spali/<repo>/private-vulnerability-reporting
    gh api -X PUT repos/spali/<repo>/actions/permissions/workflow \
      -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false
    ```
+   Turn off what the repository does not use (wiki, projects, discussions).
 7. **Rulesets** (after the workflows ran once, so the check names exist).
    Put the repository's own required checks next to `pr / check`:
    ```sh
@@ -286,7 +294,7 @@ Works for any language. Steps 1–4 are files, 5–8 are settings.
       {"type": "pull_request", "parameters": {"required_approving_review_count": 0,
         "dismiss_stale_reviews_on_push": false, "require_code_owner_review": false,
         "require_last_push_approval": false, "required_review_thread_resolution": false,
-        "allowed_merge_methods": ["rebase"]}},
+        "allowed_merge_methods": ["rebase", "squash"]}},
       {"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": false,
         "required_status_checks": [{"context": "pr / check"}]}}]}
    EOF
