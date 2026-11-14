@@ -17,14 +17,17 @@ source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 REPORT_JQ='
 $inv[0] as $inv | $cfg[0] as $cfg | . as $f
 | ($inv | map({key: .name, value: .private}) | from_entries) as $pm
-| ($inv | map(select(.private) | .name)) as $privs
+| ([(($cfg.mirrors // [])[] | select(.private) | .target),
+     (($cfg.forks // [])[] | select(.private) | .repo),
+     (($cfg.ignores // [])[] | select(.private) | .repo)]) as $cfgprivs
+| (($inv | map(select(.private) | .name)) + $cfgprivs | unique) as $privs
 | ($privs | map(split("/")[1:] | join("/"))) as $shorts
 | def lb: "[A-Za-z0-9._-]";
   def rb: "[A-Za-z0-9_-]";
   def esc: gsub("\\."; "\\.");
   def maskstr($n): gsub("(?<!\(lb))\($n | esc)(?!\(rb))"; "[private]"; "i");
   def mask: if $unmask then . else reduce (($privs + $shorts)[]) as $n (.; maskstr($n)) end;
-  def is_priv: . as $r | $r != null and ($unmask | not) and ((($pm | has($r)) | not) or $pm[$r]);
+  def is_priv: . as $r | $r != null and ($unmask | not) and ((($pm | has($r)) | not) or $pm[$r] or ($cfgprivs | index($r) != null));
   def cell: mask | gsub("\\|"; "\\|") | gsub("[\\r\\n]+"; " ");
   def matches($i): .repo == $i.repo and .check == $i.check;
 

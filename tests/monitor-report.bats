@@ -179,3 +179,15 @@ J
   [[ $stderr != *secret-repo* ]]
   [[ $output != *secret-repo* ]]
 }
+
+@test "repos named by private config entries are masked even when not in the inventory" {
+  config <<'J'
+{"ignores":[{"repo":"spali/hidden","check":"adoption","reason":"r","private":true}]}
+J
+  findings <<'J'
+{"level":"red","check":"main-red","repo":"spali/pub","message":"see spali/hidden for details"}
+J
+  run "$REPORT"
+  [[ $output == *"[private]"* ]]
+  [[ $output != *hidden* ]]
+}
