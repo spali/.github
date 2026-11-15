@@ -238,7 +238,7 @@ check_stub() {
 @test "an unknown phase is an error" {
   phase nope
   [ "$status" -eq 2 ]
-  [ "$stderr" = "error: unknown phase nope (config inventory release settings health forks mirrors lists report issue)" ]
+  [ "$stderr" = "error: unknown phase nope (config inventory matrix release settings health forks mirrors lists report issue)" ]
 }
 
 @test "config phase reports a valid control file" {
