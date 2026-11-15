@@ -88,13 +88,17 @@ sent() { cat "$GH_INPUTS/$1"; }
   issues '[]'
   run "$SCRIPT" "$REPORT" "$TITLE"
   [ "$status" -eq 0 ]
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$GH_TOKENS")" -eq 3 ]
   [ "$(sort -u "$GH_TOKENS")" = issue-token ]
-  [ "$GH_TOKEN" = read-token ]
 }
 
 @test "the body never goes through argv" {
   issues '[]'
   run "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  [ -s "$GH_INPUTS/3" ]
+  [[ "$(sent 3 | jq -r .body)" == *"red · 0 info · 0 skipped"* ]]
   [[ "$(gh_calls)" != *"red · 0 info · 0 skipped"* ]]
 }
 
@@ -140,6 +144,20 @@ long_report() {
   kept=$(grep -c '^line ' "$BATS_TEST_TMPDIR/body.md")
   [ "$kept" -lt 1000 ]
   [ "$(grep '^line ' "$BATS_TEST_TMPDIR/body.md" | tail -n1)" = "$(sed -n "$((kept + 2))p" "$REPORT")" ]
+}
+
+@test "a complete last line is kept when the cut falls right after a newline" {
+  issues '[]'
+  tail2=$(printf '\n%s\n\nUpdated 2026-11-15T05:17:00Z\n' '… truncated, see the run summary.' | wc -c)
+  budget=$((65536 - tail2))
+  { head -c "$((budget - 1))" /dev/zero | tr '\0' k; echo
+    for i in 1 2 3; do printf 'extra %s %0100d\n' "$i" 0; done; } >"$REPORT"
+  run "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  sent 3 | jq -j .body >"$BATS_TEST_TMPDIR/body.md"
+  [ "$(stat -c %s "$BATS_TEST_TMPDIR/body.md")" -eq 65536 ]
+  [ "$(head -c 10 "$BATS_TEST_TMPDIR/body.md")" = kkkkkkkkkk ]
+  run ! grep -q '^extra' "$BATS_TEST_TMPDIR/body.md"
 }
 
 @test "a report that just fits is not cut" {
