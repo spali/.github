@@ -1,6 +1,9 @@
 # Test helper: a fake `gh` on PATH.
 #
-# Every call is logged as one line ("$*") to $GH_LOG.
+# Every call is logged as one line ("$*") to $GH_LOG. The file named by an
+# --input argument is copied to $GH_INPUTS/<n> (n = line number in the log,
+# so the body sent by call n is $GH_INPUTS/n) and the GH_TOKEN of each call
+# is logged to $GH_TOKENS.
 # Responses are registered with gh_respond '<glob>' <file|->: the first glob
 # that matches the full argument string wins, its file is printed (use - to
 # read the response from stdin). gh_fail '<glob>' <message> makes a matching
@@ -10,12 +13,23 @@
 stub_gh() {
   export GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   export GH_RESPONSES="$BATS_TEST_TMPDIR/gh.responses"
+  export GH_INPUTS="$BATS_TEST_TMPDIR/gh.inputs"
+  export GH_TOKENS="$BATS_TEST_TMPDIR/gh.tokens"
+  mkdir -p "$GH_INPUTS"
   : >"$GH_LOG"
+  : >"$GH_TOKENS"
   : >"$GH_RESPONSES"
   mkdir -p "$BATS_TEST_TMPDIR/bin"
   cat >"$BATS_TEST_TMPDIR/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_LOG"
+printf '%s\n' "${GH_TOKEN:-}" >>"$GH_TOKENS"
+args=("$@")
+for i in "${!args[@]}"; do
+  if [[ ${args[$i]} == --input ]]; then
+    cp "${args[$((i + 1))]}" "$GH_INPUTS/$(wc -l <"$GH_LOG")"
+  fi
+done
 while IFS=$'\t' read -r kind glob arg; do
   # shellcheck disable=SC2053 # glob match on purpose
   if [[ "$*" == $glob ]]; then
