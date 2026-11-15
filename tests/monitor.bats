@@ -215,3 +215,200 @@ EOS
   [[ $output == *"1 red"* ]]
   [ -z "$stderr" ]
 }
+
+# --- phases (one workflow step each) -------------------------------------
+
+# phase PHASE runs one phase in the shared work dir.
+phase() {
+  run --separate-stderr env MONITOR_WORK="$BATS_TEST_TMPDIR/work" "$MONITOR" "$@"
+}
+
+# check_stub NAME BODY: a check script that sources the lib and runs BODY.
+check_stub() {
+  printf '#!/usr/bin/env bash\nsource "$(dirname "$0")/monitor-lib.sh"\n%s\n' "$2" \
+    >"$MONITOR_SCRIPTS_DIR/monitor-$1.sh"
+}
+
+@test "a phase needs MONITOR_WORK" {
+  run --separate-stderr "$MONITOR" config
+  [ "$status" -eq 2 ]
+  [ "$stderr" = "error: MONITOR_WORK is required for a single phase" ]
+}
+
+@test "an unknown phase is an error" {
+  phase nope
+  [ "$status" -eq 2 ]
+  [ "$stderr" = "error: unknown phase nope (config inventory release settings health forks mirrors lists report issue)" ]
+}
+
+@test "config phase reports a valid control file" {
+  phase config
+  [ "$status" -eq 0 ]
+  [ "$output" = "✓ public.yml is valid" ]
+  [ -s "$BATS_TEST_TMPDIR/work/config.json" ]
+}
+
+@test "config phase fails with an annotation for an invalid control file" {
+  printf 'version: 2\n' >"$MONITOR_CONFIG"
+  phase config
+  [ "$status" -eq 1 ]
+  [[ ${lines[0]} == "::error title=config-invalid::public.yml: "*"version must be 1"* ]]
+  [ "$(jq -c . "$BATS_TEST_TMPDIR/work/config.json")" = '{"version":1,"lists":{},"mirrors":[],"forks":[],"ignores":[]}' ]
+}
+
+@test "inventory phase prints the counts" {
+  phase config
+  phase inventory
+  [ "$status" -eq 0 ]
+  [ "$output" = "✓ $(jq length "$FIX/inventory.json") repositories, $(jq 'map(select(.central)) | length' "$FIX/inventory.json") central, $(jq 'map(select(.fork)) | length' "$FIX/inventory.json") forks" ]
+}
+
+@test "inventory phase fails when the script crashes" {
+  printf '#!/usr/bin/env bash\nexit 2\n' >"$MONITOR_SCRIPTS_DIR/monitor-repos.sh"
+  phase config
+  phase inventory
+  [ "$status" -eq 1 ]
+  [[ $output == *"::error title=check-failed::monitor-repos.sh crashed"* ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/work/inventory.json")" = "[]" ]
+}
+
+@test "a check phase lists clean repos and groups repos with findings" {
+  cat >"$MONITOR_CONFIG" <<'EOS'
+version: 1
+ignores:
+  - {repo: spali/c, check: main-red, reason: known}
+EOS
+  check_stub health 'checked spali/a; checked spali/b; checked spali/c
+finding red main-red spali/b "main is red"
+finding info renovate-stale spali/b "PR #1 open"
+finding skip code-scanning-alert spali/b "not enabled"
+finding red main-red spali/c "also red"
+finding red check-failed - "health: boom"'
+  phase config
+  phase inventory
+  phase health
+  [ "$status" -eq 1 ]
+  [ -z "$stderr" ]
+  expected=$(cat <<'EOS'
+::group::✗ (no repository): 1 red
+  ✗ check-failed: health: boom
+::endgroup::
+✓ spali/a
+::group::✗ spali/b: 1 red, 1 info, 1 skipped
+  ✗ main-red: main is red
+  ℹ renovate-stale: PR #1 open
+  – code-scanning-alert: not enabled
+::endgroup::
+::group::◌ spali/c: 1 ignored
+  ◌ main-red: also red (ignored: known)
+::endgroup::
+::error title=check-failed::health: boom
+::error title=main-red::spali/b: main is red
+health: 3 repositories · 2 red · 1 info · 1 skipped · 1 ignored
+EOS
+)
+  [ "$output" = "$expected" ]
+}
+
+@test "a clean check phase exits 0" {
+  check_stub release 'checked spali/a
+finding info pin-behind spali/a "pinned to v1"'
+  phase config
+  phase inventory
+  phase release
+  [ "$status" -eq 0 ]
+  [ "${lines[-1]}" = "release: 1 repositories · 0 red · 1 info · 0 skipped · 0 ignored" ]
+}
+
+@test "a crashing check phase is red and hides the script output" {
+  printf '#!/usr/bin/env bash\necho secret\necho secret >&2\nexit 3\n' >"$MONITOR_SCRIPTS_DIR/monitor-forks.sh"
+  phase config
+  phase inventory
+  phase forks
+  [ "$status" -eq 1 ]
+  [[ $output == *"::error title=check-failed::monitor-forks.sh crashed"* ]]
+  [[ $output != *secret* ]]
+  [[ $stderr != *secret* ]]
+}
+
+@test "annotation data escapes percent and newlines" {
+  check_stub lists 'finding red adoption spali/a "50% done
+next line"'
+  phase config
+  phase inventory
+  phase lists
+  [[ $output == *"::error title=adoption::spali/a: 50%25 done%0Anext line"* ]]
+}
+
+@test "findings of earlier phases are not repeated" {
+  check_stub release 'finding red orphan-tag spali/a x'
+  check_stub settings 'checked spali/a'
+  phase config
+  phase inventory
+  phase release
+  phase settings
+  [ "$status" -eq 0 ]
+  [ "$output" = $'✓ spali/a\nsettings: 1 repositories · 0 red · 0 info · 0 skipped · 0 ignored' ]
+}
+
+@test "report phase writes the summary and does not fail for red findings" {
+  export GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary.md"
+  check_stub lists 'finding red adoption spali/a x'
+  phase config
+  phase inventory
+  phase lists
+  phase report
+  [ "$status" -eq 0 ]
+  grep -q '^1 red' "$GITHUB_STEP_SUMMARY"
+  [ "$output" = "✓ report: 1 red · 0 info · 0 skipped" ]
+}
+
+@test "report phase fails when the report script crashes" {
+  printf '#!/usr/bin/env bash\nexit 2\n' >"$MONITOR_SCRIPTS_DIR/monitor-report.sh"
+  phase config
+  phase inventory
+  phase report
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: monitor-report.sh crashed" ]
+}
+
+@test "issue phase updates the issue with the title of the report" {
+  export MONITOR_ISSUE_REPO=spali/ctl
+  check_stub lists 'finding red adoption spali/a x'
+  phase config
+  phase inventory
+  phase lists
+  phase report
+  phase issue
+  [ "$status" -eq 0 ]
+  [ "$(sed -n 2p "$BATS_TEST_TMPDIR/issue.args")" = "Maintenance monitor: 1 red · 0 info" ]
+  [ "$output" = "✓ overview issue updated in spali/ctl" ]
+}
+
+@test "issue phase without MONITOR_ISSUE_REPO does nothing" {
+  phase config
+  phase inventory
+  phase report
+  phase issue
+  [ "$status" -eq 0 ]
+  [ "$output" = "– no MONITOR_ISSUE_REPO, overview issue not updated" ]
+  [ ! -e "$BATS_TEST_TMPDIR/issue.args" ]
+}
+
+@test "issue phase fails when the update fails" {
+  export MONITOR_ISSUE_REPO=spali/ctl ISSUE_FAIL=1
+  phase config
+  phase inventory
+  phase report
+  phase issue
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: updating issue #1 failed: boom (HTTP 422)" ]
+}
+
+@test "the full run does not leave the work dir or the log lines behind" {
+  check_stub health 'checked spali/a'
+  run --separate-stderr "$MONITOR"
+  [ "$status" -eq 0 ]
+  [[ $output != *"✓ spali/a"* ]]
+  [[ $output != *"::"* ]]
+}
