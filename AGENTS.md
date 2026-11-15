@@ -26,10 +26,13 @@ you should fix the document that is wrong.
 - put community health files (`FUNDING.yml`, `CONTRIBUTING.md`,
   `SECURITY.md`, issue templates, …) into `spali/.github` (they would become
   defaults for every repository of the owner);
-- make the maintenance monitor write or change anything on GitHub (only `GET`
-  requests and GraphQL queries);
-- print or commit the name of a private repository: not in `repos.yml`, logs,
-  summaries, PRs or commits (private entries live in the private control file);
+- make the maintenance monitor write anything on GitHub except its overview
+  issue (and the label `maintenance-monitor`) in the calling repository, with
+  that repository's `GITHUB_TOKEN`; everything else it does is `GET` requests
+  and GraphQL queries with the read-only app token;
+- put the name of a private repository into `spali/.github`: not in code, docs,
+  tests, fixtures, PRs or commits (say "the private control repository"; the
+  monitor's control file lives there);
 - let a check script write to stdout/stderr; check scripts write only to
   `$FINDINGS`;
 - pass API JSON through argv (`jq --arg`/`--argjson`): responses can exceed the
@@ -70,12 +73,15 @@ pull request closed
 | `.github/workflows/pr.yml` | reusable; jobs `label`, `check`, `cleanup` |
 | `.github/workflows/release-prepare.yml` | reusable; job `prepare`; outputs below |
 | `.github/workflows/release-publish.yml` | reusable; job `publish` |
+| `.github/workflows/monitor.yml` | reusable; job `monitor`; run by the private control repository |
+| `.github/workflows/monitor-config.yml` | reusable; job `config`; validates the control file |
 | `scripts/lib.sh` | `die`, `out`, `need_env` |
 | `scripts/check-pr.sh` | title regex, release label present, warning on several |
 | `scripts/prepare.sh` | `next` / `release` / `pr`: decide kind, version, tag, sha |
 | `scripts/checksums.sh` | `checksums.txt` over the build files |
 | `scripts/publish.sh` | `release` / `next` / `pr`: create, replace, publish |
 | `scripts/cleanup-pr.sh` | delete `*-pr.<N>` releases and tags |
+| `scripts/monitor*.sh` | maintenance monitor: `monitor.sh` runs `monitor-repos.sh` (inventory), the check scripts, `monitor-report.sh` and `monitor-issue.sh` |
 | `tests/*.bats`, `tests/helpers/gh-stub.bash` | bats tests with a fake `gh` |
 | `examples/caller/*.yml` | files a repository copies |
 
@@ -107,6 +113,14 @@ Triggers of `release.yml`: push to `main`; push of tags
 edited, synchronize, labeled, unlabeled, closed` on base `main`, permissions
 `contents: write`, `pull-requests: write`.
 
+The reusable monitor workflows are part of the interface too.
+`monitor.yml` (job `monitor`): inputs `app-client-id` (required) and `config`
+(default `repos.yml`), secret `app-key` (required), caller permissions
+`contents: read`, `issues: write`; it has no concurrency group and no
+schedule, the caller owns both. `monitor-config.yml` (job `config`): input
+`config`, permission `contents: read`. Renaming or removing an input or
+secret needs a new major version.
+
 The reusable workflows check out `spali/.github` at `job.workflow_sha` (the
 commit the caller pinned) and load `release-drafter.yml` from the same commit.
 So a caller always runs one consistent version of scripts and config.
@@ -136,6 +150,8 @@ reason here needs the owner's decision.
 | Rulesets **without bypass**, tag ruleset blocks **update** only | Owner's decision; deleting must stay possible to retry a failed tag check | Admin bypass; blocking deletion |
 | Logic in Bash scripts with bats tests and a fake `gh` | Testable without GitHub; the workflows stay thin | Inline workflow scripts |
 | `job.workflow_sha` with a fallback that fails checkout | Pinned scripts; never silently run the default branch | `github.workflow_sha` (that is the caller's) |
+| The monitor runs in a **private control repository** that calls reusable workflows; `spali/.github` only provides code | Private repository names can appear in logs, summary and issue without masking; the control file stays private | Cron in this public repository with masking and a private file merged in |
+| The overview issue is written with the caller's `GITHUB_TOKEN`, everything else read with the read-only app token | The app can never write; the only write is scoped to one repository | An app with `issues: write` on all repositories |
 
 ## 4. Procedures
 
@@ -258,23 +274,22 @@ Do not do this yourself.
 
 ### 4.9 Handle a monitor finding
 
-The workflow `monitor.yml` (daily, 05:17 UTC) fails while a red finding is
-open. Code: `scripts/monitor*.sh`; control file: `repos.yml`.
+The workflow `monitor.yml` runs daily (05:17 UTC) from the private control
+repository, which also holds the control file `repos.yml`. The run fails while
+a red finding is open. Code: `scripts/monitor*.sh` in `spali/.github`.
 
-1. Open the failed run and read the job summary. Each finding has a check id
-   (section 5), a repository and a detail. Private repositories only appear as
-   counts.
-2. For private details run locally:
-   `GH_TOKEN=$(gh auth token) MONITOR_UNMASK=1 scripts/monitor.sh`
-   (add `MONITOR_PRIVATE_CONFIG=<file>` for the private control file). Never
-   paste its output into a PR, commit or issue.
+1. Open the failed run in the control repository, or the issue labelled
+   `maintenance-monitor` there (updated on every run). Each finding has a
+   check id (section 5), a repository and a detail.
+2. To reproduce locally (read-only, no issue is written):
+   `GH_TOKEN=$(gh auth token) MONITOR_CONFIG=<path to repos.yml> scripts/monitor.sh`.
+   Setting `MONITOR_ISSUE_REPO` would write the issue; do not set it locally.
 3. Fix the cause (table in section 5). Settings changes need the owner's
    approval (section 1).
-4. If the finding is accepted, open a PR that adds `{repo, check, reason}` to
-   `ignores` in `repos.yml` (public repositories only; private ones go to the
-   private control file). The reason is required. Remove an ignore that is
-   reported as `ignore-unused`.
-5. Re-run: `gh workflow run monitor.yml`.
+4. If the finding is accepted, open a PR in the control repository that adds
+   `{repo, check, reason}` to `ignores` in `repos.yml`. The reason is
+   required. Remove an ignore that is reported as `ignore-unused`.
+5. Re-run: `gh workflow run monitor.yml` in the control repository.
 
 Never weaken or delete a check, widen a threshold, or add a "not applicable"
 answer just to get green. A check that cannot run is `check-failed`, not a
@@ -322,7 +337,7 @@ Red unless marked info. The detail is in the job summary.
 | `orphan-tag` | a `-next`/`-pr.N` tag without release | delete the tag (`git push --delete origin <tag>`) |
 | `several-drafts` | more than one draft release | ask the owner which to delete |
 | `next-stale` | `-next` pre-release older than the latest release | re-run the build on `main`, or delete it |
-| `pin-behind` | a caller pins a `spali/.github` release older than a newer one (older than 7 days) | merge or fix the Renovate PR |
+| `pin-behind` | a caller (including the control repository's monitor pin) pins a `spali/.github` release older than a newer one (older than 7 days) | merge or fix the Renovate PR |
 | `settings-merge` | merge options differ from README "Set up", step 6 | fix the setting (owner approval) |
 | `settings-alerts` | Dependabot alerts are off | enable them (owner approval) |
 | `settings-pvr` | private vulnerability reporting is off (public repo) | enable it (owner approval) |
@@ -334,7 +349,6 @@ Red unless marked info. The detail is in the job summary.
 | `workflow-disabled` | a workflow is disabled (inactivity) | enable it (`gh workflow enable`), push a commit if needed |
 | `dependabot-alert` | open alert; red for critical/high, info for low/medium | update or dismiss with a reason |
 | `code-scanning-alert` | open alert; red for critical/high, info for low/medium | fix or dismiss with a reason |
-| `self-stale` | no commit on `spali/.github` `main` for 50 days or more | commit something useful before GitHub disables the schedule at 60 days |
 | `fork-behind` (info) | a fork is behind its upstream | sync when you care |
 | `fork-sync-stale` | a fork with its own sync workflow misses upstream commits beyond `sync_interval_hours` + 24 h | check the sync workflow |
 | `fork-workflows-active` (info) | a fork runs its own workflows | disable them if unwanted |
@@ -346,9 +360,8 @@ Red unless marked info. The detail is in the job summary.
 | `list-archived` (info) | an archived own repository is in a list other than the archive list | move it |
 | `adoption` (info) | a repository does not use the release flow | adopt it (4.6) or ignore |
 | `check-failed` | a check could not run (API error, rate limit, bad response, empty inventory) | read the detail, fix access or the script; never ignore |
-| `config-invalid` | `repos.yml` or the private control file is invalid, or names an unknown list/check | fix the file |
+| `config-invalid` | the control file is missing or invalid, or names an unknown list/check | fix the file |
 | `ignore-unused` (info) | an ignore matched no finding | remove it, or fix the typo |
-| `public-config-private-repo` | `repos.yml` names a private repository | remove it, move it to the private control file; the name is already public in the history, tell the owner |
 
 ## 6. Facts that are easy to get wrong
 
@@ -379,7 +392,10 @@ Red unless marked info. The detail is in the job summary.
   hint): the message is the line ending in `(HTTP nnn)`; n/a patterns match the
   whole stderr.
 - Lists (GraphQL `user.lists`) contain private repositories for the owner's
-  token: treat them like the inventory and mask them.
+  token (`LISTS_TOKEN`, default `GH_TOKEN`, is used for that call only).
+- A repository that only calls `monitor.yml` / `monitor-config.yml` is not
+  `central` (not a release-flow repository): no release checks and, because it
+  has pins, no `adoption` finding, but `pin-behind` applies.
 - A fork's own sync workflow is disabled after 60 days without repository
   activity like any scheduled workflow of a public repository
   (`disabled_inactivity`); the monitor reports it as `workflow-disabled`.

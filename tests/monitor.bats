@@ -23,8 +23,16 @@ EOS
   cat >"$BATS_TEST_TMPDIR/public.yml" <<'EOS'
 version: 1
 EOS
-  export MONITOR_PUBLIC_CONFIG="$BATS_TEST_TMPDIR/public.yml"
-  unset MONITOR_PRIVATE_CONFIG GITHUB_STEP_SUMMARY GITHUB_ACTIONS MONITOR_UNMASK
+  export MONITOR_CONFIG="$BATS_TEST_TMPDIR/public.yml"
+  unset MONITOR_ISSUE_REPO GITHUB_STEP_SUMMARY GITHUB_ACTIONS
+  # a recording stand-in for the issue script
+  cat >"$MONITOR_SCRIPTS_DIR/monitor-issue.sh" <<EOS
+#!/usr/bin/env bash
+printf '%s\n' "\$1" "\$2" "\${MONITOR_ISSUE_REPO:-}" >"$BATS_TEST_TMPDIR/issue.args"
+cp "\$1" "$BATS_TEST_TMPDIR/issue.report"
+[[ -z \${ISSUE_FAIL:-} ]] || { echo "error: updating issue #1 failed: boom (HTTP 422)" >&2; echo "second line" >&2; exit 1; }
+EOS
+  chmod +x "$MONITOR_SCRIPTS_DIR/monitor-issue.sh"
   export GH_TOKEN=t
   MONITOR="$REAL/monitor.sh"
 }
@@ -54,86 +62,137 @@ EOS
   [[ $output == *"monitor-repos.sh crashed"* ]]
 }
 
-@test "invalid private config is red without details" {
-  printf 'version: 1\nmirrors:\n  - target: spali/hidden-name\n' >"$BATS_TEST_TMPDIR/private.yml"
-  export MONITOR_PRIVATE_CONFIG="$BATS_TEST_TMPDIR/private.yml"
+@test "invalid config is red and the run continues with the empty config" {
+  printf 'version: 2\n' >"$MONITOR_CONFIG"
   run --separate-stderr "$MONITOR"
   [ "$status" -eq 1 ]
   [[ $output == *"config-invalid"* ]]
-  [[ $output == *"private control file is invalid"* ]]
-  [[ $output != *hidden-name* ]]
-  [[ $output != *interval_hours* ]]
+  [[ $output == *"public.yml: "*"version must be 1"* ]]
   [ -z "$stderr" ]
 }
 
-@test "missing private config is red" {
-  export MONITOR_PRIVATE_CONFIG="$BATS_TEST_TMPDIR/nope.yml"
+@test "missing config file is red" {
+  export MONITOR_CONFIG="$BATS_TEST_TMPDIR/nope.yml"
   run "$MONITOR"
   [ "$status" -eq 1 ]
-  [[ $output == *"private control file missing"* ]]
+  [[ $output == *"nope.yml: "*"cannot read file"* ]]
 }
 
-@test "valid private config is merged and ignores apply" {
-  cat >"$BATS_TEST_TMPDIR/private.yml" <<'EOS'
+@test "MONITOR_CONFIG defaults to repos.yml in the working directory" {
+  unset MONITOR_CONFIG
+  cd "$BATS_TEST_TMPDIR"
+  run "$MONITOR"
+  [ "$status" -eq 1 ]
+  [[ $output == *"repos.yml: "*"cannot read file"* ]]
+  cp public.yml repos.yml
+  run "$MONITOR"
+  [ "$status" -eq 0 ]
+}
+
+@test "the config is converted to JSON for the checks" {
+  cat >"$BATS_TEST_TMPDIR/public.yml" <<'EOS'
 version: 1
 ignores:
-  - repo: spali/secret-repo
+  - repo: spali/x
     check: adoption
-    reason: private on purpose
+    reason: on purpose
 EOS
-  export MONITOR_PRIVATE_CONFIG="$BATS_TEST_TMPDIR/private.yml"
-  printf '#!/usr/bin/env bash\nsource "$(dirname "$0")/monitor-lib.sh"\nfinding red adoption spali/secret-repo x\n' \
+  printf '#!/usr/bin/env bash\ncp "$CONFIG" "%s/config.seen"\n' "$BATS_TEST_TMPDIR" >"$MONITOR_SCRIPTS_DIR/monitor-lists.sh"
+  run "$MONITOR"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.ignores[0].repo' "$BATS_TEST_TMPDIR/config.seen")" = '"spali/x"' ]
+  [[ $output == *"unused ignore: on purpose"* ]]
+}
+
+@test "ignores of the config apply" {
+  cat >"$MONITOR_CONFIG" <<'EOS'
+version: 1
+ignores:
+  - repo: spali/some-repo
+    check: adoption
+    reason: on purpose
+EOS
+  printf '#!/usr/bin/env bash\nsource "$(dirname "$0")/monitor-lib.sh"\nfinding red adoption spali/some-repo x\n' \
     >"$MONITOR_SCRIPTS_DIR/monitor-lists.sh"
   run "$MONITOR"
   [ "$status" -eq 0 ]
   [[ $output == *"0 red"* ]]
 }
 
-@test "invalid public config is red and the run continues" {
-  printf 'version: 2\n' >"$MONITOR_PUBLIC_CONFIG"
-  cat >"$BATS_TEST_TMPDIR/private.yml" <<'EOS'
-version: 1
-ignores:
-  - repo: spali/secret-repo
-    check: adoption
-    reason: private on purpose
-EOS
-  export MONITOR_PRIVATE_CONFIG="$BATS_TEST_TMPDIR/private.yml"
-  run "$MONITOR"
-  [ "$status" -eq 1 ]
-  [[ $output != *"cannot be merged"* ]]
-  [[ $output == *"config-invalid"* ]]
-  [[ $output == *"repos.yml: "*"version must be 1"* ]]
+@test "the report goes to GITHUB_STEP_SUMMARY when set" {
+  export GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary.md"
+  run --separate-stderr "$MONITOR"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -z "$stderr" ]
+  grep -q '^## Maintenance monitor' "$GITHUB_STEP_SUMMARY"
 }
 
-@test "public config naming a private repo is red" {
-  cat >"$MONITOR_PUBLIC_CONFIG" <<'EOS'
-version: 1
-ignores:
-  - repo: spali/secret-repo
-    check: adoption
-    reason: oops
-EOS
+@test "without MONITOR_ISSUE_REPO the issue script is not run" {
   run "$MONITOR"
-  [ "$status" -eq 1 ]
-  [[ $output == *"public-config-private-repo"* ]]
-  [[ $output != *"secret-repo"* ]]
+  [ "$status" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/issue.args" ]
 }
 
-@test "large inventory still reports a public config naming a private repo" {
+@test "with MONITOR_ISSUE_REPO the issue is updated with the report and the counts" {
+  export MONITOR_ISSUE_REPO=spali/ctl
+  printf '#!/usr/bin/env bash\nsource "$(dirname "$0")/monitor-lib.sh"\nfinding red adoption a x\nfinding red main-red b y\nfinding info list-none c z\n' \
+    >"$MONITOR_SCRIPTS_DIR/monitor-lists.sh"
+  run --separate-stderr "$MONITOR"
+  [ "$status" -eq 1 ]
+  [ -z "$stderr" ]
+  [ "$(sed -n 2p "$BATS_TEST_TMPDIR/issue.args")" = "Maintenance monitor: 2 red · 1 info" ]
+  [ "$(sed -n 3p "$BATS_TEST_TMPDIR/issue.args")" = spali/ctl ]
+  [ "$(<"$BATS_TEST_TMPDIR/issue.report")" = "$output" ]
+}
+
+@test "a clean run with the issue updated exits 0" {
+  export MONITOR_ISSUE_REPO=spali/ctl
+  run --separate-stderr "$MONITOR"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  [ "$(sed -n 2p "$BATS_TEST_TMPDIR/issue.args")" = "Maintenance monitor: 0 red · 0 info" ]
+}
+
+@test "a failing issue update prints one error line and fails an otherwise clean run" {
+  export MONITOR_ISSUE_REPO=spali/ctl ISSUE_FAIL=1
+  run --separate-stderr "$MONITOR"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: updating issue #1 failed: boom (HTTP 422)" ]
+  [[ $output == *"0 red"* ]]
+}
+
+@test "a red finding fails the run even when the issue update works" {
+  export MONITOR_ISSUE_REPO=spali/ctl
+  printf '#!/usr/bin/env bash\nexit 3\n' >"$MONITOR_SCRIPTS_DIR/monitor-health.sh"
+  run "$MONITOR"
+  [ "$status" -eq 1 ]
+  [ "$(sed -n 2p "$BATS_TEST_TMPDIR/issue.args")" = "Maintenance monitor: 1 red · 0 info" ]
+}
+
+@test "a failing issue script without output still names itself" {
+  export MONITOR_ISSUE_REPO=spali/ctl
+  printf '#!/usr/bin/env bash\nexit 4\n' >"$MONITOR_SCRIPTS_DIR/monitor-issue.sh"
+  run --separate-stderr "$MONITOR"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: monitor-issue.sh failed" ]
+}
+
+@test "a crashing report script fails the run" {
+  printf '#!/usr/bin/env bash\nexit 2\n' >"$MONITOR_SCRIPTS_DIR/monitor-report.sh"
+  run --separate-stderr "$MONITOR"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: monitor-report.sh crashed" ]
+}
+
+@test "a large inventory (over 200 KB) is handled" {
   jq -c '.[] | . + {pad: ("x" * 100000)}' "$FIX/inventory.json" |
     jq -s . >"$BATS_TEST_TMPDIR/inventory.json"
   [ "$(stat -c %s "$BATS_TEST_TMPDIR/inventory.json")" -gt 200000 ]
-  cat >"$MONITOR_PUBLIC_CONFIG" <<'EOS'
-version: 1
-ignores:
-  - repo: spali/secret-repo
-    check: adoption
-    reason: oops
-EOS
+  printf '#!/usr/bin/env bash\nsource "$(dirname "$0")/monitor-lib.sh"\njq -e length "$INVENTORY" >/dev/null && finding red adoption a x\n' \
+    >"$MONITOR_SCRIPTS_DIR/monitor-lists.sh"
   run --separate-stderr "$MONITOR"
   [ "$status" -eq 1 ]
-  [[ $output == *"public-config-private-repo: 1 private repo(s)"* ]]
-  [[ $output != *"secret-repo"* ]]
+  [[ $output == *"1 red"* ]]
   [ -z "$stderr" ]
 }

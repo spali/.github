@@ -75,12 +75,9 @@ check_adoption() {
   local out
   if ! out=$(jq -r --slurpfile cfg "$CONFIG" '
       ([$cfg[0].mirrors // [] | .[].target]) as $m |
-      [.[] | select(.name != "spali/.github" and .fork == false and .central == false and ([.name] | inside($m) | not))] |
-      (map(select(.private | not) | .name) | sort | join(", ")) as $pub |
-      (map(select(.private)) | length) as $priv |
+      [.[] | select(.name != "spali/.github" and .fork == false and .central == false and ((.pins // []) | length == 0) and ([.name] | inside($m) | not))] |
       select(length > 0) |
-      "\(length) own repositories without the shared release flow: \($pub)" +
-        (if $priv > 0 then " (+\($priv) private)" else "" end)' "$INVENTORY" 2>/dev/null); then
+      "\(length) own repositories without the shared release flow: \(map(.name) | sort | join(", "))"' "$INVENTORY" 2>/dev/null); then
     finding red check-failed - "adoption: cannot parse inventory"
     return 0
   fi

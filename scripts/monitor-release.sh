@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Release-flow checks for central repositories: devbuild-closed-pr, orphan-tag,
-# several-drafts, next-stale and pin-behind. Writes findings only.
+# Release-flow checks for central repositories (devbuild-closed-pr, orphan-tag,
+# several-drafts, next-stale) and pin-behind for every repository that pins a
+# shared workflow, central or not. Writes findings only.
 # Env: FINDINGS INVENTORY CONFIG (file paths); optional MONITOR_NOW.
 set -euo pipefail
 # shellcheck source=scripts/monitor-lib.sh
@@ -74,7 +75,7 @@ check_pins() {
 }
 
 main() {
-  local repos repo pins releases_ok latest_tag='' latest_sha='' latest_published latest_json commit_json
+  local repos repo central pins releases_ok latest_tag='' latest_sha='' latest_published latest_json commit_json
   local trim_rel='{tag_name, draft, prerelease, created_at, published_at}'
 
   if latest_json=$(fetch pin-behind "$CENTRAL" "repos/$CENTRAL/releases/latest"); then
@@ -96,21 +97,24 @@ main() {
     fi
   fi
 
-  if ! repos=$(jq -r '.[] | select(.central) | .name' "$INVENTORY" 2>/dev/null); then
+  if ! repos=$(jq -r '.[] | select(.central or ((.pins // []) | length > 0)) |
+      [.name, (.central // false)] | @tsv' "$INVENTORY" 2>/dev/null); then
     finding red check-failed - "release checks: cannot parse inventory"
     return 0
   fi
-  while IFS= read -r repo; do
+  while IFS=$'\t' read -r repo central; do
     [[ -n $repo ]] || continue
     pins=$(jq -c --arg r "$repo" '[.[] | select(.name == $r) | (.pins // [])[]]' "$INVENTORY" 2>/dev/null) || pins='[]'
 
-    rm -f "$WORK"/*.json
-    releases_ok=
-    paged devbuild-closed-pr "$repo" "repos/$repo/releases?per_page=100" "$trim_rel" "$WORK/releases.json" && releases_ok=1
-    if [[ -n $releases_ok ]]; then
-      paged devbuild-closed-pr "$repo" "repos/$repo/pulls?state=open&per_page=100" '{number}' "$WORK/pulls.json" || true
-      paged orphan-tag "$repo" "repos/$repo/tags?per_page=100" '{name}' "$WORK/tags.json" || true
-      check_releases "$repo"
+    if [[ $central == true ]]; then
+      rm -f "$WORK"/*.json
+      releases_ok=
+      paged devbuild-closed-pr "$repo" "repos/$repo/releases?per_page=100" "$trim_rel" "$WORK/releases.json" && releases_ok=1
+      if [[ -n $releases_ok ]]; then
+        paged devbuild-closed-pr "$repo" "repos/$repo/pulls?state=open&per_page=100" '{number}' "$WORK/pulls.json" || true
+        paged orphan-tag "$repo" "repos/$repo/tags?per_page=100" '{name}' "$WORK/tags.json" || true
+        check_releases "$repo"
+      fi
     fi
 
     [[ -z $latest_sha ]] || check_pins "$repo" "$pins" "$latest_tag" "$latest_sha"
