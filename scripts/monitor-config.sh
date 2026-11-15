@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # Control file of the maintenance monitor (repos.yml).
 #
-#   monitor-config.sh validate FILE [--private]
-#   monitor-config.sh merge PUBLIC [PRIVATE]
-#   monitor-config.sh public-check FILE
+#   monitor-config.sh validate FILE
 set -euo pipefail
 
 # shellcheck source=scripts/monitor-lib.sh
@@ -16,7 +14,7 @@ to_json() {
 }
 
 # JQ program: prints one problem per line for the JSON document on stdin.
-# Arguments: $private (bool), $checks (array of known check ids).
+# Argument: $checks (array of known check ids).
 # shellcheck disable=SC2016 # jq program, no shell expansion wanted
 VALIDATE_JQ='
 def repo_ok: type == "string" and test("^spali/[A-Za-z0-9._-]+$");
@@ -33,7 +31,6 @@ if type != "object" then "top level must be a mapping" else
   (if .version != 1 then "version must be 1" else empty end),
   (keys[] | select(IN("version", "lists", "mirrors", "forks", "ignores") | not)
     | "unknown key \(.)"),
-  (if $private and has("lists") then "lists is not allowed in the private file" else empty end),
   (if has("lists") and (.lists | type) != "object" then "lists must be a mapping" else empty end),
   (if (.lists | type) == "object" then
      (.lists | keys[] | select(IN("exclusive", "archive", "mirrors", "forks") | not)
@@ -85,11 +82,10 @@ if type != "object" then "top level must be a mapping" else
 end'
 
 cmd_validate() {
-  local file=${1:-} private=false json problems
-  [[ -n $file ]] || die "usage: validate FILE [--private]"
-  [[ ${2:-} != --private ]] || private=true
+  local file=${1:-} json problems
+  [[ -n $file ]] || die "usage: validate FILE"
   json=$(to_json "$file")
-  problems=$(jq -r --argjson private "$private" \
+  problems=$(jq -r \
     --argjson checks "$(printf '%s\n' "${MONITOR_CHECKS[@]}" | jq -R . | jq -sc .)" \
     "$VALIDATE_JQ" <<<"$json")
   [[ -z $problems ]] && return 0
@@ -99,48 +95,12 @@ cmd_validate() {
   return 1
 }
 
-cmd_merge() {
-  local public=${1:-} private=${2:-} pub priv='{}'
-  [[ -n $public ]] || die "usage: merge PUBLIC [PRIVATE]"
-  pub=$(to_json "$public")
-  [[ -z $private ]] || priv=$(to_json "$private")
-  jq -n --argjson pub "$pub" --argjson priv "$priv" '
-    def mark($v): [(. // [])[] | . + {private: $v}];
-    {version: $pub.version, lists: $pub.lists}
-    + (["mirrors", "forks", "ignores"] | map({(.): (($pub[.] | mark(false)) + ($priv[.] | mark(true)))}) | add)'
-}
-
-# public-check FILE: every spali repo named in the file (values and comments)
-# must be public.
-cmd_public_check() {
-  local file=${1:-} json repo body failed=0
-  [[ -n $file ]] || die "usage: public-check FILE"
-  json=$(to_json "$file")
-  while IFS= read -r repo; do
-    if body=$(gh api "repos/$repo" 2>/dev/null) &&
-      [[ $(jq -r '.private' <<<"$body" 2>/dev/null) == false ]]; then
-      continue
-    fi
-    printf 'error: %s: %s is not a public repository\n' "$file" "$repo" >&2
-    failed=1
-  done < <(
-    {
-      jq -r '[(.mirrors // [])[].target, (.forks // [])[].repo, (.ignores // [])[].repo]
-        | map(select(type == "string" and startswith("spali/")))[]' <<<"$json"
-      grep -Eo 'spali/[A-Za-z0-9._-]+' "$file" | sed 's/\.*$//' || true
-    } | sort -u
-  )
-  return "$failed"
-}
-
 main() {
   local cmd=${1:-}
   [[ $# -eq 0 ]] || shift
   case $cmd in
     validate) cmd_validate "$@" ;;
-    merge) cmd_merge "$@" ;;
-    public-check) cmd_public_check "$@" ;;
-    *) die "usage: monitor-config.sh validate|merge|public-check ..." ;;
+    *) die "usage: monitor-config.sh validate FILE" ;;
   esac
 }
 

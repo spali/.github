@@ -24,7 +24,6 @@ PRS='*repos/spali/a/pulls?state=open&per_page=100 --paginate'
 WFS='*repos/spali/a/actions/workflows?per_page=100'
 DEP='*repos/spali/a/dependabot/alerts?state=open&per_page=100 --paginate'
 CS='*repos/spali/a/code-scanning/alerts?state=open&per_page=100 --paginate'
-SELF='*repos/spali/.github/commits?sha=main&per_page=1'
 
 # run_json GLOB JQ_EXPRESSION registers a response built by jq -n.
 respond_jq() { jq -nc "$2" | gh_respond "$1" -; }
@@ -35,7 +34,6 @@ run_script() {
   respond_jq "$WFS" '{workflows: []}'
   respond_jq "$DEP" '[]'
   respond_jq "$CS" '[]'
-  respond_jq "$SELF" '[{commit: {committer: {date: "2026-11-13T12:00:00Z"}}}]'
   run --separate-stderr "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -172,20 +170,6 @@ run_entry() {
   run_script
   [ "$(count check-failed)" -eq 1 ]
   [ "$(level check-failed)" = red ]
-}
-
-@test "self-stale at 50 days is red, 49 fine" {
-  respond_jq "$SELF" '[{commit: {committer: {date: "2026-09-25T12:00:00Z"}}}]'
-  run_script
-  [ "$(count self-stale)" -eq 1 ]
-  [ "$(level self-stale)" = red ]
-  [ "$(message self-stale)" = "last commit on main 50 days ago; GitHub disables its schedule after 60 days" ]
-}
-
-@test "self-stale at 49 days is fine" {
-  respond_jq "$SELF" '[{commit: {committer: {date: "2026-09-26T12:00:00Z"}}}]'
-  run_script
-  [ "$(count self-stale)" -eq 0 ]
 }
 
 @test "forks and mirror targets are out of scope" {

@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # Builds the monitor's repository inventory: prints a JSON array to stdout.
 # Env: FINDINGS. In Actions (GITHUB_ACTIONS=true) the app's installation is
-# listed and private repository names are masked on stderr; locally the user
-# token lists all owned repositories.
+# listed; locally the user token lists all owned repositories. A repository is
+# central when it pins a shared workflow other than the monitor's own ones.
 set -euo pipefail
 # shellcheck source=scripts/monitor-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 
 need_env FINDINGS
 
-# Only the ::add-mask:: lines may reach the public log (fd 3 is the real
-# stderr); whatever the tools print is discarded.
-exec 3>&2 2>/dev/null
+# Whatever the tools print is discarded.
+exec 2>/dev/null
 
 OWNER=spali
 PIN_RE='^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+spali/\.github/\.github/workflows/([^@]+)@([0-9a-f]{40})( # (v[^ ]+))?'
@@ -67,10 +66,6 @@ main() {
   repos=$(jq -c --arg owner "$OWNER" \
     '[.[] | select(.owner.login == $owner and .archived == false)]' <<<"$repos")
 
-  if [[ ${GITHUB_ACTIONS:-} == true ]]; then
-    jq -r '.[] | select(.private) | "::add-mask::" + .full_name, "::add-mask::" + .name' <<<"$repos" >&3
-  fi
-
   if [[ $(jq length <<<"$repos") -eq 0 ]]; then
     finding red check-failed - "inventory: no repositories visible"
     echo '[]'
@@ -91,7 +86,7 @@ main() {
       --argjson pins "$(jq -s . <<<"$pins")" \
       '.[] | select(.full_name == $name) |
        {name: .full_name, private, fork, default_branch, pushed_at,
-        central: ($pins | length > 0), pins: $pins, parent: $parent}' <<<"$repos")")
+        central: ($pins | any(.workflow != "monitor.yml" and .workflow != "monitor-config.yml")), pins: $pins, parent: $parent}' <<<"$repos")")
   done < <(jq -r '.[] | [.full_name, .default_branch, .fork] | @tsv' <<<"$repos")
 
   printf '%s\n' "${entries[@]}" | jq -s 'sort_by(.name)'

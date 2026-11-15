@@ -54,7 +54,8 @@ gh_fail_raw() {
 @test "MONITOR_CHECKS lists the check ids" {
   [[ " ${MONITOR_CHECKS[*]} " == *" main-red "* ]]
   [[ " ${MONITOR_CHECKS[*]} " == *" check-failed "* ]]
-  [[ " ${MONITOR_CHECKS[*]} " == *" public-config-private-repo "* ]]
+  [[ " ${MONITOR_CHECKS[*]} " != *" self-stale "* ]]
+  [[ " ${MONITOR_CHECKS[*]} " != *" public-config-private-repo "* ]]
 }
 
 @test "fetch prints the body on success" {

@@ -91,6 +91,41 @@ YML
   [ ! -s "$FINDINGS" ]
 }
 
+@test "a repo that only calls the monitor workflows is not central" {
+  user_repos "$(repo spali/ctl true)"
+  gh_respond '*contents/.github/workflows?ref=main' - <<'JSON'
+[{"name":"monitor.yml","type":"file"},{"name":"config.yml","type":"file"}]
+JSON
+  gh_respond '*contents/.github/workflows/monitor.yml?ref=main' - <<'YML'
+jobs:
+  monitor:
+    uses: spali/.github/.github/workflows/monitor.yml@6f26c6b1dcac0797c52055241f0cfb74a797ebe3 # v1.0.0
+YML
+  gh_respond '*contents/.github/workflows/config.yml?ref=main' - <<'YML'
+jobs:
+  config:
+    uses: spali/.github/.github/workflows/monitor-config.yml@6f26c6b1dcac0797c52055241f0cfb74a797ebe3 # v1.0.0
+YML
+  run --separate-stderr "$SCRIPT"
+  [ "$(jq -c '.[0] | [.central, (.pins | map(.workflow))]' <<<"$output")" = '[false,["monitor.yml","monitor-config.yml"]]' ]
+}
+
+@test "a repo that pins the monitor and another workflow is central" {
+  user_repos "$(repo spali/a)"
+  gh_respond '*contents/.github/workflows?ref=main' - <<'JSON'
+[{"name":"x.yml","type":"file"}]
+JSON
+  gh_respond '*contents/.github/workflows/x.yml?ref=main' - <<'YML'
+jobs:
+  a:
+    uses: spali/.github/.github/workflows/monitor.yml@6f26c6b1dcac0797c52055241f0cfb74a797ebe3 # v1.0.0
+  b:
+    uses: spali/.github/.github/workflows/pr.yml@6f26c6b1dcac0797c52055241f0cfb74a797ebe3 # v1.0.0
+YML
+  run --separate-stderr "$SCRIPT"
+  [ "$(jq -c '.[0].central' <<<"$output")" = true ]
+}
+
 @test "output has the documented shape" {
   user_repos "$(repo spali/a true)"
   run --separate-stderr "$SCRIPT"
@@ -177,21 +212,6 @@ JSON
   [[ "$(jq -r .message "$FINDINGS")" == *"(HTTP 500)" ]]
 }
 
-@test "masks private repos in Actions before other calls" {
-  jq -cn --argjson a "$(repo spali/secret true)" --argjson b "$(repo spali/open)" '{repositories: [$a, $b]}' |
-    gh_respond '*installation/repositories*' -
-  GITHUB_ACTIONS=true run --separate-stderr "$SCRIPT"
-  [ "$status" -eq 0 ]
-  [ "$stderr" = $'::add-mask::spali/secret\n::add-mask::secret' ]
-  [ "$(jq length <<<"$output")" -eq 2 ]
-}
-
-@test "does not mask outside Actions" {
-  user_repos "$(repo spali/secret true)"
-  run --separate-stderr "$SCRIPT"
-  [ -z "$stderr" ]
-}
-
 @test "listing that is not JSON is a red parse failure, prints [] and leaves stderr empty" {
   printf '<html><body>Bad gateway</body></html>\n' | gh_respond '*user/repos*' -
   run --separate-stderr "$SCRIPT"
@@ -231,4 +251,15 @@ jobs:
 YML
   run --separate-stderr "$SCRIPT"
   [ "$(jq -c '.[0].pins | map(.workflow)' <<<"$output")" = '["x.yml"]' ]
+}
+
+@test "a listing above 200 KB is read completely" {
+  { for i in $(seq 1 30); do repo "spali/r$i" | jq -c '. + {pad: ("x" * 10000)}'; done; } |
+    jq -s . >"$BATS_TEST_TMPDIR/big.json"
+  [ "$(stat -c %s "$BATS_TEST_TMPDIR/big.json")" -gt 200000 ]
+  gh_respond '*user/repos*' "$BATS_TEST_TMPDIR/big.json"
+  run --separate-stderr "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(jq length <<<"$output")" -eq 30 ]
+  [ -z "$stderr" ]
 }

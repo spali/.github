@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Health checks for owned, non-fork, non-mirror repositories: main-red,
-# renovate-stale, workflow-disabled, dependabot-alert, code-scanning-alert;
-# plus self-stale once for spali/.github.
+# renovate-stale, workflow-disabled, dependabot-alert, code-scanning-alert.
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
@@ -9,8 +8,6 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 
 need_env FINDINGS INVENTORY CONFIG
-
-SELF_REPO=spali/.github
 
 # check_main_red REPO BRANCH: the latest completed run per workflow on the
 # default branch (pull request events ignored) must not have failed.
@@ -82,21 +79,6 @@ check_alerts() {
   rm -f "$tmp"
 }
 
-check_self() {
-  local body date d
-  body=$(fetch self-stale "$SELF_REPO" "repos/$SELF_REPO/commits?sha=main&per_page=1") || return 0
-  json_out self-stale "$SELF_REPO" date -r '.[0].commit.committer.date // empty' <<<"$body" || return 0
-  if [[ -z $date ]]; then
-    parse_failed self-stale "$SELF_REPO"
-    return 0
-  fi
-  d=$(days_since "$date")
-  if ((d >= 50)); then
-    finding red self-stale "$SELF_REPO" \
-      "last commit on main $d days ago; GitHub disables its schedule after 60 days"
-  fi
-}
-
 main() {
   local repos repo branch
   if ! repos=$(jq -r --slurpfile c "$CONFIG" '
@@ -118,7 +100,6 @@ main() {
       "repos/$repo/code-scanning/alerts?state=open&per_page=100" \
       '(.rule.security_severity_level // ({error: "high", warning: "medium", note: "low"}[.rule.severity // ""]) // "low")'
   done <<<"$repos"
-  check_self
 }
 
 main

@@ -1,9 +1,0 @@
-version: 1
-mirrors:
-  - target: spali/secret-mirror
-    source: https://example.org/s.git
-    interval_hours: 12
-ignores:
-  - repo: spali/secret
-    check: adoption
-    reason: not managed on purpose

@@ -7,10 +7,10 @@ MONITOR_CHECKS=(
   devbuild-closed-pr orphan-tag several-drafts next-stale pin-behind
   settings-merge settings-alerts settings-pvr settings-actions
   ruleset-main ruleset-tags main-red renovate-stale workflow-disabled
-  dependabot-alert code-scanning-alert self-stale
+  dependabot-alert code-scanning-alert
   fork-behind fork-sync-stale fork-workflows-active fork-delete-candidate
   mirror-behind list-none list-contradiction list-mirror-missing list-archived
-  adoption check-failed config-invalid ignore-unused public-config-private-repo
+  adoption check-failed config-invalid ignore-unused
 )
 
 # API answers that mean "not applicable" (matched as fixed substrings of the

@@ -183,6 +183,17 @@ message() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].message' "$FIN
   [[ "$(gh_calls)" != *spali/skip* ]]
 }
 
+@test "a pinned non-central repo only gets pin-behind" {
+  jq -n '[{name: "spali/ctl", central: false, pins: [
+    {workflow: "monitor.yml", sha: "6f26c6b1dcac0797c52055241f0cfb74a797ebe3", version: "v1.0.0"}]}]' >"$INVENTORY"
+  run_script
+  [ "$(count pin-behind)" -eq 1 ]
+  [ "$(message pin-behind)" = "monitor.yml pinned to v1.0.0, latest v1.1.0" ]
+  [[ "$(gh_calls)" != *spali/ctl/releases* ]]
+  [[ "$(gh_calls)" != *spali/ctl/tags* ]]
+  [[ "$(gh_calls)" != *spali/ctl/pulls* ]]
+}
+
 @test "large releases response (over 200 KB) still yields findings" {
   local body
   body=$(head -c 3000 /dev/zero | tr '\0' x)

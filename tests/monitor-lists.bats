@@ -195,14 +195,23 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(message adoption)" = "2 own repositories without the shared release flow: spali/b, spali/z" ]
 }
 
-@test "adoption with private repos appends the private count only" {
+@test "adoption names private repos too" {
   jq -n '[{name: "spali/b", private: false, fork: false, central: false},
     {name: "spali/p", private: true, fork: false, central: false},
     {name: "spali/q", private: true, fork: false, central: false}]' >"$INVENTORY"
   all_lists '(.[0].items = [["spali/b", false], ["spali/p", false], ["spali/q", false]])'
   run_script
-  [ "$(message adoption)" = "3 own repositories without the shared release flow: spali/b (+2 private)" ]
-  ! grep -q 'spali/p' "$FINDINGS"
+  [ "$(message adoption)" = "3 own repositories without the shared release flow: spali/b, spali/p, spali/q" ]
+}
+
+@test "repos that pin any shared workflow are not adoption candidates" {
+  jq -n '[{name: "spali/ctl", private: true, fork: false, central: false,
+      pins: [{workflow: "monitor.yml", sha: "a", version: "v1"}]},
+    {name: "spali/b", private: false, fork: false, central: false, pins: []},
+    {name: "spali/c", private: false, fork: false, central: false}]' >"$INVENTORY"
+  all_lists '(.[0].items = [["spali/ctl", false], ["spali/b", false], ["spali/c", false]])'
+  run_script
+  [ "$(message adoption)" = "2 own repositories without the shared release flow: spali/b, spali/c" ]
 }
 
 @test "list query failure is check-failed, adoption still emitted" {

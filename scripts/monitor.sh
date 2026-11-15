@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Daily maintenance monitor: validates the control files, builds the inventory,
-# runs every check script and hands the findings to monitor-report.sh.
+# Daily maintenance monitor: validates the control file, builds the inventory,
+# runs every check script, renders the report and, if MONITOR_ISSUE_REPO is
+# set, updates the overview issue in that repository.
 #
-# Env: GH_TOKEN, MONITOR_PUBLIC_CONFIG (default repos.yml),
-# MONITOR_PRIVATE_CONFIG (optional), LISTS_TOKEN (default GH_TOKEN),
+# Env: GH_TOKEN, MONITOR_CONFIG (default repos.yml), LISTS_TOKEN (default
+# GH_TOKEN), MONITOR_ISSUE_REPO and ISSUE_TOKEN (see monitor-issue.sh),
 # MONITOR_SCRIPTS_DIR (default: this script's directory).
-# Prints nothing itself; the report is the only output.
+# The report goes to $GITHUB_STEP_SUMMARY, or to stdout if that is not set.
+# Exit status: 1 if a red finding is left or the issue update failed.
 set -euo pipefail
 
 DIR=${MONITOR_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")}
@@ -13,39 +15,24 @@ DIR=${MONITOR_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")}
 source "$DIR/monitor-lib.sh"
 
 WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
 export FINDINGS="$WORK/findings.jsonl"
 export INVENTORY="$WORK/inventory.json"
 export CONFIG="$WORK/config.json"
 : >"$FINDINGS"
 
-PUBLIC=${MONITOR_PUBLIC_CONFIG:-repos.yml}
-PRIVATE=
+CONFIG_FILE=${MONITOR_CONFIG:-repos.yml}
 EMPTY_CONFIG='{"version":1,"lists":{},"mirrors":[],"forks":[],"ignores":[]}'
 
-# --- control files -----------------------------------------------------
-if err=$("$DIR/monitor-config.sh" validate "$PUBLIC" 2>&1 >/dev/null); then
-  merge_public=$PUBLIC
+# --- control file ------------------------------------------------------
+if err=$("$DIR/monitor-config.sh" validate "$CONFIG_FILE" 2>&1 >/dev/null) &&
+  yq -o=json '.' "$CONFIG_FILE" >"$CONFIG" 2>/dev/null; then
+  :
 else
   line=$(head -n1 <<<"$err")
   line=${line#error: }
-  line=${line#"$PUBLIC": }
-  finding red config-invalid - "repos.yml: ${line:-invalid}"
-  merge_public=$WORK/empty.json
-  printf '%s\n' "$EMPTY_CONFIG" >"$merge_public"
-fi
-
-if [[ -n ${MONITOR_PRIVATE_CONFIG:-} ]]; then
-  if [[ ! -f $MONITOR_PRIVATE_CONFIG ]]; then
-    finding red config-invalid - "private control file missing"
-  elif "$DIR/monitor-config.sh" validate "$MONITOR_PRIVATE_CONFIG" --private >/dev/null 2>&1; then
-    PRIVATE=$MONITOR_PRIVATE_CONFIG
-  else
-    finding red config-invalid - "private control file is invalid"
-  fi
-fi
-
-if ! "$DIR/monitor-config.sh" merge "$merge_public" ${PRIVATE:+"$PRIVATE"} >"$CONFIG" 2>/dev/null; then
-  finding red config-invalid - "control files cannot be merged"
+  line=${line#"$CONFIG_FILE": }
+  finding red config-invalid - "$(basename "$CONFIG_FILE"): ${line:-invalid}"
   printf '%s\n' "$EMPTY_CONFIG" >"$CONFIG"
 fi
 
@@ -53,20 +40,6 @@ fi
 if ! "$DIR/monitor-repos.sh" >"$INVENTORY"; then
   finding red check-failed - "monitor-repos.sh crashed"
   echo '[]' >"$INVENTORY"
-fi
-
-# --- public config must not name private repos -------------------------
-if repos=$(jq -r --slurpfile inv "$INVENTORY" '
-    ($inv[0] | map(select(.private) | .name)) as $privs
-    | [(.mirrors[] | select(.private == false) | .target),
-       (.forks[] | select(.private == false) | .repo),
-       (.ignores[] | select(.private == false) | .repo)]
-    | unique[] | select(. as $r | $privs | index($r))' "$CONFIG" 2>/dev/null); then
-  while IFS= read -r repo; do
-    [[ -z $repo ]] || finding red public-config-private-repo "$repo" "named in the public repos.yml"
-  done <<<"$repos"
-else
-  finding red check-failed - "public-config-private-repo: cannot evaluate"
 fi
 
 # --- checks ------------------------------------------------------------
@@ -77,4 +50,29 @@ for check in release settings health forks mirrors lists; do
   fi
 done
 
-exec "$DIR/monitor-report.sh"
+# --- report ------------------------------------------------------------
+status=0
+report_rc=0
+"$DIR/monitor-report.sh" >"$WORK/report.md" 2>/dev/null || report_rc=$?
+if ((report_rc > 1)); then
+  echo "error: monitor-report.sh crashed" >&2
+  exit 1
+fi
+((report_rc == 0)) || status=1
+cat "$WORK/report.md" >>"${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+
+# --- overview issue ----------------------------------------------------
+if [[ -n ${MONITOR_ISSUE_REPO:-} ]]; then
+  title='Maintenance monitor'
+  counts=$(grep -m1 -E '^[0-9]+ red · [0-9]+ info' "$WORK/report.md" || true)
+  if [[ $counts =~ ^([0-9]+)\ red\ ·\ ([0-9]+)\ info ]]; then
+    title="Maintenance monitor: ${BASH_REMATCH[1]} red · ${BASH_REMATCH[2]} info"
+  fi
+  if ! "$DIR/monitor-issue.sh" "$WORK/report.md" "$title" 2>"$WORK/issue.err" >/dev/null; then
+    line=$(head -n1 "$WORK/issue.err")
+    echo "${line:-error: monitor-issue.sh failed}" >&2
+    status=1
+  fi
+fi
+
+exit "$status"
