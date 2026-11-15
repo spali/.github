@@ -1,0 +1,45 @@
+# Reusable: validate the control file of the maintenance monitor.
+#
+# Call it from the private control repository on push and pull_request:
+#
+#   jobs:
+#     config:
+#       uses: spali/.github/.github/workflows/monitor-config.yml@<sha> # vX.Y.Z
+#       with:
+#         config: repos.yml # optional, this is the default
+name: Monitor config
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: Path of the control file in the calling repository
+        type: string
+        default: repos.yml
+
+permissions:
+  contents: read
+
+jobs:
+  config:
+    name: config
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout control file
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Checkout shared scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: spali/.github
+          ref: ${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
+          path: .monitor
+          persist-credentials: false
+      - name: Validate the control file
+        env:
+          CONFIG: ${{ inputs.config }}
+        run: .monitor/scripts/monitor-config.sh validate "$CONFIG"
