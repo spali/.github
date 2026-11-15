@@ -185,6 +185,25 @@ EOS
   [ "$stderr" = "error: monitor-report.sh crashed" ]
 }
 
+@test "a crashing report script still updates the issue and then fails" {
+  export MONITOR_ISSUE_REPO=spali/ctl
+  printf '#!/usr/bin/env bash\necho partial\nexit 2\n' >"$MONITOR_SCRIPTS_DIR/monitor-report.sh"
+  run --separate-stderr "$MONITOR"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: monitor-report.sh crashed" ]
+  [ "$(sed -n 2p "$BATS_TEST_TMPDIR/issue.args")" = "Maintenance monitor: report crashed" ]
+  [[ "$(<"$BATS_TEST_TMPDIR/issue.report")" == *"report script crashed"*"see the run log"* ]]
+  [[ "$(<"$BATS_TEST_TMPDIR/issue.report")" != *partial* ]]
+}
+
+@test "a crashing report script and a failing issue update print both error lines" {
+  export MONITOR_ISSUE_REPO=spali/ctl ISSUE_FAIL=1
+  printf '#!/usr/bin/env bash\nexit 2\n' >"$MONITOR_SCRIPTS_DIR/monitor-report.sh"
+  run --separate-stderr "$MONITOR"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = $'error: monitor-report.sh crashed\nerror: updating issue #1 failed: boom (HTTP 422)' ]
+}
+
 @test "a large inventory (over 200 KB) is handled" {
   jq -c '.[] | . + {pad: ("x" * 100000)}' "$FIX/inventory.json" |
     jq -s . >"$BATS_TEST_TMPDIR/inventory.json"
