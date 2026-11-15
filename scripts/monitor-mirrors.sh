@@ -85,6 +85,7 @@ main() {
   fi
   while IFS=$'\t' read -r target source hours; do
     [[ -n $target ]] || continue
+    checked "$target"
     check_mirror "$target" "$source" "$hours"
   done <<<"$mirrors"
 }

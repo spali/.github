@@ -52,6 +52,12 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
   [ ! -s "$FINDINGS" ]
 }
 
+@test "records the checked repositories" {
+  export MONITOR_CHECKED="$BATS_TEST_TMPDIR/checked"
+  run_script
+  [ "$(cat "$MONITOR_CHECKED")" = "spali/f" ]
+}
+
 @test "synced fork 3 days behind is red" {
   synced
   respond_jq "$BEHIND" '{ahead_by: 7, commits: [{commit: {committer: {date: "2026-11-01T00:00:00Z"}}}]}'

@@ -160,6 +160,7 @@ main() {
   fi
   while IFS=$'\t' read -r repo private; do
     [[ -n $repo ]] || continue
+    checked "$repo"
     check_merge "$repo"
     check_alerts "$repo"
     check_pvr "$repo" "$private"

@@ -57,6 +57,12 @@ run_entry() {
   [ ! -s "$FINDINGS" ]
 }
 
+@test "records the checked repositories" {
+  export MONITOR_CHECKED="$BATS_TEST_TMPDIR/checked"
+  run_script
+  [ "$(cat "$MONITOR_CHECKED")" = "spali/a" ]
+}
+
 @test "latest run failed is red" {
   { run_entry 1 success 2026-11-10T00:00:00Z; run_entry 1 failure 2026-11-12T00:00:00Z; } |
     jq -s '{workflow_runs: .}' | gh_respond "$RUNS" -

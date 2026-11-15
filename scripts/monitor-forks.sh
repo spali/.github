@@ -92,6 +92,7 @@ main() {
   fi
   while IFS=$'\t' read -r repo branch parent pbranch sync; do
     [[ -n $repo ]] || continue
+    checked "$repo"
     check_behind "$repo" "$branch" "$parent" "$pbranch" "$sync"
     check_workflows "$repo" "$sync"
     check_delete_candidate "$repo" "$branch" "$parent" "$pbranch"

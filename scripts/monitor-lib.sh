@@ -43,6 +43,12 @@ finding() {
     >>"$FINDINGS"
 }
 
+# checked REPO appends REPO to $MONITOR_CHECKED (if set): the run log lists
+# every repository a check script looked at, also those without findings.
+checked() {
+  [[ -z ${MONITOR_CHECKED:-} ]] || printf '%s\n' "$1" >>"$MONITOR_CHECKED"
+}
+
 # err_line FILE prints the line of a gh stderr file that names the failure:
 # the one containing "(HTTP ", else the first non-empty line.
 err_line() {
