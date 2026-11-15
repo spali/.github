@@ -79,8 +79,12 @@ build_body() {
     cat "$tail_file"
   } >"$WORK/tail2.md"
   budget=$((LIMIT - $(LC_ALL=C wc -c <"$WORK/tail2.md")))
-  # the last line of the cut may be partial: drop it
-  head -c "$budget" "$REPORT" | head -n -1 >"$WORK/cut.md"
+  head -c "$budget" "$REPORT" >"$WORK/cut.md"
+  # the last line of the cut is partial unless the cut ends with a newline
+  if [[ -n $(tail -c1 "$WORK/cut.md") ]]; then
+    head -n -1 "$WORK/cut.md" >"$WORK/cut2.md"
+    mv "$WORK/cut2.md" "$WORK/cut.md"
+  fi
   cat "$WORK/cut.md" "$WORK/tail2.md" >"$WORK/body.md"
 }
 
