@@ -127,6 +127,9 @@ jobs:
         run: .monitor/scripts/monitor.sh lists
       - name: Report
         if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        env:
+          MONITOR_DOCS_URL: ${{ github.server_url }}/spali/.github/blob/${{ job.workflow_sha }}/docs/monitor-checks.md
+          MONITOR_CONFIG_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/${{ inputs.config }}
         run: .monitor/scripts/monitor.sh report
       - name: Overview issue
         if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}

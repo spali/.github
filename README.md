@@ -53,6 +53,7 @@ flowchart LR
 | [`.github/workflows/release-publish.yml`](.github/workflows/release-publish.yml) | Reusable: checksums, attestation, publish |
 | [`.github/workflows/monitor.yml`](.github/workflows/monitor.yml), [`monitor-config.yml`](.github/workflows/monitor-config.yml) | Reusable: the [maintenance monitor](#maintenance-monitor) and the validation of its control file, called from a private control repository |
 | [`scripts/`](scripts) | The logic of the reusable workflows (Bash), tested in [`tests/`](tests) |
+| [`docs/monitor-checks.md`](docs/monitor-checks.md) | What each check of the maintenance monitor means and how to fix a finding |
 | [`examples/caller/`](examples/caller) | Workflows to copy into a repository |
 
 The reusable workflows load their scripts and `release-drafter.yml` from the
@@ -498,10 +499,22 @@ when the cause is gone.
 If the app loses access to all repositories, the run ends red
 (`check-failed`), not green.
 
+**The run.** Each phase is its own step of the job: control file, inventory,
+release flow, settings and rulesets, health, forks, mirrors, lists, report and
+overview issue. A check step is red while it found a red finding that is not
+ignored; the later steps still run. Its log lists every repository the check
+looked at: ✓ for one without findings, otherwise a group to unfold with each
+finding (✗ red, ℹ info, – skipped, ◌ ignored). Red findings also appear as
+annotations on the run page.
+
 **The overview issue.** Every run writes its report into one issue of the
 control repository, labelled `maintenance-monitor` (the label is created on
 the first run; the lowest-numbered open issue with it is updated, a new one is
-created if none is open). The title shows the counts, the body ends with the
+created if none is open). The title shows the counts. The body has three
+sections, 🔴 red, 🔵 info and ⚪ skipped (collapsed), one table per check:
+the repository, the details and a link to where to fix it. Each check title
+has an ℹ️ link to its explanation in
+[`docs/monitor-checks.md`](docs/monitor-checks.md). The body ends with the
 time of the update and a link to the run. A report above GitHub's size limit is
 cut and points to the run summary. The issue is a view, not a notification:
 the failed-run e-mail stays the notification.
@@ -511,6 +524,9 @@ is set, which you should not do locally):
 
 ```sh
 GH_TOKEN=$(gh auth token) MONITOR_CONFIG=<path to repos.yml> scripts/monitor.sh
+# or one phase at a time, with the log of the workflow step:
+export MONITOR_WORK=$(mktemp -d)   # plus GH_TOKEN and MONITOR_CONFIG as above
+scripts/monitor.sh config && scripts/monitor.sh inventory && scripts/monitor.sh health
 ```
 
 **Ignore a finding** with a pull request in the control repository that adds
