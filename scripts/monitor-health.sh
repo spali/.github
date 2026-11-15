@@ -100,6 +100,7 @@ main() {
   fi
   while IFS=$'\t' read -r repo branch; do
     [[ -n $repo ]] || continue
+    checked "$repo"
     check_main_red "$repo" "$branch"
     check_renovate "$repo"
     check_workflows "$repo"

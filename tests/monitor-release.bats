@@ -54,6 +54,12 @@ run_script() {
 count() { jq -s --arg c "$1" 'map(select(.check == $c)) | length' "$FINDINGS"; }
 message() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].message' "$FINDINGS"; }
 
+@test "records the checked repositories" {
+  export MONITOR_CHECKED="$BATS_TEST_TMPDIR/checked"
+  run_script
+  [ "$(cat "$MONITOR_CHECKED")" = "spali/a" ]
+}
+
 @test "dev build of closed PR 7 is red" {
   releases '[{"tag_name":"v1.0.0-pr.7","draft":false,"prerelease":true}]'
   pulls '[{"number":8}]'

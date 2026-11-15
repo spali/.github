@@ -60,6 +60,12 @@ level() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].level' "$FINDING
   run ! grep -q spali/skip "$GH_LOG"
 }
 
+@test "records the checked repositories" {
+  export MONITOR_CHECKED="$BATS_TEST_TMPDIR/checked"
+  run_script
+  [ "$(cat "$MONITOR_CHECKED")" = "spali/a" ]
+}
+
 @test "settings-merge names each differing field" {
   repo_json '.data.repository.mergeCommitAllowed = true | .data.repository.squashMergeCommitTitle = "COMMIT_OR_PR_TITLE"'
   run_script

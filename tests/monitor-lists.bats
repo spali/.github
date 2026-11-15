@@ -59,6 +59,13 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ ! -s "$FINDINGS" ]
 }
 
+@test "records the checked repositories" {
+  export MONITOR_CHECKED="$BATS_TEST_TMPDIR/checked"
+  all_lists '.'
+  run_script
+  [ "$(cat "$MONITOR_CHECKED")" = "spali/a" ]
+}
+
 @test "list-none: repo in no list" {
   all_lists '.'
   run_script

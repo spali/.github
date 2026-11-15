@@ -56,6 +56,14 @@ level() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) |
   grep -q 'ls-remote --heads --tags' "$GIT_LOG"
 }
 
+@test "records the checked repositories" {
+  export MONITOR_CHECKED="$BATS_TEST_TMPDIR/checked"
+  refs refs/heads/main:1 | git_respond "$SRC" -
+  refs refs/heads/main:1 | git_respond "$TGT" -
+  run_script
+  [ "$(cat "$MONITOR_CHECKED")" = "spali/m" ]
+}
+
 @test "mirror with differing ref and old push is red" {
   refs refs/heads/main:1 refs/heads/dev:3 refs/tags/v1:2 | git_respond "$SRC" -
   refs refs/heads/main:9 refs/tags/v1:2 | git_respond "$TGT" -

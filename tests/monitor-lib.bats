@@ -27,6 +27,21 @@ gh_fail_raw() {
   [ "$(jq -c . "$FINDINGS")" = '{"level":"red","check":"main-red","repo":"spali/x","message":"m"}' ]
 }
 
+@test "checked appends the repo to MONITOR_CHECKED" {
+  export MONITOR_CHECKED="$BATS_TEST_TMPDIR/checked"
+  checked spali/x
+  checked spali/y
+  [ "$(cat "$MONITOR_CHECKED")" = "$(printf 'spali/x\nspali/y')" ]
+}
+
+@test "checked without MONITOR_CHECKED writes nothing" {
+  unset MONITOR_CHECKED
+  run --separate-stderr checked spali/x
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -z "$stderr" ]
+}
+
 @test "finding with - has null repo" {
   finding info adoption - m
   [ "$(jq -c .repo "$FINDINGS")" = null ]

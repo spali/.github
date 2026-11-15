@@ -99,6 +99,11 @@ main() {
   fi
   rm -f "$tmp"
   check_adoption
+  local names
+  names=$(jq -r '.[].name' "$INVENTORY" 2>/dev/null) || names=
+  while IFS= read -r repo; do
+    [[ -z $repo ]] || checked "$repo"
+  done <<<"$names"
 }
 
 main

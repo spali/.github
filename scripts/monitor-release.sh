@@ -104,6 +104,7 @@ main() {
   fi
   while IFS=$'\t' read -r repo central; do
     [[ -n $repo ]] || continue
+    checked "$repo"
     pins=$(jq -c --arg r "$repo" '[.[] | select(.name == $r) | (.pins // [])[]]' "$INVENTORY" 2>/dev/null) || pins='[]'
 
     if [[ $central == true ]]; then
