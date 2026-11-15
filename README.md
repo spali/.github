@@ -459,6 +459,7 @@ mirror is behind after its `interval_hours` plus 24 h.
 | Key | Meaning |
 |---|---|
 | `version` | must be `1` |
+| `monitor` | optional: `jobs` (`per-group`, the default: one job per check group; `per-repo`: one job per check group and repository) and `runs-on` (a runner label or a list of labels, default `ubuntu-latest`) |
 | `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `archive`, `mirrors`, `forks` (list of lists) |
 | `mirrors` | mirror targets: `target` (`spali/name`), `source` (`https://` URL), `interval_hours`, optional `script` |
 | `forks` | forks with their own sync workflow: `repo`, `sync_interval_hours` |
@@ -466,6 +467,9 @@ mirror is behind after its `interval_hours` plus 24 h.
 
 ```yaml
 version: 1
+monitor:
+  jobs: per-group
+  runs-on: ubuntu-latest
 lists:
   exclusive:
     - ["Active", "Archive"]
@@ -499,13 +503,20 @@ when the cause is gone.
 If the app loses access to all repositories, the run ends red
 (`check-failed`), not green.
 
-**The run.** Each phase is its own step of the job: control file, inventory,
-release flow, settings and rulesets, health, forks, mirrors, lists, report and
-overview issue. A check step is red while it found a red finding that is not
-ignored; the later steps still run. Its log lists every repository the check
-looked at: ✓ for one without findings, otherwise a group to unfold with each
-finding (✗ red, ℹ info, – skipped, ◌ ignored). Red findings also appear as
-annotations on the run page.
+**The run.** The job **Inventory** reads the control file and the list of
+repositories. Then each check group runs as a matrix job: release flow,
+settings and rulesets, health, forks and mirrors, plus **Lists**. With
+`monitor.jobs: per-group` (default) that is one job per group; with `per-repo`
+one job per group and repository (`Forks · spali/x`), so every repository
+shows ✓ or ✗ in the run graph, at the cost of more jobs (each counts at
+least one Actions minute). **Report** collects the findings of all jobs,
+writes the job summary and the overview issue. A check job is red while it
+found a red finding that is not ignored; the other jobs still run. Its log
+lists every repository it looked at: ✓ for one without findings, otherwise a
+group to unfold with each finding (✗ red, ℹ info, – skipped, ◌ ignored). Red
+findings also appear as annotations on the run page. `monitor.runs-on` moves
+all jobs but Inventory to another runner (for example your own); it needs
+`bash`, `gh`, `jq` and `git`.
 
 **The overview issue.** Every run writes its report into one issue of the
 control repository, labelled `maintenance-monitor` (the label is created on
@@ -524,7 +535,7 @@ is set, which you should not do locally):
 
 ```sh
 GH_TOKEN=$(gh auth token) MONITOR_CONFIG=<path to repos.yml> scripts/monitor.sh
-# or one phase at a time, with the log of the workflow step:
+# or one phase at a time, with the log of its job (MONITOR_REPO=spali/x: one repository):
 export MONITOR_WORK=$(mktemp -d)   # plus GH_TOKEN and MONITOR_CONFIG as above
 scripts/monitor.sh config && scripts/monitor.sh inventory && scripts/monitor.sh health
 ```

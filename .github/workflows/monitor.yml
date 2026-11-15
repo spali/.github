@@ -25,6 +25,13 @@
 # thing it writes is the overview issue (and its label) in the calling
 # repository, with that repository's GITHUB_TOKEN. The run fails while a red
 # finding is open. The caller owns the schedule and the concurrency group.
+#
+# Jobs: Inventory (control file, inventory, the jobs per check group) → one
+# matrix job per check group (release, settings, health, forks, mirrors) and
+# Lists → Report (collects the findings of all jobs as artifacts, kept 1 day;
+# job summary and overview issue). The control file chooses one job per group
+# (monitor.jobs: per-group, default) or one per group and repository
+# (per-repo), and the runner of all jobs but Inventory (monitor.runs-on).
 name: Monitor
 
 on:
@@ -46,19 +53,26 @@ on:
 permissions:
   contents: read
 
+env:
+  MONITOR_CONFIG: ${{ inputs.config }}
+  MONITOR_WORK: .monitor-work
+
 jobs:
-  monitor:
-    name: monitor
+  prepare:
+    name: Inventory
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      issues: write # the overview issue in the calling repository
-    env:
-      MONITOR_CONFIG: ${{ inputs.config }}
-      MONITOR_WORK: .monitor-work
+    timeout-minutes: 10
+    outputs:
+      ready: ${{ steps.matrix.outputs.ready }}
+      runner: ${{ steps.matrix.outputs.runner }}
+      release: ${{ steps.matrix.outputs.release }}
+      settings: ${{ steps.matrix.outputs.settings }}
+      health: ${{ steps.matrix.outputs.health }}
+      forks: ${{ steps.matrix.outputs.forks }}
+      mirrors: ${{ steps.matrix.outputs.mirrors }}
     steps:
-      - name: Create app token
+      - &app-token
+        name: Create app token
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
@@ -76,7 +90,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Checkout shared scripts
+      - &scripts
+        name: Checkout shared scripts
         id: scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -84,55 +99,168 @@ jobs:
           ref: ${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
           path: .monitor
           persist-credentials: false
-      # One step per phase (scripts/monitor.sh): a step is red when its phase
-      # found a red finding that is not ignored; the later phases still run.
       - name: Control file
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: .monitor/scripts/monitor.sh config
       - name: Inventory
         if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: .monitor/scripts/monitor.sh inventory
-      - name: Release flow
+      - name: Repositories per check group
+        id: matrix
         if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        run: |
+          groups=$(.monitor/scripts/monitor.sh matrix)
+          for g in release settings health forks mirrors; do
+            echo "$g=$(jq -c --arg g "$g" '.[$g]' <<<"$groups")" >>"$GITHUB_OUTPUT"
+            echo "$g: $(jq -r --arg g "$g" '.[$g] | length' <<<"$groups") repositories"
+          done
+          echo "runner=$(jq -c '."runs-on"' <<<"$groups")" >>"$GITHUB_OUTPUT"
+          echo "runs-on: $(jq -c '."runs-on"' <<<"$groups")"
+          echo "ready=true" >>"$GITHUB_OUTPUT"
+      - name: Upload inventory
+        if: ${{ !cancelled() && steps.matrix.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: monitor-base
+          path: |
+            .monitor-work/config.json
+            .monitor-work/inventory.json
+          retention-days: 1
+          include-hidden-files: true
+      - &upload-findings
+        name: Upload findings
+        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: .monitor-work/findings.jsonl
+          retention-days: 1
+          include-hidden-files: true
+          if-no-files-found: error
+
+  release:
+    name: Release flow · ${{ matrix.repo || 'all repositories' }}
+    needs: prepare
+    if: ${{ !cancelled() && needs.prepare.outputs.ready == 'true' && needs.prepare.outputs.release != '[]' }}
+    runs-on: ${{ fromJSON(needs.prepare.outputs.runner) }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.prepare.outputs.release) }}
+    steps: &group-steps
+      - *app-token
+      - *scripts
+      - name: Download inventory
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: monitor-base
+          path: .monitor-work
+      - name: Check ${{ matrix.repo || 'all repositories' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: .monitor/scripts/monitor.sh release
-      - name: Settings and rulesets
-        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: .monitor/scripts/monitor.sh settings
-      - name: Health
-        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: .monitor/scripts/monitor.sh health
-      - name: Forks
-        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: .monitor/scripts/monitor.sh forks
-      - name: Mirrors
-        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: .monitor/scripts/monitor.sh mirrors
-      - name: Lists
-        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+          MONITOR_REPO: ${{ matrix.repo }}
+        run: .monitor/scripts/monitor.sh "$GITHUB_JOB"
+      - *upload-findings
+
+  settings:
+    name: Settings · ${{ matrix.repo || 'all repositories' }}
+    needs: prepare
+    if: ${{ !cancelled() && needs.prepare.outputs.ready == 'true' && needs.prepare.outputs.settings != '[]' }}
+    runs-on: ${{ fromJSON(needs.prepare.outputs.runner) }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.prepare.outputs.settings) }}
+    steps: *group-steps
+
+  health:
+    name: Health · ${{ matrix.repo || 'all repositories' }}
+    needs: prepare
+    if: ${{ !cancelled() && needs.prepare.outputs.ready == 'true' && needs.prepare.outputs.health != '[]' }}
+    runs-on: ${{ fromJSON(needs.prepare.outputs.runner) }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.prepare.outputs.health) }}
+    steps: *group-steps
+
+  forks:
+    name: Forks · ${{ matrix.repo || 'all repositories' }}
+    needs: prepare
+    if: ${{ !cancelled() && needs.prepare.outputs.ready == 'true' && needs.prepare.outputs.forks != '[]' }}
+    runs-on: ${{ fromJSON(needs.prepare.outputs.runner) }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.prepare.outputs.forks) }}
+    steps: *group-steps
+
+  mirrors:
+    name: Mirrors · ${{ matrix.repo || 'all repositories' }}
+    needs: prepare
+    if: ${{ !cancelled() && needs.prepare.outputs.ready == 'true' && needs.prepare.outputs.mirrors != '[]' }}
+    runs-on: ${{ fromJSON(needs.prepare.outputs.runner) }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.prepare.outputs.mirrors) }}
+    steps: *group-steps
+
+  lists:
+    name: Lists
+    needs: prepare
+    if: ${{ !cancelled() && needs.prepare.outputs.ready == 'true' }}
+    runs-on: ${{ fromJSON(needs.prepare.outputs.runner) }}
+    timeout-minutes: 10
+    steps:
+      - *app-token
+      - *scripts
+      - name: Download inventory
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: monitor-base
+          path: .monitor-work
+      - name: Check lists
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: .monitor/scripts/monitor.sh lists
+      - *upload-findings
+
+  report:
+    name: Report
+    needs: [prepare, release, settings, health, forks, mirrors, lists]
+    if: ${{ !cancelled() && needs.prepare.outputs.ready == 'true' }}
+    runs-on: ${{ fromJSON(needs.prepare.outputs.runner) }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write # the overview issue in the calling repository
+    steps:
+      - *scripts
+      - name: Download inventory
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: monitor-base
+          path: .monitor-work
+      - name: Download findings
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: findings-*
+          path: .monitor-findings
+      - name: Collect findings
+        run: cat .monitor-findings/*/findings.jsonl >.monitor-work/findings.jsonl
       - name: Report
-        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
         env:
           MONITOR_DOCS_URL: ${{ github.server_url }}/spali/.github/blob/${{ job.workflow_sha }}/docs/monitor-checks.md
           MONITOR_CONFIG_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/${{ inputs.config }}
         run: .monitor/scripts/monitor.sh report
       - name: Overview issue
-        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
         env:
           ISSUE_TOKEN: ${{ github.token }}
           MONITOR_ISSUE_REPO: ${{ github.repository }}
