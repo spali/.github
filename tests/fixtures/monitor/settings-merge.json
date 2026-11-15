@@ -1,0 +1,11 @@
+{
+  "data": {
+    "repository": {
+      "mergeCommitAllowed": false,
+      "squashMergeAllowed": true,
+      "rebaseMergeAllowed": true,
+      "deleteBranchOnMerge": true,
+      "squashMergeCommitTitle": "PR_TITLE"
+    }
+  }
+}

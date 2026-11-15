@@ -26,13 +26,32 @@ check_json() {
 }
 
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
+# check_merge REPO reads the merge settings with GraphQL: the REST repository
+# answers null for them to an app token without write access.
+MERGE_QUERY='query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
+    deleteBranchOnMerge squashMergeCommitTitle
+  }
+}'
 check_merge() {
-  check_json settings-merge "$1" "repos/$1" \
-    '. as $r | {allow_merge_commit: false, allow_squash_merge: true,
+  local body problems
+  body=$(fetch settings-merge "$1" graphql -f query="$MERGE_QUERY" \
+    -f owner="${1%%/*}" -f name="${1#*/}") || return 0
+  json_out settings-merge "$1" problems -r \
+    '.data.repository | if . == null then error("no repository") else . end |
+     {allow_merge_commit: .mergeCommitAllowed,
+      allow_squash_merge: .squashMergeAllowed,
+      allow_rebase_merge: .rebaseMergeAllowed,
+      delete_branch_on_merge: .deleteBranchOnMerge,
+      squash_merge_commit_title: .squashMergeCommitTitle} as $r |
+     {allow_merge_commit: false, allow_squash_merge: true,
        allow_rebase_merge: true, delete_branch_on_merge: true,
        squash_merge_commit_title: "PR_TITLE"} | to_entries |
      map(select($r[.key] != .value) |
-       "\(.key): got \($r[.key] | tojson), want \(.value | tojson)") | join("; ")'
+       "\(.key): got \($r[.key] | tojson), want \(.value | tojson)") | join("; ")' \
+    <<<"$body" || return 0
+  report settings-merge "$1" "$problems"
 }
 
 check_actions() {

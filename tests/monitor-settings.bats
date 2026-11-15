@@ -25,8 +25,9 @@ inventory() {
 }
 
 # Real answers recorded from a compliant repository (fixtures/monitor), with
-# an optional jq filter to break one field: repo_json 'FILTER'.
-repo_json() { jq -c "${1:-.}" "$FIX/settings-repo.json" | gh_respond '*repos/spali/a' -; }
+# an optional jq filter to break one field: repo_json 'FILTER'. The merge
+# settings come from GraphQL: REST answers null for them to an app token.
+repo_json() { jq -c "${1:-.}" "$FIX/settings-merge.json" | gh_respond '*graphql*owner=spali*name=a' -; }
 pvr_json() { jq -c "${1:-.}" "$FIX/settings-pvr.json" | gh_respond '*spali/a/private-vulnerability-reporting' -; }
 actions_json() { jq -c "${1:-.}" "$FIX/settings-actions.json" | gh_respond '*spali/a/actions/permissions/workflow' -; }
 list_json() { jq -c "${1:-.}" "$FIX/rulesets-list.json" | gh_respond '*repos/spali/a/rulesets' -; }
@@ -60,12 +61,25 @@ level() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].level' "$FINDING
 }
 
 @test "settings-merge names each differing field" {
-  repo_json '.allow_merge_commit = true | .squash_merge_commit_title = "COMMIT_OR_PR_TITLE"'
+  repo_json '.data.repository.mergeCommitAllowed = true | .data.repository.squashMergeCommitTitle = "COMMIT_OR_PR_TITLE"'
   run_script
   [ "$(count settings-merge)" -eq 1 ]
   [ "$(level settings-merge)" = red ]
   [ "$(message settings-merge)" = 'allow_merge_commit: got true, want false; squash_merge_commit_title: got "COMMIT_OR_PR_TITLE", want "PR_TITLE"' ]
   [ "$(jq -s length "$FINDINGS")" -eq 1 ]
+}
+
+@test "settings-merge reads GraphQL, not the REST repository" {
+  run_script
+  grep -q 'graphql' "$GH_LOG"
+  run ! grep -qx 'api repos/spali/a' "$GH_LOG"
+}
+
+@test "settings-merge without a repository in the answer is check-failed" {
+  repo_json '.data.repository = null'
+  run_script
+  [ "$(count settings-merge)" -eq 0 ]
+  [ "$(message check-failed)" = "settings-merge: cannot parse API response" ]
 }
 
 @test "settings-alerts is red when alerts are off" {
@@ -184,7 +198,7 @@ level() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].level' "$FINDING
 }
 
 @test "a failing call is check-failed, never green" {
-  gh_fail '*repos/spali/a' 'Server Error (HTTP 500)'
+  gh_fail '*graphql*name=a' 'Server Error (HTTP 500)'
   gh_fail '*repos/spali/a/rulesets' 'rate limit (HTTP 403)'
   run_script
   [ "$(count check-failed)" -eq 2 ]
