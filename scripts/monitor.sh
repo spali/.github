@@ -9,7 +9,10 @@
 # Phases, in order: config inventory release settings health forks mirrors
 # lists report issue. A check phase lists every repository it looked at
 # (clean ones with ✓, the others as a log group with their findings) and
-# annotates each red finding that is not ignored.
+# annotates each red finding that is not ignored. MONITOR_REPO limits a check
+# phase (not lists) to one repository: one matrix job per repository. The
+# phase matrix (after inventory) prints the repositories of each check group
+# as one JSON object for that matrix.
 #
 # Env: GH_TOKEN, MONITOR_CONFIG (default repos.yml), LISTS_TOKEN (default
 # GH_TOKEN), MONITOR_ISSUE_REPO and ISSUE_TOKEN (see monitor-issue.sh),
@@ -25,7 +28,7 @@ DIR=${MONITOR_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")}
 # shellcheck source=scripts/monitor-lib.sh
 source "$DIR/monitor-lib.sh"
 
-PHASES=(config inventory release settings health forks mirrors lists report issue)
+PHASES=(config inventory matrix release settings health forks mirrors lists report issue)
 CHECKS=(release settings health forks mirrors lists)
 CONFIG_FILE=${MONITOR_CONFIG:-repos.yml}
 EMPTY_CONFIG='{"version":1,"lists":{},"mirrors":[],"forks":[],"ignores":[]}'
@@ -74,14 +77,42 @@ phase_inventory() {
   jq -r '"✓ \(length) repositories, \(map(select(.central)) | length) central, \(map(select(.fork)) | length) forks"' "$INVENTORY"
 }
 
-# phase_check NAME runs monitor-NAME.sh and logs what it found.
+# The repositories of each check group, as the check scripts select them
+# (tests/monitor-matrix.bats compares both). Input: the inventory; $cfg the
+# slurped config.
+# shellcheck disable=SC2016 # jq program
+MATRIX_JQ='
+  ([$cfg[0].mirrors // [] | .[].target]) as $m |
+  (if type == "array" then . else [] end) as $inv |
+  def names(f): [$inv[] | select(f) | .name] | sort;
+  {
+    release: names(.central or ((.pins // []) | length > 0)),
+    settings: names(.central == true),
+    health: names(.fork == false and ([.name] | inside($m) | not)),
+    forks: names(.fork == true and .parent != null and ([.name] | inside($m) | not)),
+    mirrors: ($m | sort)
+  }'
+
+phase_matrix() {
+  jq -c --slurpfile cfg "$CONFIG" "$MATRIX_JQ" "$INVENTORY" 2>/dev/null ||
+    jq -cn '{release: [], settings: [], health: [], forks: [], mirrors: []}'
+}
+
+# phase_check NAME runs monitor-NAME.sh and logs what it found. With
+# MONITOR_REPO the script sees only that repository (and that mirror).
 phase_check() {
-  local name=$1 script=monitor-$1.sh from checked_file rows
+  local name=$1 script=monitor-$1.sh from checked_file rows inv=$INVENTORY cfg=$CONFIG
   checked_file="$WORK/checked-$name"
   : >"$checked_file"
   from=$(wc -l <"$FINDINGS")
+  if [[ -n ${MONITOR_REPO:-} ]]; then
+    inv="$WORK/inventory-$name.json"
+    cfg="$WORK/config-$name.json"
+    jq --arg r "$MONITOR_REPO" '[.[] | select(.name == $r)]' "$INVENTORY" >"$inv" 2>/dev/null || echo '[]' >"$inv"
+    jq --arg r "$MONITOR_REPO" '.mirrors = [(.mirrors // [])[] | select(.target == $r)]' "$CONFIG" >"$cfg"
+  fi
   if ! MONITOR_CHECKED=$checked_file LISTS_TOKEN=${LISTS_TOKEN:-${GH_TOKEN:-}} \
-    "$DIR/$script" >/dev/null 2>&1; then
+    INVENTORY=$inv CONFIG=$cfg "$DIR/$script" >/dev/null 2>&1; then
     finding red check-failed - "$script crashed"
   fi
   rows=$(new_findings "$from")
@@ -164,6 +195,7 @@ run_phase() {
   case $1 in
     config) phase_config ;;
     inventory) phase_inventory ;;
+    matrix) phase_matrix ;;
     report) phase_report ;;
     issue) phase_issue ;;
     *) phase_check "$1" ;;
@@ -184,6 +216,10 @@ main() {
     done
     if [[ -z $known ]]; then
       echo "error: unknown phase $1 (${PHASES[*]})" >&2
+      exit 2
+    fi
+    if [[ -n ${MONITOR_REPO:-} && $1 == lists ]]; then
+      echo "error: MONITOR_REPO does not apply to lists" >&2
       exit 2
     fi
     if [[ -z ${MONITOR_WORK:-} ]]; then
