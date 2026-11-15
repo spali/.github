@@ -514,9 +514,38 @@ writes the job summary and the overview issue. A check job is red while it
 found a red finding that is not ignored; the other jobs still run. Its log
 lists every repository it looked at: ✓ for one without findings, otherwise a
 group to unfold with each finding (✗ red, ℹ info, – skipped, ◌ ignored). Red
-findings also appear as annotations on the run page. `monitor.runs-on` moves
-all jobs but Inventory to another runner (for example your own); it needs
-`bash`, `gh`, `jq` and `git`.
+findings also appear as annotations on the run page.
+
+**Jobs and runner.** Both settings live in `monitor` of the control file; a
+change applies from the next run, the workflow stays the same.
+
+| Setting | Jobs per run | Use it when |
+|---|---|---|
+| `jobs: per-group` (default) | Inventory, 5 groups, Lists, Report: 8 | daily use on GitHub-hosted runners; about 8 billed minutes per run |
+| `jobs: per-repo` | Inventory, one per group and repository, Lists, Report (about 55 for 45 repositories) | you want ✓/✗ per repository in the run graph, typically on your own runner; on GitHub-hosted runners each job is billed as at least one minute |
+
+`runs-on` is one runner label or a list of labels (all must match), for
+example `[self-hosted, linux]`. It applies to every job except Inventory,
+which always runs on `ubuntu-latest` because it reads the control file first.
+Your own runner:
+
+- must be available to the control repository (repository runner, or an
+  account/organization runner group that includes it) and carry the labels;
+- needs Linux with `bash`, GNU `date`, `git`, `gh` and `jq` (the actions bring
+  their own Node.js); `yq` is only needed by Inventory;
+- runs jobs one after the other unless you register several runners, so
+  `per-repo` takes longer on a single runner; a job waits in the queue while no
+  runner is online and the run fails only when GitHub gives up on it;
+- gets the read-only app token and the issue token of each job: use it only
+  for the private control repository.
+
+Example:
+
+```yaml
+monitor:
+  jobs: per-repo
+  runs-on: [self-hosted, linux]
+```
 
 **The overview issue.** Every run writes its report into one issue of the
 control repository, labelled `maintenance-monitor` (the label is created on
