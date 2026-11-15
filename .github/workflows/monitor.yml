@@ -54,6 +54,9 @@ jobs:
     permissions:
       contents: read
       issues: write # the overview issue in the calling repository
+    env:
+      MONITOR_CONFIG: ${{ inputs.config }}
+      MONITOR_WORK: .monitor-work
     steps:
       - name: Create app token
         id: app-token
@@ -74,17 +77,60 @@ jobs:
         with:
           persist-credentials: false
       - name: Checkout shared scripts
+        id: scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: spali/.github
           ref: ${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
           path: .monitor
           persist-credentials: false
-      - name: Run monitor
+      # One step per phase (scripts/monitor.sh): a step is red when its phase
+      # found a red finding that is not ignored; the later phases still run.
+      - name: Control file
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          LISTS_TOKEN: ${{ steps.app-token.outputs.token }}
-          MONITOR_CONFIG: ${{ inputs.config }}
+        run: .monitor/scripts/monitor.sh config
+      - name: Inventory
+        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: .monitor/scripts/monitor.sh inventory
+      - name: Release flow
+        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: .monitor/scripts/monitor.sh release
+      - name: Settings and rulesets
+        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: .monitor/scripts/monitor.sh settings
+      - name: Health
+        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: .monitor/scripts/monitor.sh health
+      - name: Forks
+        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: .monitor/scripts/monitor.sh forks
+      - name: Mirrors
+        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: .monitor/scripts/monitor.sh mirrors
+      - name: Lists
+        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: .monitor/scripts/monitor.sh lists
+      - name: Report
+        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        run: .monitor/scripts/monitor.sh report
+      - name: Overview issue
+        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        env:
           ISSUE_TOKEN: ${{ github.token }}
           MONITOR_ISSUE_REPO: ${{ github.repository }}
-        run: .monitor/scripts/monitor.sh
+        run: .monitor/scripts/monitor.sh issue
