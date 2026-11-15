@@ -20,3 +20,20 @@ setup() {
     [[ " ${MONITOR_CHECKS[*]} " == *" $id "* ]] || { echo "unknown: $id"; return 1; }
   done
 }
+
+@test "every check id has a section in docs/monitor-checks.md" {
+  DOC="$BATS_TEST_DIRNAME/../docs/monitor-checks.md"
+  for id in "${MONITOR_CHECKS[@]}"; do
+    run grep -qx -- "## $id" "$DOC"
+    [ "$status" -eq 0 ] || { echo "no section: $id"; return 1; }
+  done
+}
+
+@test "every section in docs/monitor-checks.md is a check id" {
+  DOC="$BATS_TEST_DIRNAME/../docs/monitor-checks.md"
+  ids=$(sed -n 's/^## //p' "$DOC")
+  [ -n "$ids" ]
+  for id in $ids; do
+    [[ " ${MONITOR_CHECKS[*]} " == *" $id "* ]] || { echo "unknown: $id"; return 1; }
+  done
+}

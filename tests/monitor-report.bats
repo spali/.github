@@ -7,6 +7,14 @@ setup() {
   FIX="$BATS_TEST_DIRNAME/fixtures/monitor"
   export FINDINGS="$FIX/findings.jsonl"
   export CONFIG="$FIX/config.json"
+  export MONITOR_DOCS_URL=https://docs.example/checks.md
+  unset MONITOR_CONFIG_URL
+}
+
+# section NAME prints the part of $output from the section heading NAME up
+# to the next section heading.
+section() {
+  awk -v h="$1" '/^## / { on = index($0, h) == 4 } on' <<<"$output"
 }
 
 # findings sets $FINDINGS to the lines on stdin.
@@ -25,8 +33,8 @@ config() {
   run "$REPORT"
   [ "$status" -eq 1 ]
   [[ $output == "## Maintenance monitor"* ]]
-  [[ $output == *"2 red · 1 info · 1 skipped"* ]]
-  [[ $output == *"| spali/pub | merge commits allowed |"* ]]
+  [[ $output == *"**2 red** · 1 info · 1 skipped"* ]]
+  [[ $output == *"| [spali/pub](https://github.com/spali/pub) | merge commits allowed | [Settings](https://github.com/spali/pub/settings) |"* ]]
 }
 
 @test "exits 0 with only info and skip" {
@@ -36,15 +44,16 @@ config() {
 J
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"0 red · 1 info · 1 skipped"* ]]
-  [[ $output != *"### Red"* ]]
-  [[ $output != *"code-scanning-alert"* ]]
+  [[ $output == *"**0 red** · 1 info · 1 skipped"* ]]
+  [[ $output == *"> [!TIP]"* ]]
+  [[ $output != *"[!CAUTION]"* ]]
+  [[ "$(section "🔴 Red")" == *"Nothing to fix."* ]]
 }
 
 @test "names every repo and message, private or not" {
   run "$REPORT"
   [ "$status" -eq 1 ]
-  [[ $output == *"| spali/secret-repo | CI failed: https://api.github.com/repos/spali/secret-repo/actions/runs |"* ]]
+  [[ $output == *"| [spali/secret-repo](https://github.com/spali/secret-repo) | CI failed: [run](https://api.github.com/repos/spali/secret-repo/actions/runs) |"* ]]
   [[ $output != *"[private]"* ]]
 }
 
@@ -64,9 +73,9 @@ J
 J
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"0 red · 1 info · 0 skipped"* ]]
-  [[ $output == *"#### \`ignore-unused\`"* ]]
-  [[ $output == *"| spali/gone | unused ignore: hush |"* ]]
+  [[ $output == *"**0 red** · 1 info · 0 skipped"* ]]
+  [[ $output == *"### \`ignore-unused\` [ℹ️](https://docs.example/checks.md#ignore-unused)"* ]]
+  [[ $output == *"| [spali/gone](https://github.com/spali/gone) | unused ignore: hush |"* ]]
 }
 
 @test "a non-string message is rendered, not fatal" {
@@ -85,8 +94,8 @@ J
   export FINDINGS="$BATS_TEST_TMPDIR/big.jsonl"
   run --separate-stderr "$REPORT"
   [ "$status" -eq 1 ]
-  [[ $output == *"30 red · 0 info · 0 skipped"* ]]
-  [[ $output == *"| spali/r29 |"* ]]
+  [[ $output == *"**30 red** · 0 info · 0 skipped"* ]]
+  [[ $output == *"| [spali/r29](https://github.com/spali/r29) |"* ]]
   [ -z "$stderr" ]
 }
 
@@ -94,7 +103,7 @@ J
   findings </dev/null
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"0 red · 0 info · 0 skipped"* ]]
+  [[ $output == *"**0 red** · 0 info · 0 skipped"* ]]
 }
 
 @test "ignore removes a red finding and exits 0" {
@@ -106,7 +115,7 @@ J
 J
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"0 red · 0 info · 0 skipped"* ]]
+  [[ $output == *"**0 red** · 0 info · 0 skipped"* ]]
   [[ $output != *"merge commits"* ]]
 }
 
@@ -116,8 +125,8 @@ J
 J
   run "$REPORT"
   [ "$status" -eq 1 ]
-  [[ $output == *"2 red · 2 info · 1 skipped"* ]]
-  [[ $output == *"| spali/pub | unused ignore: typo? |"* ]]
+  [[ $output == *"**2 red** · 2 info · 1 skipped"* ]]
+  [[ $output == *"| [spali/pub](https://github.com/spali/pub) | unused ignore: typo? |"* ]]
 }
 
 @test "sections are sorted and pipes escaped" {
@@ -128,10 +137,92 @@ J
 {"level":"red","check":"main-red","repo":"spali/other","message":"z"}
 J
   run "$REPORT"
-  [[ $output == *'| spali/pub | a \| b |'* ]]
-  red=${output%%### Info*}
-  [[ $output == *"### Red"*"### Info"* ]]
+  [[ $output == *'| a \| b |'* ]]
+  [[ $output == *"## 🔴 Red (3)"*"## 🔵 Info (1)"*"## ⚪ Skipped (0)"* ]]
+  red=$(section "🔴 Red")
   # main-red (other, pub) before settings-pvr
   [[ $red == *"main-red"*"spali/other"*"spali/pub"*"settings-pvr"* ]]
+}
+
+@test "the summary is a caution alert while red findings are open" {
+  run "$REPORT"
+  [[ $output == *$'> [!CAUTION]\n> **2 red** · 1 info · 1 skipped'* ]]
+}
+
+@test "each check title links its explanation" {
+  run "$REPORT"
+  [[ $output == *"### \`main-red\` [ℹ️](https://docs.example/checks.md#main-red)"* ]]
+}
+
+@test "the docs link defaults to the main branch of spali/.github" {
+  unset MONITOR_DOCS_URL
+  run "$REPORT"
+  [[ $output == *"[ℹ️](https://github.com/spali/.github/blob/main/docs/monitor-checks.md#main-red)"* ]]
+}
+
+@test "skipped findings are listed in a collapsed section" {
+  run "$REPORT"
+  skipped=$(section "⚪ Skipped")
+  [[ $skipped == *"<details>"*"code-scanning-alert"*"| [spali/pub](https://github.com/spali/pub) | no analysis found |"*"</details>"* ]]
+}
+
+@test "each check links where to fix it" {
+  findings <<'J'
+{"level":"red","check":"devbuild-closed-pr","repo":"o/r","message":"m"}
+{"level":"red","check":"orphan-tag","repo":"o/r","message":"m"}
+{"level":"red","check":"pin-behind","repo":"o/r","message":"m"}
+{"level":"red","check":"settings-alerts","repo":"o/r","message":"m"}
+{"level":"red","check":"settings-actions","repo":"o/r","message":"m"}
+{"level":"red","check":"ruleset-main","repo":"o/r","message":"m"}
+{"level":"red","check":"workflow-disabled","repo":"o/r","message":"m"}
+{"level":"red","check":"dependabot-alert","repo":"o/r","message":"m"}
+{"level":"red","check":"code-scanning-alert","repo":"o/r","message":"m"}
+{"level":"red","check":"renovate-stale","repo":"o/r","message":"m"}
+{"level":"info","check":"list-none","repo":"o/r","message":"m"}
+{"level":"info","check":"fork-behind","repo":"o/r","message":"m"}
+J
+  run "$REPORT"
+  [[ $output == *"[Releases](https://github.com/o/r/releases)"* ]]
+  [[ $output == *"[Tags](https://github.com/o/r/tags)"* ]]
+  [[ $output == *"[Renovate PRs](https://github.com/o/r/pulls?q=is%3Apr+is%3Aopen+author%3Aapp%2Frenovate)"* ]]
+  [[ $output == *"[Security settings](https://github.com/o/r/settings/security_analysis)"* ]]
+  [[ $output == *"[Actions settings](https://github.com/o/r/settings/actions)"* ]]
+  [[ $output == *"[Rulesets](https://github.com/o/r/settings/rules)"* ]]
+  [[ $output == *"[Actions](https://github.com/o/r/actions)"* ]]
+  [[ $output == *"[Dependabot](https://github.com/o/r/security/dependabot)"* ]]
+  [[ $output == *"[Code scanning](https://github.com/o/r/security/code-scanning)"* ]]
+  [[ $output == *"[Lists](https://github.com/o?tab=stars)"* ]]
+  [[ $output == *"| [o/r](https://github.com/o/r) | m | [Fork](https://github.com/o/r) |"* ]]
+}
+
+@test "issue numbers link into the repository of the finding" {
+  findings <<'J'
+{"level":"red","check":"renovate-stale","repo":"o/r","message":"#12 chore: bump x (9 days)"}
+{"level":"red","check":"devbuild-closed-pr","repo":"o/r","message":"v1.0.0-pr.7: PR #7 is not open"}
+J
+  run "$REPORT"
+  [[ $output == *"| [#12](https://github.com/o/r/issues/12) chore: bump x (9 days) |"* ]]
+  [[ $output == *"PR [#7](https://github.com/o/r/issues/7) is not open"* ]]
+}
+
+@test "repositories named in an adoption message are links" {
+  findings <<'J'
+{"level":"info","check":"adoption","repo":null,"message":"2 own repositories without the shared release flow: o/a, o/b.c"}
+J
+  run "$REPORT"
+  [[ $output == *"| - | 2 own repositories without the shared release flow: [o/a](https://github.com/o/a), [o/b.c](https://github.com/o/b.c) |"* ]]
+}
+
+@test "control file findings link the control file when its URL is known" {
+  findings <<'J'
+{"level":"red","check":"config-invalid","repo":null,"message":"repos.yml: bad"}
+J
+  config <<'J'
+{"ignores":[{"repo":"o/r","check":"adoption","reason":"x"}]}
+J
+  export MONITOR_CONFIG_URL=https://github.com/o/ctl/blob/abc/repos.yml
+  run "$REPORT"
+  [[ $output == *"| - | repos.yml: bad | [Control file](https://github.com/o/ctl/blob/abc/repos.yml) |"* ]]
+  [[ $output == *"| unused ignore: x | [Control file](https://github.com/o/ctl/blob/abc/repos.yml) |"* ]]
 }
 

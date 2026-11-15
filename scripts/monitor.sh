@@ -128,7 +128,10 @@ phase_report() {
     return 1
   fi
   summary
-  counts=$(grep -m1 -E '^[0-9]+ red · [0-9]+ info' "$WORK/report.md" || true)
+  # the summary line of the report: "> **N red** · N info · N skipped"
+  counts=$(grep -m1 -E '^> \*\*[0-9]+ red\*\* · [0-9]+ info' "$WORK/report.md" || true)
+  counts=${counts#> }
+  counts=${counts//\*/}
   if [[ $counts =~ ^([0-9]+)\ red\ ·\ ([0-9]+)\ info ]]; then
     title="Maintenance monitor: ${BASH_REMATCH[1]} red · ${BASH_REMATCH[2]} info"
   fi
