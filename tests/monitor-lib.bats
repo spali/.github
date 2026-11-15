@@ -64,6 +64,19 @@ gh_fail_raw() {
   [ ! -s "$FINDINGS" ]
 }
 
+@test "fetch and paged handle a response above 200 KB" {
+  jq -cn '[range(0; 30) | {n: ., pad: ("x" * 10000), keep: .}]' >"$BATS_TEST_TMPDIR/big.json"
+  [ "$(stat -c %s "$BATS_TEST_TMPDIR/big.json")" -gt 200000 ]
+  gh_respond 'api repos/spali/x*' "$BATS_TEST_TMPDIR/big.json"
+  run fetch main-red spali/x repos/spali/x
+  [ "$status" -eq 0 ]
+  [ "$(jq length <<<"$output")" -eq 30 ]
+  paged main-red spali/x repos/spali/x '{n}' "$BATS_TEST_TMPDIR/out.json"
+  [ "$(jq length "$BATS_TEST_TMPDIR/out.json")" -eq 30 ]
+  [ "$(stat -c %s "$BATS_TEST_TMPDIR/out.json")" -lt 1000 ]
+  [ ! -s "$FINDINGS" ]
+}
+
 @test "fetch turns a known n/a answer into skip" {
   gh_fail 'api *' 'gh: no analysis found (HTTP 404)'
   run --separate-stderr fetch code-scanning-alert spali/x repos/spali/x/code-scanning/alerts

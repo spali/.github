@@ -107,6 +107,24 @@ YAML
   [ "$status" -eq 0 ]
 }
 
+@test "a control file above 200 KB is validated completely" {
+  {
+    echo 'version: 1'
+    echo 'ignores:'
+    for i in $(seq 1 3000); do
+      printf '  - {repo: spali/r%s, check: main-red, reason: "%s"}\n' "$i" "$(head -c 80 /dev/zero | tr '\0' x)"
+    done
+  } >"$BATS_TEST_TMPDIR/big.yml"
+  [ "$(stat -c %s "$BATS_TEST_TMPDIR/big.yml")" -gt 200000 ]
+  run --separate-stderr "$CONFIG" validate "$BATS_TEST_TMPDIR/big.yml"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  printf '  - {repo: spali/r1, check: main-red, reason: dup}\n' >>"$BATS_TEST_TMPDIR/big.yml"
+  run --separate-stderr "$CONFIG" validate "$BATS_TEST_TMPDIR/big.yml"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: $BATS_TEST_TMPDIR/big.yml: duplicate ignore spali/r1 main-red" ]
+}
+
 @test "unknown command fails" {
   run --separate-stderr "$CONFIG" bogus
   [ "$status" -eq 1 ]
