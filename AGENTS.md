@@ -153,6 +153,7 @@ reason here needs the owner's decision.
 | `job.workflow_sha` with a fallback that fails checkout | Pinned scripts; never silently run the default branch | `github.workflow_sha` (that is the caller's) |
 | The monitor runs in a **private control repository** that calls reusable workflows; `spali/.github` only provides code | Private repository names can appear in logs, summary and issue without masking; the control file stays private | Cron in this public repository with masking and a private file merged in |
 | The overview issue is written with the caller's `GITHUB_TOKEN`, everything else read with the read-only app token | The app can never write; the only write is scoped to one repository | An app with `issues: write` on all repositories |
+| The monitor runs as **matrix jobs**, the control file chooses `monitor.jobs` (`per-group` default, `per-repo`) and `monitor.runs-on` | One workflow and one set of scripts for both: a job per repository only changes the matrix (`MONITOR_REPO`), so the variants cannot drift; `per-repo` costs about 55 billed minutes per run on hosted runners, so it is opt-in (own runner) | Two workflows (steps in one job vs. matrix); one job with steps only |
 
 ## 4. Procedures
 
@@ -300,6 +301,21 @@ Never weaken or delete a check, widen a threshold, or add a "not applicable"
 answer just to get green. A check that cannot run is `check-failed`, not a
 pass.
 
+### 4.10 Change the monitor jobs or runner
+
+- Switching `monitor.jobs` or `monitor.runs-on` is a change of `repos.yml` in
+  the control repository (PR there). Nothing changes in `spali/.github`.
+- `per-repo` on GitHub-hosted runners costs about one billed minute per job
+  (about 55 per run): only with the owner's approval.
+- A new check group needs, in the same PR: the script, its name in `CHECKS`
+  and the selection in `MATRIX_JQ` (`scripts/monitor.sh`), a matrix job in
+  `.github/workflows/monitor.yml` (copy one, with its own `if` and
+  `matrix.repo`), the job in Report's `needs`, and the group in the test
+  "matrix selects the same repositories as the check scripts"
+  (`tests/monitor-matrix.bats`). That test fails if the matrix and a script
+  select different repositories; never change it to pass, fix the selection.
+- Never add a second workflow for another job layout.
+
 ## 5. Error catalog
 
 | Message (in run log) | Cause | Action |
@@ -415,6 +431,13 @@ and the log of the failed step. Explanations for humans:
   settings (`allow_merge_commit`, …) to an app token without write access;
   `settings-merge` reads them with GraphQL (`mergeCommitAllowed`, …), which
   works with read access.
+- Monitor jobs: `per-group` is a matrix with the single entry `""`
+  (`MONITOR_REPO` empty = all repositories of the group), so job names use
+  `matrix.repo || 'all repositories'`. An empty group gives `[]` and the job is
+  skipped by its `if` (an empty matrix would be an error). Findings travel as
+  artifacts `findings-<job>-<index>` plus `monitor-base` (config, inventory);
+  Report concatenates them. Inventory cannot use `monitor.runs-on`: the value
+  comes from its own output.
 - `git ls-remote` on mirror targets only compares the refs of the source; extra
   refs in the target are fine.
 
