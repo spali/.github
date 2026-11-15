@@ -51,6 +51,7 @@ flowchart LR
 | [`.github/workflows/pr.yml`](.github/workflows/pr.yml) | Reusable: label and check pull requests, delete dev builds of closed ones |
 | [`.github/workflows/release-prepare.yml`](.github/workflows/release-prepare.yml) | Reusable: update the draft, check a pushed tag, decide kind and version |
 | [`.github/workflows/release-publish.yml`](.github/workflows/release-publish.yml) | Reusable: checksums, attestation, publish |
+| [`.github/workflows/monitor.yml`](.github/workflows/monitor.yml), [`monitor-config.yml`](.github/workflows/monitor-config.yml) | Reusable: the [maintenance monitor](#maintenance-monitor) and the validation of its control file, called from a private control repository |
 | [`scripts/`](scripts) | The logic of the reusable workflows (Bash), tested in [`tests/`](tests) |
 | [`examples/caller/`](examples/caller) | Workflows to copy into a repository |
 
@@ -347,6 +348,11 @@ all outputs of `prepare` as inputs of the same name.
 labeled, unlabeled, closed`. It never checks out code of the pull request, so
 `pull_request_target` is safe and labels pull requests from forks too.
 
+**`monitor.yml`** (needs `contents: read`, `issues: write`): inputs
+`app-client-id` (required) and `config` (default `repos.yml`), secret
+`app-key`. **`monitor-config.yml`** (needs `contents: read`): input `config`.
+See [Maintenance monitor](#maintenance-monitor).
+
 The release workflow must keep the tag filters of the examples: `-next` and
 `-pr.*` tags must not start a release.
 
@@ -371,55 +377,113 @@ The release workflow must keep the tag filters of the examples: `-next` and
 
 ## Maintenance monitor
 
-The workflow `monitor.yml` runs every day at 05:17 UTC and on demand
-(`gh workflow run monitor.yml`). It only reads: it never changes anything on
-GitHub. It checks four groups (archived repositories are never checked):
+The monitor checks all repositories of the owner every day. It runs from a
+**private control repository** that you create: that repository holds the
+control file `repos.yml`, the schedule and the results (logs, job summary and
+an overview issue name private repositories freely). `spali/.github` only
+provides the scripts and the reusable workflows `monitor.yml` and
+`monitor-config.yml`. The monitor reads with a read-only GitHub App token; the
+only thing it writes is the overview issue (and its label) in the control
+repository, with that repository's `GITHUB_TOKEN`.
+
+It checks four groups (archived repositories are never checked):
 
 | Group | Repositories | Checks |
 |---|---|---|
 | Release flow and settings | central repositories (those that use this flow) | stale dev builds and `-next` pre-releases, orphan tags, several drafts, pin behind the latest release, merge/alert/PVR/Actions settings, rulesets |
-| Health | all non-fork, non-mirror repositories | red `main`, open Renovate pull requests, disabled workflows, Dependabot and code scanning alerts; `spali/.github` itself: no commit on `main` |
+| Health | all non-fork, non-mirror repositories | red `main`, open Renovate pull requests, disabled workflows, Dependabot and code scanning alerts |
 | Forks and mirrors | forks, and mirror targets listed in `repos.yml` | upstream commits missing, sync workflow disabled, mirror refs behind the source |
 | Lists | all repositories | GitHub Lists that contradict the archive state, forks or mirrors; repositories without the release flow |
 
+The pin check also covers the control repository's own pin of `monitor.yml`.
+A repository that only calls the monitor workflows is not a release-flow
+repository.
+
 **Levels.** `red` is something to fix, `info` is a hint, `skip` means "not
 applicable" (for example rulesets on private repositories of a Free account)
-and is only counted. The run **fails while any red finding is open**; GitHub's
-failed-run mail is the notification. The job summary lists all findings.
+and is only counted. The run **fails while any red finding is open or the
+issue update failed**; GitHub's failed-run mail is the notification.
 
-**Thresholds.** A Renovate pull request is stale after 7 days.
-`spali/.github` is stale at 50 days without a commit on `main` (scheduled
-workflows of public repositories are disabled after 60 days). A pin is behind
+**Thresholds.** A Renovate pull request is stale after 7 days. A pin is behind
 when a newer release of `spali/.github` is older than 7 days. A synced fork or
 mirror is behind after its `interval_hours` plus 24 h.
 
-**Ignore a finding** with a pull request that adds an entry to `ignores` in
-`repos.yml`; the reason is required:
+**Set up the control repository** (once):
+
+1. Create a private repository and add `.github/workflows/monitor.yml`.
+   Replace `<sha>` and `vX.Y.Z` with the latest release of `spali/.github`
+   (pin step of [Set up a new repository](#set-up-a-new-repository)); Renovate keeps the pin
+   current.
+
+   ```yaml
+   name: Monitor
+   on:
+     schedule:
+       - cron: "17 5 * * *"
+     workflow_dispatch:
+   permissions:
+     contents: read
+     issues: write
+   concurrency:
+     group: monitor
+   jobs:
+     monitor:
+       uses: spali/.github/.github/workflows/monitor.yml@<sha> # vX.Y.Z
+       with:
+         app-client-id: ${{ vars.MONITOR_APP_CLIENT_ID }}
+       secrets:
+         app-key: ${{ secrets.MONITOR_APP_KEY }}
+   ```
+
+   `with.config` (default `repos.yml`) names another control file.
+2. Add `.github/workflows/config.yml`, which validates the control file on
+   every change:
+
+   ```yaml
+   name: Config
+   on:
+     push:
+       branches: [main]
+     pull_request:
+   permissions:
+     contents: read
+   jobs:
+     config:
+       uses: spali/.github/.github/workflows/monitor-config.yml@<sha> # vX.Y.Z
+   ```
+3. Add `repos.yml` (schema below) and the app (next section).
+
+**The control file `repos.yml`:**
+
+| Key | Meaning |
+|---|---|
+| `version` | must be `1` |
+| `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `archive`, `mirrors`, `forks` (list of lists) |
+| `mirrors` | mirror targets: `target` (`spali/name`), `source` (`https://` URL), `interval_hours`, optional `script` |
+| `forks` | forks with their own sync workflow: `repo`, `sync_interval_hours` |
+| `ignores` | accepted findings: `repo`, `check` (an id from the AGENTS.md catalog, not `check-failed`), `reason` (required) |
 
 ```yaml
+version: 1
+lists:
+  exclusive:
+    - ["Active", "Archive"]
+  archive: "Archive"
+  mirrors: "Mirrors"
+  forks: ["Contribution forks", "Customization forks"]
+mirrors:
+  - target: spali/example-mirror
+    source: https://example.org/example.git
+    interval_hours: 24
+forks:
+  - repo: spali/example-fork
+    sync_interval_hours: 168
 ignores:
   - {repo: spali/example, check: renovate-stale, reason: waiting for upstream fix}
 ```
 
-Ignores for private repositories go into the private control file. An
-ignore that matches nothing is reported (`ignore-unused`, info), so remove it
+An ignore that matches nothing is reported (`ignore-unused`, info): remove it
 when the cause is gone.
-
-**Control files.** `repos.yml` (public) holds the list names, mirrors, forks
-with their own sync workflow, and ignores. It must never name a private
-repository; the CI job `config` validates it and checks that every repository
-in it is public. Private entries go into a private control file with the same
-schema minus `lists`, in a private repository whose name is the secret
-`MONITOR_PRIVATE_REPO`, at the path `repos.yml`.
-
-**Privacy.** The logs and the summary show private repositories only as
-counts. To see the details, run the monitor locally with your own token:
-
-```sh
-GH_TOKEN=$(gh auth token) MONITOR_UNMASK=1 scripts/monitor.sh
-```
-
-(`MONITOR_PRIVATE_CONFIG=<file>` adds the private control file.)
 
 **Set up the read app** (once):
 
@@ -428,12 +492,29 @@ GH_TOKEN=$(gh auth token) MONITOR_UNMASK=1 scripts/monitor.sh
    Contents, Actions, Administration, Pull requests, Dependabot alerts, Code
    scanning alerts.
 2. Install it on all repositories, generate a private key.
-3. In `spali/.github` set the variable `MONITOR_APP_CLIENT_ID` (client id of
-   the app) and the secrets `MONITOR_APP_KEY` (the private key) and
-   `MONITOR_PRIVATE_REPO` (`owner/name` of the private control repository).
+3. In the control repository set the variable `MONITOR_APP_CLIENT_ID` (client
+   id of the app) and the secret `MONITOR_APP_KEY` (the private key).
 
 If the app loses access to all repositories, the run ends red
 (`check-failed`), not green.
+
+**The overview issue.** Every run writes its report into one issue of the
+control repository, labelled `maintenance-monitor` (the label is created on
+the first run; the lowest-numbered open issue with it is updated, a new one is
+created if none is open). The title shows the counts, the body ends with the
+time of the update and a link to the run. A report above GitHub's size limit is
+cut and points to the run summary. The issue is a view, not a notification:
+the failed-run e-mail stays the notification.
+
+**Run locally** (read-only: no issue is written unless `MONITOR_ISSUE_REPO`
+is set, which you should not do locally):
+
+```sh
+GH_TOKEN=$(gh auth token) MONITOR_CONFIG=<path to repos.yml> scripts/monitor.sh
+```
+
+**Ignore a finding** with a pull request in the control repository that adds
+an entry to `ignores`.
 
 ## Troubleshooting
 
