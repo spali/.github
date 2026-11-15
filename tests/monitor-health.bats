@@ -13,6 +13,7 @@ setup() {
   echo '{"mirrors":[]}' >"$CONFIG"
   export MONITOR_NOW
   MONITOR_NOW=$(date -u -d 2026-11-14T12:00:00Z +%s)
+  unset GITHUB_WORKFLOW_REF
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/monitor-health.sh"
   jq -n '[{name: "spali/a", fork: false, default_branch: "main"}]' >"$INVENTORY"
 }
@@ -44,10 +45,11 @@ count() { jq -s --arg c "$1" 'map(select(.check == $c)) | length' "$FINDINGS"; }
 message() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | .[$i].message' "$FINDINGS"; }
 level() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | .[$i].level' "$FINDINGS"; }
 
-# run_entry ID CONCLUSION CREATED [EVENT]
+# run_entry ID CONCLUSION CREATED [EVENT [PATH]]
 run_entry() {
   jq -nc --argjson id "$1" --arg c "$2" --arg t "$3" --arg e "${4:-push}" \
-    '{workflow_id: $id, name: "wf\($id)", conclusion: $c, html_url: "https://x/\($id)/\($t)", created_at: $t, event: $e}'
+    --arg p "${5:-.github/workflows/wf$1.yml}" \
+    '{workflow_id: $id, name: "wf\($id)", conclusion: $c, html_url: "https://x/\($id)/\($t)", created_at: $t, event: $e, path: $p}'
 }
 
 @test "compliant repo has no findings" {
@@ -195,4 +197,47 @@ run_entry() {
   [ "$(count renovate-stale)" -eq 1 ]
   [ "$(count code-scanning-alert)" -eq 1 ]
   [ "$(count check-failed)" -eq 0 ]
+}
+
+# The monitor's own workflow in the calling repository must not turn the
+# repository red because of the monitor's previous (failed) run.
+@test "main-red skips the monitor's own workflow in the calling repository" {
+  export GITHUB_WORKFLOW_REF='spali/a/.github/workflows/monitor.yml@refs/heads/main'
+  run_entry 1 failure 2026-11-12T00:00:00Z schedule .github/workflows/monitor.yml |
+    jq -s '{workflow_runs: .}' | gh_respond "$RUNS" -
+  run_script
+  [ "$(count main-red)" -eq 0 ]
+}
+
+@test "main-red still reports another failed workflow of the calling repository" {
+  export GITHUB_WORKFLOW_REF='spali/a/.github/workflows/monitor.yml@refs/heads/main'
+  { run_entry 1 failure 2026-11-12T00:00:00Z schedule .github/workflows/monitor.yml
+    run_entry 2 failure 2026-11-12T00:00:00Z push .github/workflows/ci.yml; } |
+    jq -s '{workflow_runs: .}' | gh_respond "$RUNS" -
+  run_script
+  [ "$(count main-red)" -eq 1 ]
+  [[ "$(message main-red)" == wf2:* ]]
+}
+
+@test "main-red keeps the same path in a different repository" {
+  export GITHUB_WORKFLOW_REF='spali/ctl/.github/workflows/monitor.yml@refs/heads/main'
+  run_entry 1 failure 2026-11-12T00:00:00Z schedule .github/workflows/monitor.yml |
+    jq -s '{workflow_runs: .}' | gh_respond "$RUNS" -
+  run_script
+  [ "$(count main-red)" -eq 1 ]
+}
+
+@test "main-red skips nothing when GITHUB_WORKFLOW_REF is unset" {
+  run_entry 1 failure 2026-11-12T00:00:00Z schedule .github/workflows/monitor.yml |
+    jq -s '{workflow_runs: .}' | gh_respond "$RUNS" -
+  run_script
+  [ "$(count main-red)" -eq 1 ]
+}
+
+@test "main-red: a run path with a ref suffix still matches the own workflow" {
+  export GITHUB_WORKFLOW_REF='spali/a/.github/workflows/monitor.yml@refs/heads/main'
+  run_entry 1 failure 2026-11-12T00:00:00Z schedule '.github/workflows/monitor.yml@refs/heads/main' |
+    jq -s '{workflow_runs: .}' | gh_respond "$RUNS" -
+  run_script
+  [ "$(count main-red)" -eq 0 ]
 }

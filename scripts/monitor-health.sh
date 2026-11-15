@@ -10,14 +10,24 @@ source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 need_env FINDINGS INVENTORY CONFIG
 
 # check_main_red REPO BRANCH: the latest completed run per workflow on the
-# default branch (pull request events ignored) must not have failed.
+# default branch (pull request events ignored) must not have failed. The
+# monitor's own workflow in the calling repository is skipped: its previous run
+# fails whenever a finding was red, and would keep the repository red forever.
+# In Actions GITHUB_WORKFLOW_REF is the caller's: owner/repo/path@ref.
 check_main_red() {
-  local repo=$1 body failed line
+  local repo=$1 body failed line own_repo='' own_path='' wf_ref
+  if [[ -n ${GITHUB_WORKFLOW_REF:-} ]]; then
+    wf_ref=${GITHUB_WORKFLOW_REF%%@*}
+    own_repo=$(cut -d/ -f1-2 <<<"$wf_ref")
+    own_path=${wf_ref#*/*/}
+    [[ $own_repo == "$repo" ]] || own_path=''
+  fi
   body=$(fetch main-red "$repo" \
     "repos/$repo/actions/runs?branch=$2&status=completed&per_page=100") || return 0
-  json_out main-red "$repo" failed -r '
+  json_out main-red "$repo" failed -r --arg own "$own_path" '
     [.workflow_runs // [] | .[] |
       select(.event != "pull_request" and .event != "pull_request_target") |
+      select($own == "" or ((.path // "") | sub("@.*$"; "")) != $own) |
       {workflow_id, name, conclusion, html_url, created_at, event}] |
     group_by(.workflow_id) | map(max_by(.created_at)) | .[] |
     select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") |

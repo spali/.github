@@ -344,7 +344,7 @@ Red unless marked info. The detail is in the job summary.
 | `settings-actions` | default workflow permissions are not read-only, or Actions may approve PRs | fix the setting (owner approval) |
 | `ruleset-main` | the `main` ruleset is missing or differs (README step 7); skipped on private repositories under the Free plan | restore it (owner approval) |
 | `ruleset-tags` | the tag ruleset is missing or differs; skipped on private repositories under the Free plan | restore it (owner approval) |
-| `main-red` | the latest run of a workflow on the default branch failed | fix the cause, re-run |
+| `main-red` | the latest run of a workflow on the default branch failed (the monitor's own workflow in the control repository is not checked) | fix the cause, re-run |
 | `renovate-stale` | a Renovate PR is open for more than 7 days | review and merge, or close it |
 | `workflow-disabled` | a workflow is disabled (inactivity) | enable it (`gh workflow enable`), push a commit if needed |
 | `dependabot-alert` | open alert; red for critical/high, info for low/medium | update or dismiss with a reason |
@@ -393,6 +393,11 @@ Red unless marked info. The detail is in the job summary.
   whole stderr.
 - Lists (GraphQL `user.lists`) contain private repositories for the owner's
   token (`LISTS_TOKEN`, default `GH_TOKEN`, is used for that call only).
+- `main-red` skips the monitor's own workflow in the calling repository, found
+  by `GITHUB_WORKFLOW_REF` (in a reusable workflow that is the caller's
+  `owner/repo/.github/workflows/file.yml@ref`): its previous run fails after
+  every red finding and would otherwise keep the control repository red.
+  Without the variable (local runs) nothing is skipped.
 - A repository that only calls `monitor.yml` / `monitor-config.yml` is not
   `central` (not a release-flow repository): no release checks and, because it
   has pins, no `adoption` finding, but `pin-behind` applies.
