@@ -29,8 +29,18 @@ def need($e; $k; $path; test_):
 
 if type != "object" then "top level must be a mapping" else
   (if .version != 1 then "version must be 1" else empty end),
-  (keys[] | select(IN("version", "lists", "mirrors", "forks", "ignores") | not)
+  (keys[] | select(IN("version", "monitor", "lists", "mirrors", "forks", "ignores") | not)
     | "unknown key \(.)"),
+  (if has("monitor") and (.monitor | type) != "object" then "monitor must be a mapping" else empty end),
+  (if (.monitor | type) == "object" then
+     (.monitor | keys[] | select(IN("jobs", "runs-on") | not) | "monitor: unknown key \(.)"),
+     (.monitor | if has("jobs") and (.jobs | IN("per-group", "per-repo") | not)
+       then "monitor.jobs must be per-group or per-repo" else empty end),
+     (.monitor | if has("runs-on") and (.["runs-on"] |
+         (type == "string" and length > 0) or
+         (type == "array" and length > 0 and all(type == "string" and length > 0)) | not)
+       then "monitor.runs-on must be a label or a list of labels" else empty end)
+   else empty end),
   (if has("lists") and (.lists | type) != "object" then "lists must be a mapping" else empty end),
   (if (.lists | type) == "object" then
      (.lists | keys[] | select(IN("exclusive", "archive", "mirrors", "forks") | not)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# monitor.sh matrix and MONITOR_REPO: the repositories of each check group,
-# one matrix job per repository.
+# monitor.sh matrix and MONITOR_REPO: the jobs of each check group (one per
+# repository with monitor.jobs per-repo, else one for all) and the runner.
 
 bats_require_minimum_version 1.5.0
 
@@ -26,7 +26,7 @@ setup() {
     {name: "o/orphan", central: false, fork: true, private: false, default_branch: "main", parent: null, pins: []},
     {name: "o/mirror", central: false, fork: false, private: false, default_branch: "main",
      pushed_at: "2026-11-01T00:00:00Z", pins: []}]' >"$MONITOR_WORK/inventory.json"
-  jq -n '{version: 1, lists: {}, forks: [], ignores: [],
+  jq -n '{version: 1, lists: {}, forks: [], ignores: [], monitor: {jobs: "per-repo"},
     mirrors: [{target: "o/mirror", source: "https://src.example/m.git", interval_hours: 24}]}' \
     >"$MONITOR_WORK/config.json"
 }
@@ -35,7 +35,7 @@ setup() {
   run --separate-stderr "$MONITOR" matrix
   [ "$status" -eq 0 ]
   [ -z "$stderr" ]
-  [ "$(jq -c . <<<"$output")" = '{"release":["o/caller","o/central"],"settings":["o/central"],"health":["o/caller","o/central","o/plain"],"forks":["o/fork"],"mirrors":["o/mirror"]}' ]
+  [ "$(jq -c . <<<"$output")" = '{"release":["o/caller","o/central"],"settings":["o/central"],"health":["o/caller","o/central","o/plain"],"forks":["o/fork"],"mirrors":["o/mirror"],"runs-on":"ubuntu-latest"}' ]
 }
 
 # checked_by GROUP runs the real check script of GROUP over the inventory and
@@ -80,9 +80,36 @@ checked_by() {
   [ "$stderr" = "error: MONITOR_REPO does not apply to lists" ]
 }
 
-@test "matrix with an unreadable inventory prints empty groups" {
+@test "matrix with an unreadable inventory keeps only the mirrors of the control file" {
   echo nope >"$MONITOR_WORK/inventory.json"
   run --separate-stderr "$MONITOR" matrix
   [ "$status" -eq 0 ]
-  [ "$(jq -c . <<<"$output")" = '{"release":[],"settings":[],"health":[],"forks":[],"mirrors":[]}' ]
+  [ "$(jq -c . <<<"$output")" = '{"release":[],"settings":[],"health":[],"forks":[],"mirrors":["o/mirror"],"runs-on":"ubuntu-latest"}' ]
+}
+
+@test "matrix with an unreadable control file prints empty groups" {
+  echo nope >"$MONITOR_WORK/inventory.json"
+  echo nope >"$MONITOR_WORK/config.json"
+  run --separate-stderr "$MONITOR" matrix
+  [ "$status" -eq 0 ]
+  [ "$(jq -c . <<<"$output")" = '{"release":[],"settings":[],"health":[],"forks":[],"mirrors":[],"runs-on":"ubuntu-latest"}' ]
+}
+
+@test "per-group (the default) runs one job for all repositories of a group" {
+  jq '.mirrors = [] | del(.monitor)' "$MONITOR_WORK/config.json" >"$BATS_TEST_TMPDIR/c" && mv "$BATS_TEST_TMPDIR/c" "$MONITOR_WORK/config.json"
+  run --separate-stderr "$MONITOR" matrix
+  [ "$status" -eq 0 ]
+  [ "$(jq -c . <<<"$output")" = '{"release":[""],"settings":[""],"health":[""],"forks":[""],"mirrors":[],"runs-on":"ubuntu-latest"}' ]
+}
+
+@test "runs-on comes from the control file" {
+  jq '.monitor = {"runs-on": ["self-hosted", "linux"]}' "$MONITOR_WORK/config.json" >"$BATS_TEST_TMPDIR/c" && mv "$BATS_TEST_TMPDIR/c" "$MONITOR_WORK/config.json"
+  run --separate-stderr "$MONITOR" matrix
+  [ "$(jq -c '."runs-on"' <<<"$output")" = '["self-hosted","linux"]' ]
+}
+
+@test "an empty MONITOR_REPO checks every repository of the group" {
+  MONITOR_REPO='' run --separate-stderr "$MONITOR" settings
+  [ -n "$output" ]
+  [[ ${lines[-1]} == "settings: 1 repositories"* ]]
 }
