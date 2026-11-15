@@ -1,5 +1,5 @@
 [
-  {"name":"spali/pub","private":false,"fork":false,"default_branch":"main","pushed_at":"2026-11-01T00:00:00Z","central":true,"pins":[],"parent":null},
-  {"name":"spali/other","private":false,"fork":false,"default_branch":"main","pushed_at":"2026-11-01T00:00:00Z","central":true,"pins":[],"parent":null},
-  {"name":"spali/secret-repo","private":true,"fork":false,"default_branch":"main","pushed_at":"2026-11-01T00:00:00Z","central":true,"pins":[],"parent":null}
+  {"name":"spali/pub","private":false,"fork":false,"default_branch":"main","pushed_at":"2026-11-01T00:00:00Z","central":true,"pins":[{"workflow":"pr.yml","sha":"6f26c6b1dcac0797c52055241f0cfb74a797ebe3","version":"v1.0.0"}],"parent":null},
+  {"name":"spali/other","private":false,"fork":false,"default_branch":"main","pushed_at":"2026-11-01T00:00:00Z","central":true,"pins":[{"workflow":"pr.yml","sha":"6f26c6b1dcac0797c52055241f0cfb74a797ebe3","version":"v1.0.0"}],"parent":null},
+  {"name":"spali/secret-repo","private":true,"fork":false,"default_branch":"main","pushed_at":"2026-11-01T00:00:00Z","central":true,"pins":[{"workflow":"pr.yml","sha":"6f26c6b1dcac0797c52055241f0cfb74a797ebe3","version":"v1.0.0"}],"parent":null}
 ]
