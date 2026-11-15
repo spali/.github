@@ -170,3 +170,28 @@ YAML
   [ "$status" -eq 1 ]
   [ "$stderr" = "error: $f: ignores[0].check: check-failed cannot be ignored" ]
 }
+
+@test "monitor settings are allowed" {
+  f=$(printf 'version: 1\nmonitor:\n  jobs: per-repo\n  runs-on: [self-hosted, linux]\n' | mk ok.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+  f=$(printf 'version: 1\nmonitor:\n  jobs: per-group\n  runs-on: ubuntu-24.04\n' | mk ok2.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+}
+
+@test "wrong monitor settings fail" {
+  f=$(printf 'version: 1\nmonitor:\n  jobs: all\n  runs-on: [1]\n  runner: x\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"monitor: unknown key runner"* ]]
+  [[ $stderr == *"monitor.jobs must be per-group or per-repo"* ]]
+  [[ $stderr == *"monitor.runs-on must be a label or a list of labels"* ]]
+}
+
+@test "monitor must be a mapping" {
+  f=$(printf 'version: 1\nmonitor: per-repo\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: $f: monitor must be a mapping" ]
+}

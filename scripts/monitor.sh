@@ -77,25 +77,32 @@ phase_inventory() {
   jq -r '"✓ \(length) repositories, \(map(select(.central)) | length) central, \(map(select(.fork)) | length) forks"' "$INVENTORY"
 }
 
-# The repositories of each check group, as the check scripts select them
-# (tests/monitor-matrix.bats compares both). Input: the inventory; $cfg the
-# slurped config.
+# The jobs of each check group: with monitor.jobs per-repo one per repository,
+# as the check scripts select them (tests/monitor-matrix.bats compares both);
+# with per-group (default) one job "" for all, none if the group is empty.
+# Plus "runs-on" (monitor.runs-on, default ubuntu-latest). Input: the
+# inventory (anything else counts as empty); $cfg the slurped config.
 # shellcheck disable=SC2016 # jq program
 MATRIX_JQ='
-  ([$cfg[0].mirrors // [] | .[].target]) as $m |
+  ($cfg[0] // {}) as $c |
+  ([$c.mirrors // [] | .[].target]) as $m |
   (if type == "array" then . else [] end) as $inv |
   def names(f): [$inv[] | select(f) | .name] | sort;
+  def jobs: if ($c.monitor.jobs // "per-group") == "per-repo" then .
+    elif length > 0 then [""] else [] end;
   {
-    release: names(.central or ((.pins // []) | length > 0)),
-    settings: names(.central == true),
-    health: names(.fork == false and ([.name] | inside($m) | not)),
-    forks: names(.fork == true and .parent != null and ([.name] | inside($m) | not)),
-    mirrors: ($m | sort)
+    release: names(.central or ((.pins // []) | length > 0)) | jobs,
+    settings: names(.central == true) | jobs,
+    health: names(.fork == false and ([.name] | inside($m) | not)) | jobs,
+    forks: names(.fork == true and .parent != null and ([.name] | inside($m) | not)) | jobs,
+    mirrors: ($m | sort) | jobs,
+    "runs-on": ($c.monitor["runs-on"] // "ubuntu-latest")
   }'
 
 phase_matrix() {
   jq -c --slurpfile cfg "$CONFIG" "$MATRIX_JQ" "$INVENTORY" 2>/dev/null ||
-    jq -cn '{release: [], settings: [], health: [], forks: [], mirrors: []}'
+    jq -c --slurpfile cfg "$CONFIG" -n '[] | '"$MATRIX_JQ" 2>/dev/null ||
+    jq -cn '{release: [], settings: [], health: [], forks: [], mirrors: [], "runs-on": "ubuntu-latest"}'
 }
 
 # phase_check NAME runs monitor-NAME.sh and logs what it found. With
