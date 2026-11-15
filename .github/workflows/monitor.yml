@@ -1,28 +1,66 @@
+# Reusable: the daily maintenance monitor of all repositories of the owner.
+#
+# Call it from a workflow of a PRIVATE control repository (the logs, the job
+# summary and the overview issue list private repositories by name):
+#
+#   on:
+#     schedule:
+#       - cron: "17 5 * * *"
+#     workflow_dispatch:
+#   concurrency:
+#     group: monitor
+#   permissions:
+#     contents: read
+#     issues: write # the overview issue of that repository
+#   jobs:
+#     monitor:
+#       uses: spali/.github/.github/workflows/monitor.yml@<sha> # vX.Y.Z
+#       with:
+#         app-client-id: ${{ vars.MONITOR_APP_CLIENT_ID }}
+#       secrets:
+#         app-key: ${{ secrets.MONITOR_APP_KEY }}
+#
+# The control file (default repos.yml) is read from the calling repository.
+# The monitor only reads from GitHub, with a read-only app token; the single
+# thing it writes is the overview issue (and its label) in the calling
+# repository, with that repository's GITHUB_TOKEN. The run fails while a red
+# finding is open. The caller owns the schedule and the concurrency group.
 name: Monitor
 
 on:
-  schedule:
-    - cron: "17 5 * * *"
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      app-client-id:
+        description: Client id of the read-only GitHub App
+        type: string
+        required: true
+      config:
+        description: Path of the control file in the calling repository
+        type: string
+        default: repos.yml
+    secrets:
+      app-key:
+        description: Private key of the read-only GitHub App
+        required: true
 
 permissions:
   contents: read
-
-concurrency:
-  group: monitor
 
 jobs:
   monitor:
     name: monitor
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write # the overview issue in the calling repository
     steps:
       - name: Create app token
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
-          client-id: ${{ vars.MONITOR_APP_CLIENT_ID }}
-          private-key: ${{ secrets.MONITOR_APP_KEY }}
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-key }}
           owner: spali
           permission-metadata: read
           permission-contents: read
@@ -31,20 +69,22 @@ jobs:
           permission-pull-requests: read
           permission-vulnerability-alerts: read
           permission-security-events: read
-      - name: Checkout
+      - name: Checkout control file
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Checkout private control file
+      - name: Checkout shared scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: ${{ secrets.MONITOR_PRIVATE_REPO }}
-          path: private
-          token: ${{ steps.app-token.outputs.token }}
+          repository: spali/.github
+          ref: ${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
+          path: .monitor
           persist-credentials: false
       - name: Run monitor
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           LISTS_TOKEN: ${{ steps.app-token.outputs.token }}
-          MONITOR_PRIVATE_CONFIG: private/repos.yml
-        run: scripts/monitor.sh
+          MONITOR_CONFIG: ${{ inputs.config }}
+          ISSUE_TOKEN: ${{ github.token }}
+          MONITOR_ISSUE_REPO: ${{ github.repository }}
+        run: .monitor/scripts/monitor.sh
