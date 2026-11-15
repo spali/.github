@@ -53,20 +53,26 @@ done
 # --- report ------------------------------------------------------------
 status=0
 report_rc=0
+title=
 "$DIR/monitor-report.sh" >"$WORK/report.md" 2>/dev/null || report_rc=$?
 if ((report_rc > 1)); then
   echo "error: monitor-report.sh crashed" >&2
-  exit 1
+  printf '## Maintenance monitor\n\nThe report script crashed, see the run log.\n' >"$WORK/report.md"
+  title='Maintenance monitor: report crashed'
+  status=1
+elif ((report_rc == 1)); then
+  status=1
 fi
-((report_rc == 0)) || status=1
 cat "$WORK/report.md" >>"${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 
 # --- overview issue ----------------------------------------------------
 if [[ -n ${MONITOR_ISSUE_REPO:-} ]]; then
-  title='Maintenance monitor'
-  counts=$(grep -m1 -E '^[0-9]+ red · [0-9]+ info' "$WORK/report.md" || true)
-  if [[ $counts =~ ^([0-9]+)\ red\ ·\ ([0-9]+)\ info ]]; then
-    title="Maintenance monitor: ${BASH_REMATCH[1]} red · ${BASH_REMATCH[2]} info"
+  if [[ -z $title ]]; then
+    title='Maintenance monitor'
+    counts=$(grep -m1 -E '^[0-9]+ red · [0-9]+ info' "$WORK/report.md" || true)
+    if [[ $counts =~ ^([0-9]+)\ red\ ·\ ([0-9]+)\ info ]]; then
+      title="Maintenance monitor: ${BASH_REMATCH[1]} red · ${BASH_REMATCH[2]} info"
+    fi
   fi
   if ! "$DIR/monitor-issue.sh" "$WORK/report.md" "$title" 2>"$WORK/issue.err" >/dev/null; then
     line=$(head -n1 "$WORK/issue.err")
