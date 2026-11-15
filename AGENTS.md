@@ -81,7 +81,7 @@ pull request closed
 | `scripts/checksums.sh` | `checksums.txt` over the build files |
 | `scripts/publish.sh` | `release` / `next` / `pr`: create, replace, publish |
 | `scripts/cleanup-pr.sh` | delete `*-pr.<N>` releases and tags |
-| `scripts/monitor*.sh` | maintenance monitor: `monitor.sh` runs `monitor-repos.sh` (inventory), the check scripts, `monitor-report.sh` and `monitor-issue.sh`; `monitor.sh PHASE` runs one of them (one workflow step each, shared dir `MONITOR_WORK`) |
+| `scripts/monitor*.sh` | maintenance monitor: `monitor.sh` runs `monitor-repos.sh` (inventory), the check scripts, `monitor-report.sh` and `monitor-issue.sh`; `monitor.sh PHASE` runs one of them (shared dir `MONITOR_WORK`); `monitor.sh matrix` prints the jobs per check group for the workflow matrix (`monitor.jobs`, `monitor.runs-on` of the control file), `MONITOR_REPO` limits a check phase to one repository (empty: all) |
 | `docs/monitor-checks.md` | explanation of each monitor check, linked from the overview issue (one `## <check id>` section each, tested) |
 | `tests/*.bats`, `tests/helpers/gh-stub.bash` | bats tests with a fake `gh` |
 | `examples/caller/*.yml` | files a repository copies |
@@ -281,8 +281,9 @@ a red finding is open. Code: `scripts/monitor*.sh` in `spali/.github`.
 
 1. Open the failed run in the control repository, or the issue labelled
    `maintenance-monitor` there (updated on every run). Each finding has a
-   check id (section 5), a repository and a detail. The red step of the run
-   names the check group; its log groups the findings per repository.
+   check id (section 5), a repository and a detail. The red job of the run
+   job names the check group (and the repository with `monitor.jobs:
+   per-repo`); its log groups the findings per repository.
 2. To reproduce locally (read-only, no issue is written):
    `GH_TOKEN=$(gh auth token) MONITOR_CONFIG=<path to repos.yml> scripts/monitor.sh`.
    Setting `MONITOR_ISSUE_REPO` would write the issue; do not set it locally.
