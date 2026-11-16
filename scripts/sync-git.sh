@@ -33,7 +33,8 @@
 #                     record or an ancestor of it; else it stays,
 #                     "; accept refused: own commits on top, ..."); a declared
 #                     branch moves only its own commits (rebase --onto onto
-#                     <record>); a moved tag is set to upstream. Without a
+#                     <record>), a manual one also without SYNC_BRANCH;
+#                     a moved tag is set to upstream. Without a
 #                     stop (also a declared branch without its record,
 #                     which rebases as usual) it does nothing.
 #   sync-git.sh push  pushes $WORK/plan.tsv to TARGET_URL in one atomic push
@@ -156,6 +157,14 @@ default_branch() {
 
 wants_rebase() {
   [[ $1 == auto || ${SYNC_BRANCH:-} == "$2" || ${SYNC_BRANCH:-} == '*' ]]
+}
+
+# stopped BRANCH ONTO succeeds when the declared BRANCH is in a rewrite stop:
+# the target branch contains its record and the record is no ancestor of
+# the upstream ONTO.
+stopped() {
+  local tg=${TGR[heads/$1]:-} up=${UPR[heads/$2]:-}
+  [[ -n $tg && -n $up ]] && rewritten "$1" "$up" && is_ancestor "${RECR[$1]}" "$tg"
 }
 
 # accepts KEY (heads/x or tags/x) succeeds when SYNC_ACCEPT accepts a
@@ -457,9 +466,10 @@ plan() {
       skip "refs/heads/$name" "invalid ref name"
     elif [[ -n ${CONTRIB[$name]:-} ]]; then
       skip "refs/heads/$name" contribution
-    elif wants_rebase "$how" "$name" || [[ -z ${TGR[heads/$name]:-} ]]; then
+    elif wants_rebase "$how" "$name" || [[ -z ${TGR[heads/$name]:-} ]] ||
+      { accepts "heads/$name" && stopped "$name" "$onto"; }; then
       # a missing branch is created from onto, also a manual one (it loses
-      # nothing)
+      # nothing); an accepted stop also rebases a manual branch
       rebase_branch "$name" "$onto"
     fi
   done < <(jq -r '.branches[] | [.name, .onto, .rebase]
