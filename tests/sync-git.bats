@@ -116,6 +116,24 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   done
 }
 
+@test "missing manual branch is created from onto" {
+  set_ref "$TG" refs/heads/main "$B"
+  entry fork default '[{"name": "feat", "onto": "main", "rebase": "manual"}]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/feat\t%s\t%s\trebase' "$ZERO" "$B")" ]
+  [ ! -s "$WORK/skipped.txt" ]
+}
+
+@test "missing manual branch with a missing onto fails without push" {
+  set_ref "$TG" refs/heads/main "$B"
+  entry fork default '[{"name": "feat", "onto": "dev", "rebase": "manual"}]'
+  run --separate-stderr "$SCRIPT" plan
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"onto dev missing upstream"* ]]
+  [ ! -e "$WORK/plan.tsv" ]
+}
+
 @test "mirror mode adds new branches and tags" {
   C=$(commit "$A" d dev)
   set_ref "$UP" refs/heads/dev "$C"

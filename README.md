@@ -620,7 +620,7 @@ nothing is lost: `git fetch origin 'refs/backup/*:refs/remotes/backup/*'`.
 | `repo` | the fork or mirror, `spali/name` |
 | `upstream` | `https://` URL of the source; on `github.com` the repository is a **fork**, anywhere else a **mirror** |
 | `refs` | forks only: `default` (the default, the default branch and the declared branches) or `all` (all branches and tags of upstream); mirrors always sync all branches and tags |
-| `branches` | own branches of a fork: `<branch>: {onto: <upstream branch>, rebase: auto}` or `rebase: manual`; `auto` rebases on every run, `manual` only when dispatched with `branch` |
+| `branches` | own branches of a fork: `<branch>: {onto: <upstream branch>, rebase: auto}` or `rebase: manual`; `auto` rebases on every run, `manual` only when dispatched with `branch`; a missing declared branch is created from its `onto` |
 | `settings` | exceptions to the defaults (all `false`): `has_issues`, `has_pull_requests`, `has_wiki`, `has_discussions`, `has_projects`, `actions` |
 | `private` | mirrors: the visibility in the create command (default `false`) |
 
