@@ -131,7 +131,9 @@ long_report() {
   sent 3 | jq -j .body >"$BATS_TEST_TMPDIR/body.md"
   [ "$(stat -c %s "$BATS_TEST_TMPDIR/body.md")" -le 65536 ]
   [ "$(stat -c %s "$BATS_TEST_TMPDIR/body.md")" -gt 65000 ]
-  [ "$(tail -n1 "$BATS_TEST_TMPDIR/body.md")" = '… truncated, see the run summary.' ]
+  # the body ends with the note (not tail -n1: it printed an empty line for
+  # this file on the GitHub runner)
+  [[ $(<"$BATS_TEST_TMPDIR/body.md") == *$'\n… truncated, see the run summary.' ]]
   # every kept report line is complete and in order
   kept=$(grep -c '^line ' "$BATS_TEST_TMPDIR/body.md")
   [ "$kept" -lt 1000 ]
