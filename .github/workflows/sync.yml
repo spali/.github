@@ -37,8 +37,9 @@
 # write app (Administration, Contents and Workflows write; Pull requests,
 # Actions and Metadata read; installed on all repositories). Each repository
 # gets its own job and tokens: a metadata token checks that it exists, an
-# unscoped token creates a missing fork (forking needs one; it is minted only
-# then), and a token scoped to that repository syncs it. A missing mirror
+# unscoped token with all app permissions creates a missing fork (forking
+# refuses down-scoped tokens; it is minted only then), and a token scoped to
+# that repository syncs it. A missing mirror
 # fails with the command to create it by hand. The caller owns the schedule and the
 # concurrency group; each repository also has its own group (sync-<repo>).
 #
@@ -141,8 +142,10 @@ jobs:
           GH_TOKEN: ${{ steps.meta-token.outputs.token }}
           REPO: ${{ matrix.repo }}
         run: .sync/scripts/sync.sh exists "$REPO"
-      # forking needs a token that is not scoped to repositories; a token
-      # cannot be scoped to a repository that does not exist yet. A missing
+      # forking needs a token that is not scoped to repositories (a token
+      # cannot be scoped to a repository that does not exist yet) and that has
+      # all app permissions: no permission-* inputs here, a down-scoped token
+      # gets 403 "You can't fork this repository at this time.". A missing
       # mirror cannot be created by the app: no such token for it.
       - name: Create token
         id: create-token
@@ -152,8 +155,6 @@ jobs:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-key }}
           owner: spali
-          permission-administration: write
-          permission-contents: read
       # a missing mirror fails here with the command to create it by hand
       - name: Create repository
         id: create

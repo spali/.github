@@ -497,10 +497,12 @@ and the log of the failed step. Explanations for humans:
 - Sync tokens (tested 2026-11-16): an installation token scoped
   (`repositories:`) to a repository that does not exist cannot be created
   (422). Forking needs an installation token that is not scoped to
-  repositories (one scoped to another repository gets 403). So `sync.yml`
-  checks existence with an unscoped metadata-only token, creates a missing
-  fork with an unscoped Administration write token, and syncs with a token
-  scoped to the repository. `POST /user/repos` is refused for app tokens:
+  repositories (one scoped to another repository gets 403) and that has all
+  app permissions: a down-scoped token (any subset of permissions) gets 403
+  "You can't fork this repository at this time.". So `sync.yml` checks
+  existence with an unscoped metadata-only token, creates a missing fork with
+  an unscoped token without `permission-*` inputs (all app permissions), and
+  syncs with a token scoped to the repository. `POST /user/repos` is refused for app tokens:
   mirrors (no fork parent) must be created by hand.
 - `has_pull_requests` is settable with `PATCH repos/{owner}/{repo}`, like the
   other `has_*` settings.

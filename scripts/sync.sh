@@ -13,7 +13,7 @@
 #   sync.sh create REPO  creates the missing fork (sync-create.sh). A missing
 #                        mirror fails with the command to create it by hand.
 #                        Forking needs an installation token that is not
-#                        scoped to repositories.
+#                        scoped to repositories and has all app permissions.
 #   sync.sh repo REPO    refuses a repository that does not exist, then checks
 #                        its kind (sync-create.sh), enforces its settings
 #                        (sync-settings.sh), lists the contribution branches

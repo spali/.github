@@ -666,7 +666,7 @@ read-only monitor app:
    Repository permissions: Administration, Contents and Workflows **write**;
    Pull requests, Actions and Metadata read.
 2. Install it on **all repositories** (forking needs an installation token
-   that is not limited to repositories), generate a private key.
+   that is not limited to repositories and has all of the app's permissions), generate a private key.
 3. In the control repository set the variable `SYNC_APP_CLIENT_ID` and the
    secret `SYNC_APP_KEY`.
 
