@@ -7,7 +7,7 @@ setup() {
   stub_gh
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/monitor-issue.sh"
   REPORT="$BATS_TEST_TMPDIR/report.md"
-  printf '## Maintenance monitor\n\n1 red · 0 info · 0 skipped\n' >"$REPORT"
+  printf '## Maintenance monitor\n\n1 red · 0 info · 0 not checked\n' >"$REPORT"
   export MONITOR_ISSUE_REPO=spali/ctl
   export ISSUE_TOKEN=issue-token
   export GH_TOKEN=read-token
@@ -98,8 +98,8 @@ sent() { cat "$GH_INPUTS/$1"; }
   run "$SCRIPT" "$REPORT" "$TITLE"
   [ "$status" -eq 0 ]
   [ -s "$GH_INPUTS/3" ]
-  [[ "$(sent 3 | jq -r .body)" == *"red · 0 info · 0 skipped"* ]]
-  [[ "$(gh_calls)" != *"red · 0 info · 0 skipped"* ]]
+  [[ "$(sent 3 | jq -r .body)" == *"red · 0 info · 0 not checked"* ]]
+  [[ "$(gh_calls)" != *"red · 0 info · 0 not checked"* ]]
 }
 
 @test "footer without run variables" {

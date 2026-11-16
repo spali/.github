@@ -407,9 +407,10 @@ The pin check also covers the control repository's own pin of `monitor.yml`.
 A repository that only calls the monitor workflows is not a release-flow
 repository.
 
-**Levels.** `red` is something to fix, `info` is a hint, `skip` means "not
-applicable" (for example rulesets on private repositories of a Free account)
-and is only counted. The run **fails while any red finding is open or the
+**Levels.** `red` is something to fix, `info` is a hint, `skip` (shown as
+"not checked") means the check could not run in that repository because the
+feature is off there (for example rulesets on private repositories of a Free
+account); it is only listed. The run **fails while any red finding is open or the
 issue update failed**; GitHub's failed-run mail is the notification.
 
 **Thresholds.** A Renovate pull request is stale after 7 days. A pin is behind
@@ -559,10 +560,14 @@ monitor:
 **The overview issue.** Every run writes its report into one issue of the
 control repository, labelled `maintenance-monitor` (the label is created on
 the first run; the lowest-numbered open issue with it is updated, a new one is
-created if none is open). The title shows the counts. The body has three
-sections, 🔴 red, 🔵 info and ⚪ skipped (collapsed), one table per check:
-the repository, the details and a link to where to fix it. Each check title
-has an ℹ️ link to its explanation in
+created if none is open). The title shows the counts. The summary at the top
+counts red, info, clean and not checked, each count linked to its section.
+🔴 Red and 🔵 Info have one table per check: the repository, the details and a
+link to where to fix it. ✅ Clean (collapsed) lists the repositories of the
+inventory without a red or info finding (ignored and not checked findings
+count as clean; without an inventory, in a local report, the section is left
+out). ⚪ Not checked (collapsed) lists, per check, one line per reason with its
+repositories. Each check title has an ℹ️ link to its explanation in
 [`docs/monitor-checks.md`](docs/monitor-checks.md). The body ends with the
 time of the update and a link to the run. A report above GitHub's size limit is
 cut and points to the run summary. The issue is a view, not a notification:

@@ -5,7 +5,8 @@
 # Env: FINDINGS (JSON lines), CONFIG (the control file as JSON),
 # MONITOR_DOCS_URL (the check explanations, default: docs/monitor-checks.md on
 # main of spali/.github), MONITOR_CONFIG_URL (the control file on GitHub,
-# optional).
+# optional), INVENTORY (the inventory JSON array, optional: without it there
+# is no section of clean repositories).
 # Exit status: 1 if a red finding is left, else 0.
 set -euo pipefail
 
@@ -13,8 +14,12 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 
 # JQ program, run with -s over $FINDINGS. Arguments: $cfg (slurped config),
-# $docs (URL of the check explanations), $control (URL of the control file,
-# may be empty). Prints {markdown, red}.
+# $inv (slurped inventory, [] without one), $docs (URL of the check
+# explanations), $control (URL of the control file, may be empty). Prints
+# {markdown, red}.
+# The summary links each section by the id GitHub generates for its heading
+# (lowercase, emoji and punctuation removed, spaces to hyphens): "## 🔴 Red"
+# is #-red. The headings carry no count so the ids never change.
 # shellcheck disable=SC2016 # jq program, no shell expansion wanted
 REPORT_JQ='
 $cfg[0] as $cfg | . as $f
@@ -67,29 +72,59 @@ $cfg[0] as $cfg | . as $f
     | ($r | map(select(.check == $c)) | sort_by(.repo // "")) as $cr
     | "### `\($c)` [ℹ️](\($docs)#\($c))\n\n| Repository | Details | Fix at |\n| --- | --- | --- |\n"
       + ($cr | map(row) | join("\n")) + "\n";
+  # The not checked findings of one check: one line per reason (the message
+  # without "<check>: " and "gh: "), its repositories sorted.
+  def reasons($r):
+    $r | map(.check) | unique[] as $c
+    | "### `\($c)` [ℹ️](\($docs)#\($c))\n\n"
+      + ($r | map(select(.check == $c))
+         | map(.reason = (.message // "" | tostring | gsub("[\\r\\n]+"; " ")
+             | ltrimstr("\($c): ") | ltrimstr("gh: ")))
+         | group_by(.reason)
+         | map("- \(.[0].reason): \(map(.repo // empty) | unique | map(repo_link) | join(", "))")
+         | join("\n")) + "\n";
+  def count($n; $one; $more): "\($n) \(if $n == 1 then $one else $more end)";
   (level_rows("red") | length) as $nred
 | (level_rows("info") | length) as $ninfo
 | (level_rows("skip") | length) as $nskip
+  # ignore-unused and findings without a repository concern no repository
+| ($inv[0] | if type == "array" then
+      ($rows | map(select(.level != "skip" and .check != "ignore-unused") | .repo // empty)) as $dirty
+      | map(.name) | unique | map(select(. as $n | $dirty | index($n) | not))
+    else null end) as $clean
 | {
     red: $nred,
     markdown: ([
       "## Maintenance monitor\n",
       (if $nred > 0 then "> [!CAUTION]" else "> [!TIP]" end)
-        + "\n> **\($nred) red** · \($ninfo) info · \($nskip) skipped\n",
-      "## 🔴 Red (\($nred))\n",
+        + "\n> **[\($nred) red](#-red)** · [\($ninfo) info](#-info)"
+        + (if $clean then " · [\($clean | length) clean](#-clean)" else "" end)
+        + " · [\($nskip) not checked](#-not-checked)\n",
+      "## 🔴 Red\n",
       (if $nred == 0 then "✅ Nothing to fix.\n" else checks(level_rows("red")) end),
-      "## 🔵 Info (\($ninfo))\n",
+      "## 🔵 Info\n",
       (if $ninfo == 0 then "Nothing to note.\n" else checks(level_rows("info")) end),
-      "## ⚪ Skipped (\($nskip))\n",
-      (if $nskip == 0 then "Nothing skipped.\n"
-       else "<details><summary>Not applicable, click to show</summary>\n", checks(level_rows("skip")), "</details>\n" end)
+      (if $clean then
+        "## ✅ Clean\n",
+        (if ($clean | length) == 0 then "No repository without findings.\n"
+         else "<details><summary>\(count($clean | length; "repository"; "repositories")), click to show</summary>\n",
+           ($clean | map(repo_link) | join(", ")) + "\n", "</details>\n" end)
+       else empty end),
+      "## ⚪ Not checked\n",
+      (if $nskip == 0 then "Every check ran.\n"
+       else "Checks that could not run in these repositories because the feature is off there; the repositories were checked otherwise.\n",
+         "<details><summary>\(count($nskip; "check"; "checks")), click to show</summary>\n", reasons(level_rows("skip")), "</details>\n" end)
     ] | join("\n"))
   }'
 
 main() {
   need_env FINDINGS CONFIG
-  local result
-  result=$(jq -s --slurpfile cfg "$CONFIG" \
+  local result inv=(--argjson inv '[]')
+  # a missing or broken inventory means none: no section of clean repositories
+  if [[ -n ${INVENTORY:-} ]] && jq -e 'type == "array"' "$INVENTORY" >/dev/null 2>&1; then
+    inv=(--slurpfile inv "$INVENTORY")
+  fi
+  result=$(jq -s --slurpfile cfg "$CONFIG" "${inv[@]}" \
     --arg docs "${MONITOR_DOCS_URL:-https://github.com/spali/.github/blob/main/docs/monitor-checks.md}" \
     --arg control "${MONITOR_CONFIG_URL:-}" "$REPORT_JQ" "$FINDINGS")
   jq -r '.markdown' <<<"$result"
