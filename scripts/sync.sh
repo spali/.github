@@ -219,15 +219,20 @@ contributions() {
   }
 }
 
+# git_auth sets GIT_AUTH, the base64 credential of the extraheader. In GitHub
+# Actions it is masked first: the runner masks GH_TOKEN, not its encoding.
+git_auth() {
+  GIT_AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+  [[ ${GITHUB_ACTIONS:-} != true ]] || printf '::add-mask::%s\n' "$GIT_AUTH"
+}
+
 # git_step plan|push runs sync-git.sh with the URLs of the entry, the
-# committer and the token as an extraheader for https://github.com/.
+# committer and the token (GIT_AUTH) as an extraheader for https://github.com/.
 git_step() {
-  local auth
-  auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
   TARGET_URL="https://github.com/$REPO.git" UPSTREAM_URL=$UPSTREAM WORK=$WORK \
     GIT_COMMITTER_NAME=$COMMITTER_NAME GIT_COMMITTER_EMAIL=$COMMITTER_EMAIL \
     GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-    GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+    GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $GIT_AUTH" \
     step sync-git.sh "$1"
 }
 
@@ -307,6 +312,7 @@ cmd_repo() {
     finish 1
   fi
 
+  git_auth
   if ! git_step plan; then
     fail_note plan
     note "- refs: not synced"
