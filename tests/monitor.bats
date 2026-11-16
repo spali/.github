@@ -359,7 +359,7 @@ next line"'
   phase lists
   phase report
   [ "$status" -eq 0 ]
-  grep -qF '**[1 red](#-red)**' "$GITHUB_STEP_SUMMARY"
+  grep -qF '**[1 red](#user-content-red)**' "$GITHUB_STEP_SUMMARY"
   [ "$output" = "✓ report: 1 red · 0 info · 3 clean · 0 not checked" ]
 }
 

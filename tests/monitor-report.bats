@@ -14,7 +14,8 @@ setup() {
 # section NAME prints the part of $output from the section heading NAME up
 # to the next section heading.
 section() {
-  awk -v h="$1" '/^## / { on = index($0, h) == 4 } on' <<<"$output"
+  # headings may start with an anchor: ## <a name="x"></a>Title
+  awk -v h="$1" '/^## / { t = $0; sub(/^## (<a name="[^"]*"><\/a>)?/, "", t); on = index(t, h) == 1 } on' <<<"$output"
 }
 
 # findings sets $FINDINGS to the lines on stdin.
@@ -33,7 +34,7 @@ config() {
   run "$REPORT"
   [ "$status" -eq 1 ]
   [[ $output == "## Maintenance monitor"* ]]
-  [[ $output == *"**[2 red](#-red)** · [1 info](#-info) · [1 not checked](#-not-checked)"* ]]
+  [[ $output == *"**[2 red](#user-content-red)** · [1 info](#user-content-info) · [1 not checked](#user-content-not-checked)"* ]]
   [[ $output == *"| [spali/pub](https://github.com/spali/pub) | merge commits allowed | [Settings](https://github.com/spali/pub/settings) |"* ]]
 }
 
@@ -44,7 +45,7 @@ config() {
 J
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"**[0 red](#-red)** · [1 info](#-info) · [1 not checked](#-not-checked)"* ]]
+  [[ $output == *"**[0 red](#user-content-red)** · [1 info](#user-content-info) · [1 not checked](#user-content-not-checked)"* ]]
   [[ $output == *"> [!TIP]"* ]]
   [[ $output != *"[!CAUTION]"* ]]
   [[ "$(section "🔴 Red")" == *"Nothing to fix."* ]]
@@ -73,7 +74,7 @@ J
 J
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"**[0 red](#-red)** · [1 info](#-info) · [0 not checked](#-not-checked)"* ]]
+  [[ $output == *"**[0 red](#user-content-red)** · [1 info](#user-content-info) · [0 not checked](#user-content-not-checked)"* ]]
   [[ $output == *"### \`ignore-unused\` [ℹ️](https://docs.example/checks.md#ignore-unused)"* ]]
   [[ $output == *"| [spali/gone](https://github.com/spali/gone) | unused ignore: hush |"* ]]
 }
@@ -94,7 +95,7 @@ J
   export FINDINGS="$BATS_TEST_TMPDIR/big.jsonl"
   run --separate-stderr "$REPORT"
   [ "$status" -eq 1 ]
-  [[ $output == *"**[30 red](#-red)** · [0 info](#-info) · [0 not checked](#-not-checked)"* ]]
+  [[ $output == *"**[30 red](#user-content-red)** · [0 info](#user-content-info) · [0 not checked](#user-content-not-checked)"* ]]
   [[ $output == *"| [spali/r29](https://github.com/spali/r29) |"* ]]
   [ -z "$stderr" ]
 }
@@ -103,7 +104,7 @@ J
   findings </dev/null
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"**[0 red](#-red)** · [0 info](#-info) · [0 not checked](#-not-checked)"* ]]
+  [[ $output == *"**[0 red](#user-content-red)** · [0 info](#user-content-info) · [0 not checked](#user-content-not-checked)"* ]]
 }
 
 @test "ignore removes a red finding and exits 0" {
@@ -115,7 +116,7 @@ J
 J
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"**[0 red](#-red)** · [0 info](#-info) · [0 not checked](#-not-checked)"* ]]
+  [[ $output == *"**[0 red](#user-content-red)** · [0 info](#user-content-info) · [0 not checked](#user-content-not-checked)"* ]]
   [[ $output != *"merge commits"* ]]
 }
 
@@ -125,7 +126,7 @@ J
 J
   run "$REPORT"
   [ "$status" -eq 1 ]
-  [[ $output == *"**[2 red](#-red)** · [2 info](#-info) · [1 not checked](#-not-checked)"* ]]
+  [[ $output == *"**[2 red](#user-content-red)** · [2 info](#user-content-info) · [1 not checked](#user-content-not-checked)"* ]]
   [[ $output == *"| [spali/pub](https://github.com/spali/pub) | unused ignore: typo? |"* ]]
 }
 
@@ -138,7 +139,7 @@ J
 J
   run "$REPORT"
   [[ $output == *'| a \| b |'* ]]
-  [[ $output == *"## 🔴 Red"$'\n'*"## 🔵 Info"$'\n'*"## ⚪ Not checked"$'\n'* ]]
+  [[ $output == *'## <a name="red"></a>🔴 Red'$'\n'*'## <a name="info"></a>🔵 Info'$'\n'*'## <a name="not-checked"></a>⚪ Not checked'$'\n'* ]]
   red=$(section "🔴 Red")
   # main-red (other, pub) before settings-pvr
   [[ $red == *"main-red"*"spali/other"*"spali/pub"*"settings-pvr"* ]]
@@ -146,7 +147,7 @@ J
 
 @test "the summary is a caution alert while red findings are open" {
   run "$REPORT"
-  [[ $output == *$'> [!CAUTION]\n> **[2 red](#-red)** · [1 info](#-info) · [1 not checked](#-not-checked)'* ]]
+  [[ $output == *$'> [!CAUTION]\n> **[2 red](#user-content-red)** · [1 info](#user-content-info) · [1 not checked](#user-content-not-checked)'* ]]
 }
 
 @test "each check title links its explanation" {
@@ -177,7 +178,7 @@ J
 J
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"[4 not checked](#-not-checked)"* ]]
+  [[ $output == *"[4 not checked](#user-content-not-checked)"* ]]
   nc=$(section "⚪ Not checked")
   [[ $nc == *"### \`code-scanning-alert\`"*"### \`settings-pvr\`"* ]]
   [ "$(grep -c '^- ' <<<"$nc")" -eq 3 ]
@@ -238,15 +239,15 @@ J
 @test "without not checked findings the section says every check ran" {
   findings </dev/null
   run "$REPORT"
-  [[ "$(section "⚪ Not checked")" == $'## ⚪ Not checked\n\nEvery check ran.' ]]
+  [[ "$(section "⚪ Not checked")" == $'## <a name="not-checked"></a>⚪ Not checked\n\nEvery check ran.' ]]
 }
 
 @test "with an inventory the summary links all four sections in order" {
   export INVENTORY="$FIX/inventory.json"
   run "$REPORT"
   [ "$status" -eq 1 ]
-  [[ $output == *$'> [!CAUTION]\n> **[2 red](#-red)** · [1 info](#-info) · [0 clean](#-clean) · [1 not checked](#-not-checked)\n'* ]]
-  [[ $output == *$'\n## 🔴 Red\n'*$'\n## 🔵 Info\n'*$'\n## ✅ Clean\n'*$'\n## ⚪ Not checked\n'* ]]
+  [[ $output == *$'> [!CAUTION]\n> **[2 red](#user-content-red)** · [1 info](#user-content-info) · [0 clean](#user-content-clean) · [1 not checked](#user-content-not-checked)\n'* ]]
+  [[ $output == *$'\n## <a name="red"></a>🔴 Red\n'*$'\n## <a name="info"></a>🔵 Info\n'*$'\n## <a name="clean"></a>✅ Clean\n'*$'\n## <a name="not-checked"></a>⚪ Not checked\n'* ]]
   [[ "$(section "✅ Clean")" == *"No repository without findings."* ]]
 }
 
@@ -266,7 +267,7 @@ J
   run "$REPORT"
   [ "$status" -eq 1 ]
   # o/e only has an unused ignore, o/f is only named in a finding without repo
-  [[ $output == *"**[1 red](#-red)** · [3 info](#-info) · [4 clean](#-clean) · [1 not checked](#-not-checked)"* ]]
+  [[ $output == *"**[1 red](#user-content-red)** · [3 info](#user-content-info) · [4 clean](#user-content-clean) · [1 not checked](#user-content-not-checked)"* ]]
   clean=$(section "✅ Clean")
   [[ $clean == *"<details>"*"4 repositories"*$'\n[o/c](https://github.com/o/c), [o/d](https://github.com/o/d), [o/e](https://github.com/o/e), [o/f](https://github.com/o/f)\n'*"</details>"* ]]
 }
@@ -274,8 +275,8 @@ J
 @test "the section anchors stay the same whatever the counts" {
   export INVENTORY="$FIX/inventory.json"
   run "$REPORT"
-  for h in "🔴 Red" "🔵 Info" "✅ Clean" "⚪ Not checked"; do
-    grep -qxF "## $h" <<<"$output"
+  for h in 'red">🔴 Red' 'info">🔵 Info' 'clean">✅ Clean' 'not-checked">⚪ Not checked'; do
+    grep -qxF "## <a name=\"${h%%\">*}\"></a>${h#*\">}" <<<"$output"
   done
 }
 
@@ -353,7 +354,7 @@ J
     findings < <(cat $files)
     run "$REPORT"
     [ "$status" -eq 1 ]
-    [[ $output == *"**[3 red](#-red)**"* ]]
+    [[ $output == *"**[3 red](#user-content-red)**"* ]]
     [ "$(grep -c '^| \[spali/knx.js\](https://github.com/spali/knx.js) | last sync of this repository failed: \[job\](https://github.com/ctl/x/actions/runs/9/job/7) |  |' <<<"$output")" -eq 1 ]
     [ "$(grep -c '^| - | sync run failed before the repositories: \[run\](https://github.com/ctl/x/actions/runs/9) |  |' <<<"$output")" -eq 1 ]
   done
