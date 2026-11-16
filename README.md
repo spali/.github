@@ -588,11 +588,14 @@ explanation in [`docs/monitor-checks.md`](docs/monitor-checks.md). The
 issue body holds the summary line, 📝 TODO and 📋 Overview; 🔴 Red, 🔵 Info,
 ✅ Clean and ⚪ Not checked are in the monitor comment right below it (the
 report is split at the line `<!-- maintenance-monitor:details -->`). The
-monitor comment is the oldest comment of the issue starting with that line:
-it is edited in place every run (created on the first run), other comments are
-left alone, and the links of the summary and the overview jump into it. Body
-and comment that are above GitHub's size limit are each
-cut and point to the run summary, which always shows the whole report. The issue is a view, not a notification:
+monitor comment is the oldest comment of the issue by `github-actions[bot]`
+(the author with the workflow's `GITHUB_TOKEN`; env `MONITOR_COMMENT_AUTHOR`
+of `monitor-issue.sh`, empty for any author, e.g. a local run with a personal
+token) starting with that line: it is edited in place every run (created on
+the first run), other comments are left alone, and the links of the summary
+and the overview jump into it. Body and comment that are above GitHub's size
+limit are each cut and point to the run summary, which always shows the whole
+report; the line pointing to the comment stays at the end of the body. The issue is a view, not a notification:
 the failed-run e-mail stays the notification.
 
 **Run locally** (read-only: no issue is written unless `MONITOR_ISSUE_REPO`

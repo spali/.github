@@ -13,7 +13,7 @@ setup() {
   export GH_TOKEN=read-token
   export MONITOR_NOW
   MONITOR_NOW=$(date -u -d 2026-11-15T05:17:00Z +%s)
-  unset GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID
+  unset GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID MONITOR_COMMENT_AUTHOR
   TITLE='Maintenance monitor: 1 red · 0 info'
 }
 
@@ -302,8 +302,8 @@ comments() { gh_respond "*repos/spali/ctl/issues/$1/comments?per_page=100 --pagi
 @test "the oldest monitor comment is updated in place, the others stay" {
   split_report
   issues '[{"number":7}]'
-  comments 7 "$(jq -cn --arg m "$MARK" '[{id: 90, body: "human"}, {id: 82, body: ($m + "\nnewer")},
-    {id: 81, body: ($m + "\r\nold")}, {id: 95, body: ($m + "\nnewest")}]')"
+  comments 7 "$(jq -cn --arg m "$MARK" '[{id: 90, body: "human"}, {id: 82, user: {login: "github-actions[bot]"}, body: ($m + "\nnewer")},
+    {id: 81, user: {login: "github-actions[bot]"}, body: ($m + "\r\nold")}, {id: 95, user: {login: "github-actions[bot]"}, body: ($m + "\nnewest")}]')"
   run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
   [ "$status" -eq 0 ]
   [ -z "$stderr" ]
@@ -317,7 +317,7 @@ comments() { gh_respond "*repos/spali/ctl/issues/$1/comments?per_page=100 --pagi
 @test "reads every page of the comments" {
   split_report
   issues '[{"number":7}]'
-  { echo '[{"id":10,"body":"human"}]'; jq -cn --arg m "$MARK" '[{id: 11, body: ($m + "\nx")}]'; } |
+  { echo '[{"id":10,"body":"human"}]'; jq -cn --arg m "$MARK" '[{id: 11, user: {login: "github-actions[bot]"}, body: ($m + "\nx")}]'; } |
     gh_respond '*issues/7/comments?per_page=100 --paginate' -
   run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
   [ "$status" -eq 0 ]
@@ -348,8 +348,9 @@ comments() { gh_respond "*repos/spali/ctl/issues/$1/comments?per_page=100 --pagi
   for f in body comment; do
     [ "$(stat -c %s "$BATS_TEST_TMPDIR/$f.md")" -le 65536 ]
     [ "$(stat -c %s "$BATS_TEST_TMPDIR/$f.md")" -gt 65000 ]
-    [[ $(<"$BATS_TEST_TMPDIR/$f.md") == *$'\n… truncated, see the run summary.' ]]
   done
+  [[ $(<"$BATS_TEST_TMPDIR/body.md") == *$'\n… truncated, see the run summary.\n\n'"$DETAILS_LINE" ]]
+  [[ $(<"$BATS_TEST_TMPDIR/comment.md") == *$'\n… truncated, see the run summary.' ]]
   run ! grep -q '^det ' "$BATS_TEST_TMPDIR/body.md"
   [ "$(head -n1 "$BATS_TEST_TMPDIR/comment.md")" = "$MARK" ]
   run ! grep -q '^text ' "$BATS_TEST_TMPDIR/comment.md"
@@ -385,7 +386,7 @@ comments() { gh_respond "*repos/spali/ctl/issues/$1/comments?per_page=100 --pagi
 @test "a failing comment update or creation fails the run" {
   split_report
   issues '[{"number":7}]'
-  comments 7 "$(jq -cn --arg m "$MARK" '[{id: 81, body: $m}]')"
+  comments 7 "$(jq -cn --arg m "$MARK" '[{id: 81, user: {login: "github-actions[bot]"}, body: $m}]')"
   gh_fail '*-X PATCH repos/spali/ctl/issues/comments/*' 'gh: Forbidden (HTTP 403)'
   run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
   [ "$status" -eq 1 ]
@@ -408,4 +409,56 @@ comments() { gh_respond "*repos/spali/ctl/issues/$1/comments?per_page=100 --pagi
   [ "$status" -eq 0 ]
   [ "$(wc -l <"$GH_TOKENS")" -eq 5 ]
   [ "$(sort -u "$GH_TOKENS")" = issue-token ]
+}
+
+@test "a marked comment by someone else is not the monitor comment" {
+  split_report
+  issues '[{"number":7}]'
+  comments 7 "$(jq -cn --arg m "$MARK" '[{id: 60, user: {login: "spali"}, body: $m},
+    {id: 61, body: $m}, {id: 70, user: {login: "github-actions[bot]"}, body: $m}]')"
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  [[ "$(gh_calls)" == *"-X PATCH repos/spali/ctl/issues/comments/70 "* ]]
+}
+
+@test "only marked comments by someone else means a new monitor comment" {
+  split_report
+  issues '[{"number":7}]'
+  comments 7 "$(jq -cn --arg m "$MARK" '[{id: 60, user: {login: "spali"}, body: $m}]')"
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  run ! grep -q 'issues/comments/' "$GH_LOG"
+  grep -q 'POST repos/spali/ctl/issues/7/comments' "$GH_LOG"
+}
+
+@test "MONITOR_COMMENT_AUTHOR names the author; empty accepts any author" {
+  split_report
+  issues '[{"number":7}]'
+  comments 7 "$(jq -cn --arg m "$MARK" '[{id: 60, user: {login: "spali"}, body: $m},
+    {id: 70, user: {login: "github-actions[bot]"}, body: $m}]')"
+  MONITOR_COMMENT_AUTHOR=spali run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  [[ "$(gh_calls)" == *"-X PATCH repos/spali/ctl/issues/comments/60 "* ]]
+
+  stub_gh
+  issues '[{"number":7}]'
+  comments 7 "$(jq -cn --arg m "$MARK" '[{id: 70, user: {login: "github-actions[bot]"}, body: $m},
+    {id: 65, user: {login: "someone"}, body: $m}]')"
+  MONITOR_COMMENT_AUTHOR= run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  [[ "$(gh_calls)" == *"-X PATCH repos/spali/ctl/issues/comments/65 "* ]]
+}
+
+@test "a cut issue text keeps the pointer to the comment and stays within the limit" {
+  { echo '## Maintenance monitor'; echo
+    for i in $(seq 1 1000); do printf 'text %06d %s\n' "$i" "$(head -c 62 /dev/zero | tr '\0' x)"; done
+    echo; echo "$MARK"; echo 'det'; } >"$REPORT"
+  issues '[{"number":7}]'
+  comments 7 '[]'
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  sent 3 | jq -j .body >"$BATS_TEST_TMPDIR/body.md"
+  [ "$(stat -c %s "$BATS_TEST_TMPDIR/body.md")" -le 65536 ]
+  [ "$(stat -c %s "$BATS_TEST_TMPDIR/body.md")" -gt 65000 ]
+  [[ $(<"$BATS_TEST_TMPDIR/body.md") == *$'\n… truncated, see the run summary.\n\n'"$DETAILS_LINE" ]]
 }
