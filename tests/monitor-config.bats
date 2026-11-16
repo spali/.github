@@ -307,3 +307,45 @@ YAML
   [ "$status" -eq 1 ]
   [[ $stderr == *"spali/x is in managed and in forks"* ]]
 }
+
+@test "managed: onto must be a valid branch name" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: "--x", rebase: auto}}}' 'managed[0].branches.main.onto: "--x" is not a valid branch name'
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: "a b", rebase: auto}}}' 'managed[0].branches.main.onto: "a b" is not a valid branch name'
+}
+
+@test "managed: non-string onto is invalid" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: 1, rebase: auto}}}' "managed[0].branches.main.onto is invalid"
+}
+
+@test "managed: github.com host is case-insensitive" {
+  managed_bad '  - {repo: spali/a, upstream: "https://GitHub.com/o/a/tree/x"}' "managed[0].upstream is not a github.com repository URL"
+  f=$(printf 'version: 1\nmanaged:\n  - {repo: spali/a, upstream: "https://GitHub.com/o/a", refs: all}\n' | mk ok.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+}
+
+@test "managed: duplicate and overlap checks ignore case" {
+  managed_bad '  - {repo: spali/X, upstream: "https://github.com/o/a"}
+  - {repo: spali/x, upstream: "https://github.com/o/b"}' "duplicate managed spali/x"
+  f=$(printf 'version: 1\nmanaged:\n  - {repo: spali/X, upstream: "https://github.com/o/a"}\nmirrors:\n  - {target: spali/x, source: "https://example.org/a", interval_hours: 24}\nforks:\n  - {repo: spali/x, sync_interval_hours: 24}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"spali/x is in managed and in mirrors"* ]]
+  [[ $stderr == *"spali/x is in managed and in forks"* ]]
+}
+
+@test "managed: unknown entry key fails" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", foo: 1}' "managed[0]: unknown key foo"
+}
+
+@test "managed: branches and settings must be mappings" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: [main]}' "managed[0].branches must be a mapping"
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", settings: [a]}' "managed[0].settings must be a mapping"
+}
+
+@test "managed: must be a list" {
+  f=$(printf 'version: 1\nmanaged: x\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: $f: managed must be a list" ]
+}

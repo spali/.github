@@ -65,3 +65,10 @@ setup() {
   run managed_entry "$CONFIG" spali/nope
   [ "$status" -eq 1 ]
 }
+
+@test "github.com host is case-insensitive, upstream_repo keeps case" {
+  jq -n '{managed: [{repo: "spali/c", upstream: "https://GitHub.com/Own/Nm.git"}]}' >"$CONFIG"
+  run managed_entry "$CONFIG" spali/c
+  [ "$(jq -r .kind <<<"$output")" = fork ]
+  [ "$(jq -r .upstream_repo <<<"$output")" = Own/Nm ]
+}

@@ -9,9 +9,9 @@ MANAGED_DEFAULT_SETTINGS='{"has_issues":false,"has_pull_requests":false,"has_wik
 # Argument: $defaults (default settings). Entries are assumed validated.
 # shellcheck disable=SC2016 # jq program, no shell expansion wanted
 MANAGED_JQ='
-def gh: capture("^https://github\\.com/(?<o>[^/]+)/(?<n>[^/]+?)(\\.git)?/?$");
+def gh: capture("^https://github\\.com/(?<o>[^/]+)/(?<n>[^/]+?)(\\.git)?/?$"; "i");
 (.managed // [])[] |
-  (.upstream | test("^https://github\\.com(/|$)")) as $fork
+  (.upstream | test("^https://github\\.com(/|$)"; "i")) as $fork
   | {
       repo,
       upstream,
@@ -32,7 +32,9 @@ managed_entries() {
 
 # managed_entry CONFIG_JSON_FILE REPO prints the object of one repo, or fails.
 managed_entry() {
-  local entries
+  local entries entry
   entries=$(managed_entries "$1") || return 1
-  jq -ce --arg repo "$2" 'select(.repo == $repo)' <<<"$entries" | head -n1 | grep . || return 1
+  entry=$(jq -c --arg repo "$2" 'select(.repo == $repo)' <<<"$entries")
+  [[ -n $entry ]] || return 1
+  printf '%s\n' "$entry"
 }
