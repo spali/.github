@@ -375,7 +375,7 @@ and the log of the failed step. Explanations for humans:
 | `fork-behind` (info) | a fork is behind its upstream | sync when you care |
 | `fork-sync-stale` | a fork with its own sync workflow misses upstream commits beyond `sync_interval_hours` + 24 h | check the sync workflow |
 | `fork-workflows-active` (info) | a fork runs its own workflows | disable them if unwanted |
-| `fork-delete-candidate` (info) | no own commits on the default branch, no open upstream PR from the fork, and every fork branch also exists upstream | consider deleting the fork |
+| `fork-delete-candidate` (info) | no own commits on the default branch, no open upstream PR from the fork, and every fork branch also exists upstream or was the head of a closed or merged upstream PR from the fork | consider deleting the fork |
 | `mirror-behind` | the mirror target lacks refs of its source beyond `interval_hours` + 24 h | check the mirror job in the mirror repository |
 | `list-none` (info) | a repository is in no list | add it to a list |
 | `list-contradiction` (info) | a repository is in both lists of an exclusive pair | fix the lists |
@@ -387,8 +387,8 @@ and the log of the failed step. Explanations for humans:
 | `branch-undeclared` | a fork branch (not the default branch) with own commits is neither declared in `branches:` nor the head of an open upstream PR from the fork (info for an unmanaged fork) | declare it or delete it |
 | `rebase-pending` (info) | a `rebase: manual` branch is behind its `onto` upstream | rebase it by hand |
 | `sync-failed` | the newest completed run of `sync.yml` in the control repository did not succeed (checked in Lists when `managed:` has entries; skipped in a local run) | read the sync log |
-| `contribution-stale` (info) | an open upstream pull request is older than 90 days | follow up or close it |
-| `unmanaged` (info) | a fork or mirror is not listed under `managed:` | add it to `managed:` or ignore |
+| `contribution-stale` (info) | an open upstream pull request from a fork is older than 90 days (unmanaged forks) | follow up or close it |
+| `unmanaged` (info) | a repository in the mirrors list is neither under `managed:` nor a `mirrors:` target | add it to `managed:` or ignore |
 | `adoption` (info) | a repository does not use the release flow | adopt it (4.6) or ignore |
 | `check-failed` | a check could not run (API error, rate limit, bad response, empty inventory) | read the detail, fix access or the script; never ignore |
 | `config-invalid` | the control file is missing or invalid, or names an unknown list/check | fix the file |

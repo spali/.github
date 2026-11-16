@@ -119,6 +119,24 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ ! -s "$FINDINGS" ]
 }
 
+@test "mirror list entry without managed entry is unmanaged" {
+  echo '{"lists": {"mirrors": "👀  Mirrors"}, "mirrors": [{"target": "spali/m"}], "managed": [{"repo": "spali/ok", "upstream": "https://github.com/up/ok"}]}' >"$CONFIG"
+  inv spali/m false false false
+  all_lists '(.[2].items = [["spali/m", false], ["spali/other", false], ["spali/OK", false], ["spali/m", false]])'
+  run_script
+  [ "$(count unmanaged)" -eq 1 ]
+  [ "$(level unmanaged)" = info ]
+  [ "$(repo unmanaged)" = spali/other ]
+  [ "$(message unmanaged)" = "in the mirrors list but not managed" ]
+}
+
+@test "unmanaged needs the mirrors list name" {
+  all_lists '(.[2].items = [["spali/other", false]])'
+  jq '.lists.mirrors = null' "$CONFIG" >"$CONFIG.n" && mv "$CONFIG.n" "$CONFIG"
+  run_script
+  [ "$(count unmanaged)" -eq 0 ]
+}
+
 @test "list-archived: archived repo outside the archive list" {
   all_lists '(.[0].items = [["spali/a", false], ["spali/old", true]]) | (.[3].items = [["spali/old", true]]) | (.[1].items = [["spali/old", true]])'
   run_script

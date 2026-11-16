@@ -176,7 +176,9 @@ fail or use minutes for nothing.
 ## fork-delete-candidate
 
 🔵 The fork has no own commits on its default branch, no open pull request
-upstream, and every branch of it also exists upstream: nothing would be lost.
+upstream, and every branch of it also exists upstream or was the head of a
+closed or merged pull request from the fork (contribution done): nothing
+would be lost.
 
 **Fix:** delete the fork if you no longer need it.
 
@@ -272,7 +274,8 @@ says otherwise. The detail lists each difference
 `branches:` and is not the head of an open pull request from the fork to
 upstream. Own commits are counted against the upstream branch of the same
 name, else the upstream default branch. The default branch counts as
-declared. The sync does not touch such a branch. (🔵 for an unmanaged fork.)
+declared. The sync does not touch such a branch. (🔵 for an unmanaged fork,
+where no sync manages anything: there the default branch is checked too.)
 
 **Fix:** declare the branch with its `onto` and `rebase`, or delete it.
 
@@ -295,13 +298,16 @@ repository.
 
 ## contribution-stale
 
-🔵 An open upstream pull request from a managed fork is older than 90 days.
+🔵 An open upstream pull request from a fork is older than 90 days
+(`PR #12 open for 91 days: <url>`). Checked for unmanaged forks.
 
 **Fix:** follow up or close it.
 
 ## unmanaged
 
-🔵 A fork or mirror is not listed under `managed:`.
+🔵 A repository is in the mirrors list (`lists.mirrors`) but is neither
+listed under `managed:` nor a mirror target under `mirrors:`
+(`in the mirrors list but not managed`).
 
 **Fix:** add it to `managed:`, or ignore the finding with a reason.
 

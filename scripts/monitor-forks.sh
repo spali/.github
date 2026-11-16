@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fork checks: fork-sync-stale / fork-behind (missing upstream commits),
-# workflow-disabled / fork-workflows-active, fork-delete-candidate.
+# workflow-disabled / fork-workflows-active, fork-delete-candidate,
+# contribution-stale, branch-undeclared (info).
 # Scope: inventory forks with a parent that are neither mirror targets nor
 # managed (monitor-managed.sh checks those).
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
@@ -53,35 +54,65 @@ check_workflows() {
   fi
 }
 
-# check_delete_candidate REPO BRANCH PARENT PARENT_BRANCH: no own commits on the
-# default branch, no open upstream PR from the fork, and every fork branch also
-# exists upstream.
+# check_delete_candidate REPO BRANCH PARENT PARENT_BRANCH PRS_FILE: no own
+# commits on the default branch, no open upstream PR from the fork, and every
+# fork branch also exists upstream or was the head of a closed or merged
+# upstream PR from the fork (contribution done). PRS_FILE: the open upstream
+# pulls, [{head_repo, head_ref, number, created_at, html_url}].
 check_delete_candidate() {
-  local repo=$1 branch=$2 parent=$3 pbranch=$4 body n prs mine fb pb extra
+  local repo=$1 branch=$2 parent=$3 pbranch=$4 prs=$5 body n mine fb pb cl extra
   body=$(fetch fork-delete-candidate "$repo" \
     "repos/$parent/compare/$pbranch...${repo%%/*}:${repo#*/}:$branch") || return 0
   json_out fork-delete-candidate "$repo" n -r '.ahead_by // "x"' <<<"$body" || return 0
   [[ $n == 0 ]] || return 0
-  prs=$(mktemp)
+  json_out fork-delete-candidate "$repo" mine --arg r "$repo" \
+    '[.[] | select(.head_repo | ascii_downcase == ($r | ascii_downcase))] | length' "$prs" || return 0
+  [[ $mine == 0 ]] || return 0
   fb=$(mktemp)
   pb=$(mktemp)
+  cl=$(mktemp)
   # shellcheck disable=SC2064 # expand now
-  trap "rm -f '$prs' '$fb' '$pb'; trap - RETURN" RETURN
-  paged fork-delete-candidate "$repo" "repos/$parent/pulls?state=open&per_page=100" \
-    '{head: (.head.repo.full_name // "")}' "$prs" || return 0
-  json_out fork-delete-candidate "$repo" mine --arg r "$repo" \
-    '[.[] | select(.head | ascii_downcase == ($r | ascii_downcase))] | length' "$prs" || return 0
-  [[ $mine == 0 ]] || return 0
+  trap "rm -f '$fb' '$pb' '$cl'; trap - RETURN" RETURN
   paged fork-delete-candidate "$repo" "repos/$repo/branches?per_page=100" '{name}' "$fb" || return 0
   paged fork-delete-candidate "$repo" "repos/$parent/branches?per_page=100" '{name}' "$pb" || return 0
   json_out fork-delete-candidate "$repo" extra --slurpfile p "$pb" \
-    '([$p[0][].name]) as $pn | [.[] | select(.name as $n | $pn | index($n) | not)] | length' "$fb" || return 0
-  [[ $extra == 0 ]] || return 0
+    '([$p[0][].name]) as $pn | [.[] | select(.name as $n | $pn | index($n) | not) | .name]' "$fb" || return 0
+  if [[ $extra != '[]' ]]; then
+    paged fork-delete-candidate "$repo" "repos/$parent/pulls?state=closed&per_page=100" \
+      '{head_repo: (.head.repo.full_name // ""), head_ref: .head.ref}' "$cl" || return 0
+    json_out fork-delete-candidate "$repo" extra --arg r "$repo" --argjson e "$extra" \
+      '[.[] | select(.head_repo | ascii_downcase == ($r | ascii_downcase)) | .head_ref] as $done |
+       [$e[] | select(IN($done[]) | not)] | length' "$cl" || return 0
+    [[ $extra == 0 ]] || return 0
+  fi
   finding info fork-delete-candidate "$repo" "no own commits, no open pull request upstream"
 }
 
+# check_contributions REPO PRS_FILE: open upstream PRs from the fork older than
+# 90 days.
+check_contributions() {
+  local repo=$1 prs=$2 rows n days url
+  json_out contribution-stale "$repo" rows -r --arg r "$repo" --argjson now "${MONITOR_NOW:-$(date -u +%s)}" '
+    .[] | select((.head_repo | ascii_downcase) == ($r | ascii_downcase)) |
+    (($now - (.created_at | fromdateiso8601)) / 86400 | floor) as $d |
+    select($d > 90) | [.number, $d, .html_url] | @tsv' "$prs" || return 0
+  while IFS=$'\t' read -r n days url; do
+    [[ -z $n ]] || finding info contribution-stale "$repo" "PR #$n open for $days days: $url"
+  done <<<"$rows"
+}
+
+# check_undeclared REPO PARENT PARENT_BRANCH PRS_FILE: no sync manages an
+# unmanaged fork, so every branch with own commits counts.
+check_undeclared() {
+  local repo=$1 parent=$2 pbranch=$3 prs=$4 found branch n
+  found=$(undeclared_branches branch-undeclared "$repo" "$parent" "$pbranch" '[]' "$prs") || true
+  while IFS=$'\t' read -r branch n; do
+    [[ -z $branch ]] || finding info branch-undeclared "$repo" "$branch: $n own commits, not declared in repos.yml"
+  done <<<"$found"
+}
+
 main() {
-  local forks repo branch parent pbranch sync
+  local forks repo branch parent pbranch sync prs
   if ! forks=$(jq -r --slurpfile c "$CONFIG" '
       ([$c[0].mirrors // [] | .[].target]) as $m |
       ([$c[0].managed // [] | .[].repo | ascii_downcase]) as $mg |
@@ -98,7 +129,14 @@ main() {
     checked "$repo"
     check_behind "$repo" "$branch" "$parent" "$pbranch" "$sync"
     check_workflows "$repo" "$sync"
-    check_delete_candidate "$repo" "$branch" "$parent" "$pbranch"
+    prs=$(mktemp)
+    if paged fork-delete-candidate "$repo" "repos/$parent/pulls?state=open&per_page=100" \
+      '{head_repo: (.head.repo.full_name // ""), head_ref: .head.ref, number, created_at, html_url}' "$prs"; then
+      check_delete_candidate "$repo" "$branch" "$parent" "$pbranch" "$prs"
+      check_contributions "$repo" "$prs"
+      check_undeclared "$repo" "$parent" "$pbranch" "$prs"
+    fi
+    rm -f "$prs"
   done <<<"$forks"
 }
 

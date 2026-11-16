@@ -64,6 +64,11 @@ list_findings() {
       ($cfg[0].mirrors // [])[] | .target as $t |
       select(inlists($t) | index($m) == null) |
       row("info"; "list-mirror-missing"; $t; "mirror target not in \"\($m)\"")),
+    (select($cl.mirrors != null and ok($cl.mirrors)) | $cl.mirrors as $m |
+      ([($cfg[0].managed // [])[].repo, ($cfg[0].mirrors // [])[].target] | map(ascii_downcase)) as $known |
+      [$lists[] | select(.name == $m) | .items[].repo] | unique[] |
+      select(ascii_downcase | IN($known[]) | not) |
+      row("info"; "unmanaged"; .; "in the mirrors list but not managed")),
     (select($cl.archive != null and ok($cl.archive)) |
       [$lists[] | select(.name != $cl.archive) | .name as $n |
         .items[] | select(.archived) | {repo, n: $n}] |
