@@ -387,6 +387,10 @@ fi'
   [ "$status" -eq 0 ]
   [[ $output == *"steps.exists.outputs.exists != 'true'"* ]]
   [[ $output == *"steps.exists.outputs.kind == 'fork'"* ]]
+  # forking refuses down-scoped tokens: no repositories, no permission-* inputs
+  run yq -r '.jobs.sync.steps[] | select(.id == "create-token") | .with | keys | .[]' "$wf"
+  [[ $output != *permission-* ]]
+  [[ $output != *repositories* ]]
   # a missing mirror still runs create (it fails with the by-hand command),
   # with the metadata token
   run yq -r '.jobs.sync.steps[] | select(.id == "create") | .if' "$wf"
