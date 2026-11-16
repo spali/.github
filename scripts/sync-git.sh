@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Syncs the git refs of one managed fork or mirror.
 #
-#   sync-git.sh plan  fetches upstream and target into $WORK/repo, rebases the
+#   sync-git.sh plan  fetches upstream (refs default: only the default branch,
+#                     the onto branches and the branches matching a follow
+#                     pattern, no tags) and target into $WORK/repo, rebases the
 #                     declared branches there and writes $WORK/plan.tsv
 #                     (<ref> <old sha> <new sha> <reason>, tab separated;
 #                     reasons ff, rebase, mirror, delete, backup) and
@@ -152,6 +154,55 @@ check_backup_prefix() {
   fi
 }
 
+# follow_match prints the names (one per line on stdin) that match a follow
+# pattern of the entry as a whole. The patterns are only used inside jq.
+follow_match() {
+  if [[ $FOLLOW == '[]' ]]; then
+    cat >/dev/null
+    return 0
+  fi
+  # shellcheck disable=SC2016 # jq program
+  jq -rR --argjson f "$FOLLOW" \
+    'select(. as $n | any($f[]; . as $re | $n | test("^(?:" + $re + ")$")))' ||
+    die "invalid follow pattern"
+}
+
+# fetch_needed UPSTREAM_DEFAULT fetches (refs default) only the upstream
+# default branch, the onto of every declared branch and the branches that
+# match a follow pattern (FOL), no tags. The branch names come from
+# ls-remote; invalid ones are skipped.
+fetch_needed() {
+  local udef=$1 out sha name onto fol
+  local -a specs=()
+  local -A have=() want=()
+  out=$(g ls-remote --heads -- "$UPSTREAM_URL") || die "cannot read upstream branches"
+  while IFS=$'\t' read -r sha name; do
+    [[ -n $name ]] || continue
+    if [[ $name != refs/heads/* ]] || ! valid_ref "$name"; then
+      skip "$name" "invalid ref name"
+      continue
+    fi
+    have[${name#refs/heads/}]=1
+  done <<<"$out"
+  [[ -z $udef ]] || want[$udef]=1
+  # shellcheck disable=SC2153 # ENTRY comes from the environment
+  while IFS= read -r onto; do
+    [[ -z $onto ]] || want[$onto]=1
+  done < <(jq -r '.branches[].onto // empty | tostring' <<<"$ENTRY")
+  fol=$(sorted_keys have | follow_match)
+  while IFS= read -r name; do
+    [[ -z $name ]] || FOL[$name]=1
+  done <<<"$fol"
+  for name in "${!FOL[@]}"; do want[$name]=1; done
+  for name in "${!want[@]}"; do
+    [[ -n ${have[$name]:-} ]] || continue
+    specs+=("+refs/heads/$name:refs/up/heads/$name")
+  done
+  ((${#specs[@]})) || return 0
+  g fetch -q --no-tags --no-write-fetch-head -- "$UPSTREAM_URL" "${specs[@]}" ||
+    die "cannot fetch upstream"
+}
+
 sorted_keys() {
   local -n a=$1
   ((${#a[@]})) || return 0
@@ -159,7 +210,7 @@ sorted_keys() {
 }
 
 plan() {
-  local mode kind name onto how key up tg tdef udef n u sha
+  local mode kind name onto how key up tg tdef udef n u sha fol
   local -a keys
   need_env ENTRY TARGET_URL UPSTREAM_URL WORK GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
   [[ -d $WORK ]] || die "WORK $WORK is not a directory"
@@ -179,15 +230,21 @@ plan() {
   : >"$WORK/skipped.txt"
   git init -q "$REPO"
 
-  g fetch -q --no-tags --no-write-fetch-head -- "$UPSTREAM_URL" \
-    '+refs/heads/*:refs/up/heads/*' '+refs/tags/*:refs/up/tags/*' ||
-    die "cannot fetch upstream"
+  declare -gA UPR=() TGR=() BKR=() DECL=() CONTRIB=() FOL=()
+  FOLLOW=$(jq -c '.follow // []' <<<"$ENTRY")
+  if [[ $mode == default ]]; then
+    udef=$(default_branch "$UPSTREAM_URL" upstream)
+    fetch_needed "$udef"
+  else
+    g fetch -q --no-tags --no-write-fetch-head -- "$UPSTREAM_URL" \
+      '+refs/heads/*:refs/up/heads/*' '+refs/tags/*:refs/up/tags/*' ||
+      die "cannot fetch upstream"
+  fi
   g fetch -q --no-tags --no-write-fetch-head -- "$TARGET_URL" \
     '+refs/heads/*:refs/tg/heads/*' '+refs/tags/*:refs/tg/tags/*' \
     "+${BACKUP_PREFIX}*:refs/tg/backup/*" ||
     die "cannot fetch target"
 
-  declare -gA UPR=() TGR=() BKR=() DECL=() CONTRIB=()
   load up UPR
   load tg TGR
   while IFS=$'\t' read -r sha name; do
@@ -226,7 +283,6 @@ plan() {
     | map((. // "") | tostring | explode | map(if . < 32 or . == 127 then 63 else . end) | implode) | join("\u001f")' <<<"$ENTRY")
 
   if [[ $mode == default ]]; then
-    udef=$(default_branch "$UPSTREAM_URL" upstream)
     [[ -n $udef && -n ${UPR[heads/$udef]:-} ]] || die "upstream default branch missing"
     tdef=$(default_branch "$TARGET_URL" target)
     tdef=${tdef:-$udef}
@@ -243,6 +299,34 @@ plan() {
         skip "refs/heads/$tdef" undeclared
       fi
     fi
+    # followed branches: like the heads in mode all
+    mapfile -t keys < <(sorted_keys FOL)
+    for name in "${keys[@]}"; do
+      [[ $name != "$tdef" && -z ${DECL[$name]:-} ]] || continue
+      up=${UPR[heads/$name]:-}
+      tg=${TGR[heads/$name]:-$ZERO}
+      [[ -n $up && $tg != "$up" ]] || continue
+      if [[ -n ${CONTRIB[$name]:-} ]]; then
+        skip "refs/heads/$name" contribution
+      elif [[ $tg != "$ZERO" ]] && ! is_ancestor "$tg" "$up"; then
+        skip "refs/heads/$name" undeclared
+      else
+        add "refs/heads/$name" "$tg" "$up" mirror
+      fi
+    done
+    # followed target branches gone upstream (the default branch never)
+    fol=$(sorted_keys TGR | sed -n 's|^heads/||p' | follow_match)
+    mapfile -t keys <<<"$fol"
+    for name in "${keys[@]}"; do
+      [[ -n $name && $name != "$tdef" && -z ${DECL[$name]:-} && -z ${UPR[heads/$name]:-} ]] || continue
+      if [[ -n ${CONTRIB[$name]:-} ]]; then
+        skip "refs/heads/$name" contribution
+      elif contained "${TGR[heads/$name]}"; then
+        add "refs/heads/$name" "${TGR[heads/$name]}" "$ZERO" delete
+      else
+        skip "refs/heads/$name" "unique commits"
+      fi
+    done
   else
     mapfile -t keys < <(sorted_keys UPR)
     for key in "${keys[@]}"; do

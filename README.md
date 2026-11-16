@@ -471,7 +471,7 @@ after 48 h.
 | `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `archive`, `mirrors`, `forks` (list of lists) |
 | `mirrors` | mirror targets: `target` (`spali/name`), `source` (`https://` URL), `interval_hours`, optional `script` |
 | `forks` | forks with their own sync workflow: `repo`, `sync_interval_hours` |
-| `managed` | forks and mirrors kept in sync by [`sync.yml`](#fork-and-mirror-sync): `repo`, `upstream`, optional `refs`, `branches`, `settings`, `private` |
+| `managed` | forks and mirrors kept in sync by [`sync.yml`](#fork-and-mirror-sync): `repo`, `upstream`, optional `refs`, `branches`, `follow`, `settings`, `private` |
 | `ignores` | accepted findings: `repo`, `check` (an id from the AGENTS.md catalog, not `check-failed`), `reason` (required) |
 
 ```yaml
@@ -593,10 +593,18 @@ For each managed repository it
 2. enforces its settings: issues, pull requests, wiki, discussions, projects
    and GitHub Actions are off unless `settings:` turns them on;
 3. syncs the refs from upstream: fast-forwards the default branch, rebases
-   the declared branches onto their upstream branch, mirrors all branches and
-   tags with `refs: all` (and for every mirror); there it deletes a target
-   ref that is gone upstream only when its commits are still in an upstream
-   ref.
+   the declared branches onto their upstream branch, mirrors the upstream
+   branches that match a `follow` pattern, and mirrors all branches and tags
+   with `refs: all` (and for every mirror); it deletes a target ref that is
+   gone upstream (with `refs: default` only a followed branch) only when its
+   commits are still in an upstream ref.
+
+**Only the needed branches.** A fork with `refs: default` fetches from
+upstream only the default branch, the `onto` of each declared branch and the
+branches matching a `follow` pattern; no tags. The branch names come from
+`git ls-remote` (no objects), so a large upstream with many branches and tags
+costs no Actions minutes for refs nobody uses. Every other branch must be
+configured, by `branches:` or `follow:`; other target branches are left alone.
 
 It writes **only to the repositories under `managed:`**. A branch with own
 commits that is not declared, and the head branch of an open upstream pull
@@ -622,7 +630,8 @@ nothing is lost: `git fetch origin 'refs/backup/*:refs/remotes/backup/*'`.
 |---|---|
 | `repo` | the fork or mirror, `spali/name` |
 | `upstream` | `https://` URL of the source; on `github.com` the repository is a **fork**, anywhere else a **mirror** |
-| `refs` | forks only: `default` (the default, the default branch and the declared branches) or `all` (all branches and tags of upstream); mirrors always sync all branches and tags |
+| `refs` | forks only: `default` (the default, the default branch, the declared branches and the followed branches) or `all` (all branches and tags of upstream); mirrors always sync all branches and tags |
+| `follow` | forks with `refs: default` only: a list of regular expressions (jq/Oniguruma syntax); every upstream branch whose **whole** name matches one is mirrored by name like with `refs: all` (fast-forward only, a diverged one with own commits is kept, one gone upstream is deleted only when nothing is lost) |
 | `branches` | own branches of a fork: `<branch>: {onto: <upstream branch>, rebase: auto}` or `rebase: manual`; `auto` rebases on every run, `manual` only when dispatched with `branch`; a missing declared branch is created from its `onto` |
 | `settings` | exceptions to the defaults (all `false`): `has_issues`, `has_pull_requests`, `has_wiki`, `has_discussions`, `has_projects`, `actions` |
 | `private` | mirrors: the visibility in the create command (default `false`) |
@@ -634,6 +643,7 @@ managed:
     branches:
       my-feature: {onto: main, rebase: auto}
       experiment: {onto: develop, rebase: manual}
+    follow: ['release/v[0-9]+\.[0-9]+']
     settings:
       has_issues: true
   - repo: spali/example-mirror

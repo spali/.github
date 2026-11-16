@@ -269,7 +269,9 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
-  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/%s\tinvalid ref name\n' --exec=x --upload-pack=touch_pwned main; printf 'refs/tags/-t\tinvalid ref name')" ]
+  # default mode reads no tags
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/%s\tinvalid ref name\n' --exec=x --upload-pack=touch_pwned main)" ]
+  [ -z "$(find "$BATS_TEST_TMPDIR" -name 'touch_pwned*' -o -name pwned)" ]
 }
 
 @test "merge-requests refs are never fetched" {
@@ -402,6 +404,176 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/\tinvalid ref name\nrefs/heads/feat\tinvalid ref name')" ]
+}
+
+# up_refs prints the upstream refs fetched into the work repository.
+up_refs() {
+  git -C "$WORK/repo" for-each-ref --format='%(refname)' refs/up/
+}
+
+@test "default mode fetches only the default branch" {
+  C=$(commit "$A" d dev)
+  T=$(atag v2 "$C")
+  set_ref "$UP" refs/heads/dev "$C"
+  set_ref "$UP" refs/tags/v1 "$A"
+  set_ref "$UP" refs/tags/v2 "$T"
+  set_ref "$TG" refs/heads/main "$A"
+  entry fork default
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$A" "$B")" ]
+  [ "$(up_refs)" = refs/up/heads/main ]
+  [ -z "$(git -C "$WORK/repo" for-each-ref refs/tags/ refs/up/tags/)" ]
+  run git -C "$WORK/repo" cat-file -e "$T"
+  [ "$status" -ne 0 ]
+  run git -C "$WORK/repo" cat-file -e "$C"
+  [ "$status" -ne 0 ]
+}
+
+@test "onto branches are fetched for declared branches" {
+  C=$(commit "$A" d dev)
+  D=$(commit "$A" r rel)
+  O=$(commit "$A" o own)
+  set_ref "$UP" refs/heads/dev "$C"
+  set_ref "$UP" refs/heads/rel "$D"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/heads/feat "$O"
+  entry fork default '[{"name": "feat", "onto": "dev", "rebase": "auto"}]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(up_refs)" = "$(printf 'refs/up/heads/dev\nrefs/up/heads/main')" ]
+  N=$(git -C "$WORK/repo" rev-parse refs/heads/feat)
+  [ "$(plan_line refs/heads/feat)" = "$(printf '%s\t%s\trebase' "$O" "$N")" ]
+  [ "$(git -C "$WORK/repo" rev-parse "$N~1")" = "$C" ]
+}
+
+@test "follow pattern mirrors matching release branches" {
+  C=$(commit "$B" r rel)
+  D=$(commit "$B" x feat)
+  set_ref "$UP" refs/heads/release/v1 "$C"
+  set_ref "$UP" refs/heads/feature/x "$D"
+  set_ref "$TG" refs/heads/main "$B"
+  entry fork default '[]' '["^release/.*"]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/release/v1\t%s\t%s\tmirror' "$ZERO" "$C")" ]
+  [ ! -s "$WORK/skipped.txt" ]
+  [ "$(up_refs)" = "$(printf 'refs/up/heads/main\nrefs/up/heads/release/v1')" ]
+}
+
+@test "follow pattern is a full match" {
+  C=$(commit "$B" r rel)
+  set_ref "$UP" refs/heads/release/v1 "$C"
+  set_ref "$UP" refs/heads/stable "$C"
+  set_ref "$UP" refs/heads/stable-2 "$C"
+  set_ref "$UP" refs/heads/pre-stable "$C"
+  set_ref "$TG" refs/heads/main "$B"
+  entry fork default '[]' '["release", "stable"]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/stable\t%s\t%s\tmirror' "$ZERO" "$C")" ]
+  [ "$(up_refs)" = "$(printf 'refs/up/heads/main\nrefs/up/heads/stable')" ]
+}
+
+@test "followed branch with own commits is kept" {
+  C=$(commit "$A" r rel)
+  O=$(commit "$A" o own)
+  set_ref "$UP" refs/heads/release/v1 "$C"
+  set_ref "$UP" refs/heads/release/v2 "$C"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/heads/release/v1 "$O"
+  set_ref "$TG" refs/heads/release/v2 "$A"
+  entry fork default '[]' '["release/.*"]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/release/v2\t%s\t%s\tmirror' "$A" "$C")" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/release/v1\tundeclared')" ]
+}
+
+@test "followed contribution and declared branches keep their rules" {
+  C=$(commit "$A" r rel)
+  O=$(commit "$A" o own)
+  set_ref "$UP" refs/heads/release/v1 "$C"
+  set_ref "$UP" refs/heads/release/v2 "$C"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/heads/release/v1 "$A"
+  set_ref "$TG" refs/heads/release/v2 "$O"
+  printf '%s\n' release/v1 >"$WORK/contrib.txt"
+  entry fork default '[{"name": "release/v2", "onto": "main", "rebase": "manual"}]' '["release/.*"]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/release/v1\tcontribution')" ]
+}
+
+@test "followed branch gone upstream is deleted when contained" {
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/heads/release/old "$A"
+  entry fork default '[]' '["release/.*"]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/release/old\t%s\t%s\tdelete' "$A" "$ZERO")" ]
+  [ ! -s "$WORK/skipped.txt" ]
+}
+
+@test "followed branch gone upstream is kept with unique commits" {
+  O=$(commit "$A" o own)
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/heads/release/old "$O"
+  entry fork default '[]' '["release/.*"]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/release/old\tunique commits')" ]
+}
+
+@test "followed target default branch is never deleted" {
+  git -C "$TG" symbolic-ref HEAD refs/heads/master
+  set_ref "$TG" refs/heads/master "$B"
+  entry fork default '[]' '["master"]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ ! -s "$WORK/skipped.txt" ]
+}
+
+@test "invalid follow pattern fails without plan" {
+  set_ref "$TG" refs/heads/main "$A"
+  entry fork default '[]' '["release/(v"]'
+  run --separate-stderr "$SCRIPT" plan
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"error: invalid follow pattern"* ]]
+  [ ! -e "$WORK/plan.tsv" ]
+}
+
+@test "unfollowed target branch is untouched" {
+  C=$(commit "$A" x feat)
+  O=$(commit "$A" o own)
+  set_ref "$UP" refs/heads/feature/x "$C"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/heads/feature/x "$A"
+  set_ref "$TG" refs/heads/feature/y "$O"
+  set_ref "$TG" refs/heads/gone "$A"
+  entry fork default '[]' '["release/.*"]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ ! -s "$WORK/skipped.txt" ]
+}
+
+@test "mode all still fetches everything" {
+  C=$(commit "$A" d dev)
+  T=$(atag v2 "$C")
+  set_ref "$UP" refs/heads/dev "$C"
+  set_ref "$UP" refs/tags/v1 "$A"
+  set_ref "$UP" refs/tags/v2 "$T"
+  set_ref "$TG" refs/heads/main "$B"
+  entry fork all
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(up_refs)" = "$(printf 'refs/up/heads/dev\nrefs/up/heads/main\nrefs/up/tags/v1\nrefs/up/tags/v2')" ]
+  [ "$(git -C "$WORK/repo" cat-file -t "$T")" = tag ]
+  [ "$(cut -f1 "$WORK/plan.tsv" | tr '\n' ' ')" = "refs/heads/dev refs/tags/v1 refs/tags/v2 " ]
 }
 
 # --- push ---

@@ -67,11 +67,13 @@ plan_line() {
   awk -F'\t' -v r="$1" '$1 == r { print $2 "\t" $3 "\t" $4 }' "$WORK/plan.tsv"
 }
 
-# entry KIND REFS BRANCHES_JSON exports ENTRY like managed_entry prints it.
+# entry KIND REFS [BRANCHES_JSON [FOLLOW_JSON]] exports ENTRY like
+# managed_entry prints it.
 entry() {
   ENTRY=$(jq -nc --arg kind "$1" --arg refs "$2" --argjson branches "${3:-[]}" \
+    --argjson follow "${4:-[]}" \
     '{repo: "spali/t", upstream: "https://example.com/u/t.git", kind: $kind,
-      upstream_repo: null, refs: $refs, branches: $branches,
+      upstream_repo: null, refs: $refs, branches: $branches, follow: $follow,
       settings: {}, private: false}')
   export ENTRY
 }

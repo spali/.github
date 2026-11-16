@@ -26,6 +26,8 @@ def on_github: type == "string" and test("^https://github\\.com(/|$)"; "i");
 def gh_repo_url: test("^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(\\.git)?/?$"; "i");
 def branch_ok: type == "string" and test("^[A-Za-z0-9._/-]+$") and (contains("..") | not)
   and (startswith("-") | not) and (startswith("/") | not);
+# a follow pattern must compile on its own and inside the full-match wrapper
+def regex_ok: . as $re | (try ("" | test($re) | ("" | test("^(?:" + $re + ")$")) | true) catch false);
 def need($e; $k; $path; test_):
   if ($e | has($k)) | not then "\($path).\($k) is required"
   elif ($e[$k] | test_) then empty
@@ -84,7 +86,7 @@ if type != "object" then "top level must be a mapping" else
   (if has("managed") and (.managed | type) != "array" then "managed must be a list" else empty end),
   (list_of("managed") | to_entries[] | "managed[\(.key)]" as $p | .value
     | if type != "object" then "\($p) must be a mapping" else
-        (keys[] | select(IN("repo", "upstream", "refs", "branches", "settings", "private") | not)
+        (keys[] | select(IN("repo", "upstream", "refs", "branches", "follow", "settings", "private") | not)
           | "\($p): unknown key \(.)"),
         (if has("repo") | not then "\($p).repo is required" else repo_err("\($p).repo"; .repo) end),
         (if has("upstream") | not then "\($p).upstream is required"
@@ -98,6 +100,14 @@ if type != "object" then "top level must be a mapping" else
             else empty end)
          else empty end),
         (if has("private") and (.private | type) != "boolean" then "\($p).private must be a boolean" else empty end),
+        (if has("follow") then
+           (if (.follow | type == "array" and all(type == "string")) | not
+            then "\($p).follow must be a list of strings"
+            else (.follow | to_entries[] | select(.value | regex_ok | not)
+              | "\($p).follow[\(.key)]: invalid regular expression") end),
+           (if ((.upstream | on_github) | not) or .refs == "all"
+            then "\($p): follow only applies to forks with refs default" else empty end)
+         else empty end),
         (if has("branches") then
            (if (.branches | type) != "object" then "\($p).branches must be a mapping"
             else (.branches | to_entries[] | .key as $b | .value as $v

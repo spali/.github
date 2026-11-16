@@ -262,8 +262,10 @@ says otherwise. The detail lists each difference
   or a branch declared with `rebase: auto` misses commits of its `onto`, and
   the oldest missing commit is older than 48 hours
   (`main: 3 upstream commits missing, oldest from …`). A declared default
-  branch follows its declaration. A declared branch that does not exist in
-  the fork is red at once (`feat: missing in the target`);
+  branch follows its declaration. With `refs: default`, an upstream branch
+  that matches a `follow` pattern is compared with the fork branch of the
+  same name the same way. A declared or followed branch that does not exist
+  in the fork is red at once (`feat: missing in the target`);
 - a mirror, or a fork with `refs: all`: branches or tags of the upstream are
   missing or differ (declared branches excepted), and the last push is older
   than 48 hours (`2 refs differ, last push …`).
@@ -280,8 +282,9 @@ the sync never writes it.
 upstream. Own commits of the default branch are counted against the upstream
 default branch (never against an upstream branch of the same name; with
 `refs: all`, which mirrors branches by name, like any other branch), those
-of any other branch against the upstream branch of the same name, else the
-upstream default branch. The default branch counts too unless it is
+of any other branch (a followed one too, the sync mirrors it by name)
+against the upstream branch of the same name, else the upstream default
+branch. The default branch counts too unless it is
 declared. The sync does not touch such a branch and its run fails. (🔵 for
 an unmanaged fork, where no sync manages anything.)
 
