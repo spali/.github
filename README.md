@@ -627,6 +627,38 @@ inside a merge (conflict resolutions, evil merges) are not carried over. The
 old tip of every rebased branch stays in the backup ref
 `refs/backup/<branch>` of the repository (written in the same push), so
 nothing is lost: `git fetch origin 'refs/backup/*:refs/remotes/backup/*'`.
+There is one backup per ref: it holds the latest old tip and is replaced by
+each later rebase or accept.
+
+**Upstream rewrites.** Every synced branch has a record
+`refs/sync/upstream/<branch>` in the repository: the upstream commit it was
+last synced to (the upstream branch for the default and followed branches,
+the `onto` for a declared branch). It moves in the same atomic push as its
+branch and is deleted with it. When upstream rewrites history (a force push)
+the sync never follows on its own:
+
+- a default or followed branch whose upstream no longer contains its record,
+  and a declared branch whose record is no longer in its `onto`, are skipped
+  as `upstream rewritten (synced <sha>, upstream now <sha>, <n> synced
+  commits gone upstream; target has …)`;
+- a target tag that differs from the upstream tag of the same name is
+  skipped as `upstream moved tag (target <sha>, upstream <sha>)`.
+
+The other refs are synced as usual; the run fails after the push with one
+line per stopped ref: `error: <ref>: <reason>. Check upstream, then run the
+sync with repo=<repo> accept=<branch | tags/name>`. Check upstream (was the
+rewrite intended?), then accept it:
+`gh workflow run sync.yml -f repo=spali/name -f accept=<branch>` (a tag:
+`-f accept=tags/<name>`; every stop of that repository: `-f accept='*'`).
+Accept backs up the old tip (a branch in `refs/backup/<branch>`, a tag in
+`refs/backup-tags/<tag>`) and then follows upstream: a default or followed
+branch and a tag are set to upstream, a declared branch rebases only its
+own commits after the record onto the new `onto`. A default or followed
+branch with own commits on top is refused (`; accept refused: own commits on
+top, …`): declare it in `branches:`, or reset it by hand. A declared branch
+whose record is not in the branch (reset or rebased by hand) is no stop and
+rebases as usual. The records are first created by the first run after an
+update of the sync; nothing stops in that run.
 
 **Own tags.** With `tags: true` the target's tags are synced by name, so a
 fork that carries own tags should set `tags: false`. Otherwise:
@@ -717,6 +749,9 @@ on:
       branch:
         description: Also rebase this manual branch (or * for all), needs repo
         type: string
+      accept:
+        description: Accept an upstream rewrite of this branch, tags/<name> or *; needs repo
+        type: string
 concurrency:
   group: sync
 permissions:
@@ -728,6 +763,7 @@ jobs:
       app-client-id: ${{ vars.SYNC_APP_CLIENT_ID }}
       repo: ${{ inputs.repo }}
       branch: ${{ inputs.branch }}
+      accept: ${{ inputs.accept }}
     secrets:
       app-key: ${{ secrets.SYNC_APP_KEY }}
 ```
@@ -737,7 +773,9 @@ lists the repositories (only `repo` when dispatched with it). Then one job
 **Sync · spali/name** per repository runs, at most 4 at a time, on
 `monitor.runs-on`; a failure in one does not stop the others, and each
 repository has its own concurrency group. Rebase a `rebase: manual` branch:
-`gh workflow run sync.yml -f repo=spali/name -f branch=<branch>`.
+`gh workflow run sync.yml -f repo=spali/name -f branch=<branch>`. Accept an
+upstream rewrite (see "Upstream rewrites"):
+`gh workflow run sync.yml -f repo=spali/name -f accept=<branch|tags/name|*>`.
 
 ## Troubleshooting
 

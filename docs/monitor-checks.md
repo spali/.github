@@ -286,8 +286,13 @@ ls-remote --symref` fails or the upstream has no `HEAD`), its branches are
 not compared: `check-failed` with
 `managed-behind: cannot read the upstream default branch`.
 
+A branch or tag the sync stopped because upstream rewrote it
+(`upstream rewritten` or `upstream moved tag` in the sync run) stays behind
+until the rewrite is accepted, so it shows here too.
+
 **Fix:** look at the sync run (see `sync-failed`); for a missing `onto`,
-fix the `onto` of the branch in `repos.yml`.
+fix the `onto` of the branch in `repos.yml`; for a stopped ref, accept the
+rewrite as described under `sync-failed`.
 
 ## branch-undeclared
 
@@ -334,7 +339,15 @@ monitor run (in the Lists job), only when `managed:` has entries. No run yet
 is no finding. ⚪ Skipped in a local run, where there is no control
 repository.
 
-**Fix:** read the log of the run, fix the cause, run the sync again.
+A run also fails when the sync stopped a ref because upstream rewrote it:
+`error: <ref>: upstream rewritten (…)` or `upstream moved tag (…)`, with the
+command to accept it. Such a ref stays as it was (the other refs are synced)
+until the rewrite is accepted.
+
+**Fix:** read the log of the run, fix the cause, run the sync again. For a
+stopped ref: check upstream, then in the control repository run
+`gh workflow run sync.yml -f repo=<repo> -f accept=<branch|tags/name|*>`
+(the old tip is kept in `refs/backup/<branch>` or `refs/backup-tags/<tag>`).
 
 ## contribution-stale
 

@@ -43,7 +43,7 @@ EOS
   export GH_TOKEN=secret-token SYNC_APP_SLUG=sync-app
   export GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary.md"
   : >"$GITHUB_STEP_SUMMARY"
-  unset SYNC_REPO SYNC_BRANCH GITHUB_OUTPUT GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL \
+  unset SYNC_REPO SYNC_BRANCH SYNC_ACCEPT GITHUB_OUTPUT GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL \
     GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
   SYNC="$REAL/sync.sh"
 }
@@ -61,6 +61,7 @@ set -euo pipefail
   printf '  committer=%s <%s>\n' "\${GIT_COMMITTER_NAME:-}" "\${GIT_COMMITTER_EMAIL:-}"
   printf '  config=%s %s %s\n' "\${GIT_CONFIG_COUNT:-}" "\${GIT_CONFIG_KEY_0:-}" "\${GIT_CONFIG_VALUE_0:-}"
   printf '  branch=%s\n' "\${SYNC_BRANCH:-}"
+  printf '  accept=%s\n' "\${SYNC_ACCEPT:-}"
   [[ ! -f \${WORK:-/nonexistent}/contrib.txt ]] || sed 's/^/  contrib=/' "\$WORK/contrib.txt"
 } >>"\$CALLS"
 $2
@@ -120,6 +121,29 @@ steps() {
   [[ $stderr == "error: invalid branch"* ]]
   SYNC_REPO=spali/tool SYNC_BRANCH='*' run --separate-stderr "$SYNC" matrix
   [ "$status" -eq 0 ]
+}
+
+@test "accept needs repo" {
+  SYNC_ACCEPT=main run --separate-stderr "$SYNC" matrix
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: the accept input needs the repo input" ]
+}
+
+@test "invalid accept is refused" {
+  local a
+  for a in -x tags/ a..b; do
+    SYNC_REPO=spali/tool SYNC_ACCEPT=$a run --separate-stderr "$SYNC" matrix
+    [ "$status" -eq 1 ]
+    [[ $stderr == "error: invalid accept: "* ]]
+    SYNC_ACCEPT=$a run --separate-stderr "$SYNC" repo spali/tool
+    [ "$status" -eq 1 ]
+    [[ $stderr == "error: invalid accept: "* ]]
+  done
+  [ -z "$(steps)" ]
+  for a in '*' main tags/v1.0; do
+    SYNC_REPO=spali/tool SYNC_ACCEPT=$a run --separate-stderr "$SYNC" matrix
+    [ "$status" -eq 0 ]
+  done
 }
 
 @test "invalid config fails" {
@@ -297,6 +321,40 @@ fi'
   grep -qF 'error: 1 refs kept with own commits: refs/heads/x' "$GITHUB_STEP_SUMMARY"
 }
 
+@test "upstream rewrite is an actionable error" {
+  stub_step sync-git.sh '
+if [[ $1 == plan ]]; then
+  printf "refs/heads/main\tupstream rewritten (synced 1111111, upstream now 2222222, 1 synced commits gone upstream; target has no own commits)\nrefs/tags/v1\tupstream moved tag (target 3333333, upstream 4444444)\nrefs/heads/x\tundeclared\n" >"$WORK/skipped.txt"
+else
+  echo "nothing to do"
+fi'
+  run --separate-stderr "$SYNC" repo spali/tool
+  [ "$status" -eq 1 ]
+  [ "$(steps | tail -n 1)" = "sync-git.sh push" ]
+  local main tag
+  main="error: refs/heads/main: upstream rewritten (synced 1111111, upstream now 2222222, 1 synced commits gone upstream; target has no own commits). Check upstream, then run the sync with repo=spali/tool accept=main"
+  tag="error: refs/tags/v1: upstream moved tag (target 3333333, upstream 4444444). Check upstream, then run the sync with repo=spali/tool accept=tags/v1"
+  [[ $stderr == *"$main"* ]]
+  [[ $stderr == *"$tag"* ]]
+  [[ $stderr == *"error: 1 refs kept with own commits: refs/heads/x"* ]]
+  grep -qF "$main" "$GITHUB_STEP_SUMMARY"
+  grep -qF "$tag" "$GITHUB_STEP_SUMMARY"
+  grep -qF 'error: 1 refs kept with own commits: refs/heads/x' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "an upstream rewrite alone fails the run" {
+  stub_step sync-git.sh '
+if [[ $1 == plan ]]; then
+  printf "refs/heads/main\tupstream rewritten (synced 1111111, upstream now 2222222, 1 synced commits gone upstream; target has no own commits)\n" >"$WORK/skipped.txt"
+else
+  echo "nothing to do"
+fi'
+  run --separate-stderr "$SYNC" repo spali/tool
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"accept=main"* ]]
+  [[ $stderr != *"kept with own commits"* ]]
+}
+
 # target_branches NAME...: the branches of spali/tool (two pages)
 target_branches() {
   jq -n '$ARGS.positional[:1] | map({name: .})' --args "$@"
@@ -381,6 +439,13 @@ open_on() {
   ! grep -q secret-token "$GH_LOG"
 }
 
+@test "accept is passed to the git step" {
+  SYNC_ACCEPT=tags/v1 run "$SYNC" repo spali/tool
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^  accept=tags/v1$' "$CALLS")" -eq 4 ]
+  [ "$(steps | grep -c '^sync-git.sh plan$')" -eq 1 ]
+}
+
 @test "the credential is masked in GitHub Actions before git runs" {
   local b64
   b64=$(printf '%s' 'x-access-token:secret-token' | base64 -w0)
@@ -452,4 +517,14 @@ open_on() {
   [[ $output == *$'create\n'*repo* ]]
   # all inputs reach run: steps through env only
   ! grep -E 'run:.*\$\{\{' "$wf"
+}
+
+@test "workflow passes the accept input as env to matrix and repo" {
+  local wf="$BATS_TEST_DIRNAME/../.github/workflows/sync.yml"
+  run yq -r '.on.workflow_call.inputs.accept.description' "$wf"
+  [ "$output" = "Accept an upstream rewrite of this branch, tags/<name> or *; needs repo" ]
+  run yq -r '.jobs.plan.steps[] | select(.id == "matrix") | .env.SYNC_ACCEPT' "$wf"
+  [ "$output" = '${{ inputs.accept }}' ]
+  run yq -r '.jobs.sync.steps[] | select(.id == "repo") | .env.SYNC_ACCEPT' "$wf"
+  [ "$output" = '${{ inputs.accept }}' ]
 }
