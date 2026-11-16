@@ -658,19 +658,31 @@ branch with own commits on top is refused (`; accept refused: own commits on
 top, …`, the error line then has no accept hint): declare it in
 `branches:`, or reset it by hand. A declared branch
 whose record is not in the branch (reset or rebased by hand) is no stop and
-rebases as usual. The records are first created by the first run after an
-update of the sync; nothing stops in that run.
+rebases as usual; a `rebase: manual` branch in a stop needs only `accept`
+(no `branch`). The records are first created by the first run after an
+update of the sync; no branch stops in that run. Tags have no record: a
+target tag that differs from upstream stops in every run until it is
+accepted, also in the first one.
+
+Changing the `onto` of a declared branch, or declaring a branch that was
+followed until then, shows up as `upstream rewritten` (its record is not
+in the new `onto`); accept then moves only
+the own commits after the record onto the new `onto`. Records of branches
+that are no longer synced are not removed; when a later branch name
+conflicts with one (e.g. `foo` and `foo/bar`), delete
+`refs/sync/upstream/<branch>` in the repository by hand.
 
 **Own tags.** With `tags: true` the target's tags are synced by name, so a
 fork that carries own tags should set `tags: false`. Otherwise:
 
 - an own tag on an own commit (in no upstream branch or tag) is kept and
   fails every run (`unique commits`);
-- an own tag on an upstream commit is deleted when upstream has no tag of
-  that name, and overwritten by the upstream tag when it has one;
-- a tag that upstream moved or deleted is updated or deleted only when its
-  old commit is in an upstream ref (all upstream branches count, not only
-  the fetched ones), else it is kept as `unique commits`;
+- a target tag that differs from the upstream tag of the same name (an own
+  tag or one upstream moved) always stops as `upstream moved tag` until it
+  is accepted, then it is set to the upstream tag with a backup;
+- a tag upstream does not have (an own tag, or one upstream deleted) is
+  deleted only when its commit is in an upstream ref (all upstream branches
+  count, not only the fetched ones), else it is kept as `unique commits`;
 - nothing is synced when upstream has fewer than half as many refs as the
   target (default branch, followed branches and tags counted together;
   `error: upstream has <u> refs (branches and tags), target <n>: refusing
@@ -684,7 +696,7 @@ fork that carries own tags should set `tags: false`. Otherwise:
 | `repo` | the fork or mirror, `spali/name` |
 | `upstream` | `https://` URL of the source; on `github.com` the repository is a **fork**, anywhere else a **mirror** |
 | `follow` | a list of regular expressions (jq/Oniguruma syntax); every upstream branch whose **whole** name matches one is mirrored by name (fast-forward only, a diverged one with own commits is kept, one gone upstream is deleted only when nothing is lost); all branches: `['.*']`; default none (only the default branch and the declared branches) |
-| `tags` | `true` (the default): all upstream tags are mirrored (new ones taken over, annotated tags kept, moved or gone upstream ones changed only when nothing is lost, see "Own tags"); `false`: tags are neither fetched nor touched |
+| `tags` | `true` (the default): all upstream tags are mirrored (new ones taken over, annotated tags kept, one that differs from upstream stops as `upstream moved tag` until accepted, one gone upstream is deleted only when nothing is lost, see "Own tags"); `false`: tags are neither fetched nor touched |
 | `branches` | own branches: `<branch>: {onto: <upstream branch>, rebase: auto}` or `rebase: manual`; `auto` rebases on every run, `manual` only when dispatched with `branch`; a missing declared branch is created from its `onto` |
 | `settings` | exceptions to the defaults (all `false`): `has_issues`, `has_pull_requests`, `has_wiki`, `has_discussions`, `has_projects`, `actions` |
 | `private` | mirrors: the visibility in the create command (default `false`) |

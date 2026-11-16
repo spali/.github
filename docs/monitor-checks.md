@@ -288,7 +288,8 @@ not compared: `check-failed` with
 
 A branch or tag the sync stopped because upstream rewrote it
 (`upstream rewritten` or `upstream moved tag` in the sync run) stays behind
-until the rewrite is accepted, so it shows here too.
+until the rewrite is accepted, so it may also show here (only once the last
+push is older than 48 hours); `sync-failed` is the reliable signal.
 
 **Fix:** look at the sync run (see `sync-failed`); for a missing `onto`,
 fix the `onto` of the branch in `repos.yml`; for a stopped ref, accept the
