@@ -265,7 +265,8 @@ says otherwise. The detail lists each difference
   branch follows its declaration. With `refs: default`, an upstream branch
   that matches a `follow` pattern is compared with the fork branch of the
   same name the same way. A declared or followed branch that does not exist
-  in the fork is red at once (`feat: missing in the target`);
+  in the fork is red at once (`feat: missing in the target`); a followed
+  branch that is new upstream shows this until the next sync run creates it;
 - a mirror, or a fork with `refs: all`: branches or tags of the upstream are
   missing or differ (declared branches excepted), and the last push is older
   than 48 hours (`2 refs differ, last push …`).
@@ -285,8 +286,11 @@ default branch (never against an upstream branch of the same name; with
 of any other branch (a followed one too, the sync mirrors it by name)
 against the upstream branch of the same name, else the upstream default
 branch. The default branch counts too unless it is
-declared. The sync does not touch such a branch and its run fails. (🔵 for
-an unmanaged fork, where no sync manages anything.)
+declared. With `refs: default` the sync ignores an undeclared branch that is
+neither the default branch nor followed: its run stays green, only the
+monitor reports it. The default branch, a followed branch, or (with
+`refs: all`) any branch with own commits is kept by the sync and fails its
+run. (🔵 for an unmanaged fork, where no sync manages anything.)
 
 **Fix:** declare the branch with its `onto` and `rebase`, or delete it (or
 reset the default branch to upstream) by hand.

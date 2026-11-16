@@ -601,10 +601,14 @@ For each managed repository it
 
 **Only the needed branches.** A fork with `refs: default` fetches from
 upstream only the default branch, the `onto` of each declared branch and the
-branches matching a `follow` pattern; no tags. The branch names come from
-`git ls-remote` (no objects), so a large upstream with many branches and tags
-costs no Actions minutes for refs nobody uses. Every other branch must be
-configured, by `branches:` or `follow:`; other target branches are left alone.
+branches matching a `follow` pattern; no tags (from the fork itself it reads
+only its branches and backups). The branch names come from `git ls-remote`
+(no objects), so the other branches and tags of a large upstream are not
+downloaded; listing their names still costs a little. Every other branch
+must be configured, by `branches:` or `follow:`; other target branches are
+left alone. A followed branch that is new upstream is created by the next
+sync run; until then the monitor reports it as `managed-behind`
+(`<branch>: missing in the target`).
 
 It writes **only to the repositories under `managed:`**. A branch with own
 commits that is not declared, and the head branch of an open upstream pull

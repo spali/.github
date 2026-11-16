@@ -561,6 +561,28 @@ up_refs() {
   [ ! -s "$WORK/skipped.txt" ]
 }
 
+@test "default mode fetches no target tags" {
+  T=$(atag v2 "$A")
+  set_ref "$TG" refs/heads/main "$A"
+  set_ref "$TG" refs/tags/v1 "$A"
+  set_ref "$TG" refs/tags/v2 "$T"
+  set_ref "$TG" refs/backup/main "$A"
+  entry fork default
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$A" "$B")" ]
+  [ "$(git -C "$WORK/repo" for-each-ref --format='%(refname)' refs/tg/)" = "$(printf 'refs/tg/backup/main\nrefs/tg/heads/main')" ]
+  run git -C "$WORK/repo" cat-file -e "$T"
+  [ "$status" -ne 0 ]
+  # mode all still reads the target tags (upstream has them too: no guard)
+  set_ref "$UP" refs/tags/v1 "$A"
+  fresh_work
+  entry fork all
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ -n "$(git -C "$WORK/repo" for-each-ref refs/tg/tags/v2)" ]
+}
+
 @test "mode all still fetches everything" {
   C=$(commit "$A" d dev)
   T=$(atag v2 "$C")
