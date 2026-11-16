@@ -628,6 +628,22 @@ old tip of every rebased branch stays in the backup ref
 `refs/backup/<branch>` of the repository (written in the same push), so
 nothing is lost: `git fetch origin 'refs/backup/*:refs/remotes/backup/*'`.
 
+**Own tags.** With `tags: true` the target's tags are synced by name, so a
+fork that carries own tags should set `tags: false`. Otherwise:
+
+- an own tag on an own commit (in no upstream branch or tag) is kept and
+  fails every run (`unique commits`);
+- an own tag on an upstream commit is deleted when upstream has no tag of
+  that name, and overwritten by the upstream tag when it has one;
+- a tag that upstream moved or deleted is updated or deleted only when its
+  old commit is in an upstream ref (all upstream branches count, not only
+  the fetched ones), else it is kept as `unique commits`;
+- nothing is synced when upstream has fewer than half as many refs as the
+  target (default branch, followed branches and tags counted together;
+  `error: upstream has <u> refs (branches and tags), target <n>: refusing
+  (empty or broken source)`), e.g. a fork with more own tags than upstream
+  refs.
+
 **The `managed:` entries:**
 
 | Key | Meaning |
@@ -635,7 +651,7 @@ nothing is lost: `git fetch origin 'refs/backup/*:refs/remotes/backup/*'`.
 | `repo` | the fork or mirror, `spali/name` |
 | `upstream` | `https://` URL of the source; on `github.com` the repository is a **fork**, anywhere else a **mirror** |
 | `follow` | a list of regular expressions (jq/Oniguruma syntax); every upstream branch whose **whole** name matches one is mirrored by name (fast-forward only, a diverged one with own commits is kept, one gone upstream is deleted only when nothing is lost); all branches: `['.*']`; default none (only the default branch and the declared branches) |
-| `tags` | `true` (the default): all upstream tags are mirrored (new and moved ones taken over, annotated tags kept, one gone upstream deleted only when nothing is lost); `false`: tags are neither fetched nor touched |
+| `tags` | `true` (the default): all upstream tags are mirrored (new ones taken over, annotated tags kept, moved or gone upstream ones changed only when nothing is lost, see "Own tags"); `false`: tags are neither fetched nor touched |
 | `branches` | own branches: `<branch>: {onto: <upstream branch>, rebase: auto}` or `rebase: manual`; `auto` rebases on every run, `manual` only when dispatched with `branch`; a missing declared branch is created from its `onto` |
 | `settings` | exceptions to the defaults (all `false`): `has_issues`, `has_pull_requests`, `has_wiki`, `has_discussions`, `has_projects`, `actions` |
 | `private` | mirrors: the visibility in the create command (default `false`) |
