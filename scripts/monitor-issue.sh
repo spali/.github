@@ -6,14 +6,18 @@
 # Writes the report into the open issue labelled maintenance-monitor of
 # $MONITOR_ISSUE_REPO (the lowest number if there are several), or creates it.
 # Creates the label if it is missing. The report is split at its line MARK:
-# the part above is the issue body (plus a line pointing to the comment), the
-# part from MARK on is the monitor comment, the oldest comment of the issue
-# that starts with MARK (updated in place, created if there is none; other
-# comments are left alone). Without MARK the whole report is the body and no
-# comment is touched. Issue, label and that comment are the only things the
-# monitor ever writes. The report needs no footer (its summary line carries
-# the time and the run link). Env: MONITOR_ISSUE_REPO (owner/name), ISSUE_TOKEN (used
-# as GH_TOKEN for the gh calls of this script only).
+# the part above is the issue body (plus POINTER, kept also when the body is
+# cut), the part from MARK on is the monitor comment: the oldest comment of
+# the issue by MONITOR_COMMENT_AUTHOR whose first line is MARK (updated in
+# place, created if there is none; other comments are left alone). Without
+# MARK the whole report is the body and no comment is touched. Issue, label
+# and that comment are the only things the monitor ever writes. The report
+# needs no footer (its summary line carries the time and the run link).
+# Env: MONITOR_ISSUE_REPO (owner/name), ISSUE_TOKEN (used as GH_TOKEN for the
+# gh calls of this script only), MONITOR_COMMENT_AUTHOR (login of the monitor
+# comment's author, default github-actions[bot], the author with the
+# workflow's GITHUB_TOKEN; empty: any author, for a local run with a
+# personal token).
 # Failure: one "error: ..." line on stderr, exit 1.
 set -euo pipefail
 
@@ -25,6 +29,7 @@ LIMIT=65536 # GitHub's limit for an issue or comment body; counted in bytes to b
 NOTE='… truncated, see the run summary.'
 MARK='<!-- maintenance-monitor:details -->'
 POINTER='Details (red, info, clean, not checked) are in the monitor comment below.'
+AUTHOR=${MONITOR_COMMENT_AUTHOR-github-actions[bot]}
 
 REPORT=${1:-}
 TITLE=${2:-}
@@ -65,22 +70,22 @@ split_report() {
     cp "$REPORT" "$WORK/text.md"
     return 0
   fi
-  { head -n "$((n - 1))" "$REPORT"; printf '%s\n' "$POINTER"; } >"$WORK/text.md"
+  head -n "$((n - 1))" "$REPORT" >"$WORK/text.md"
   tail -n "+$n" "$REPORT" >"$WORK/details.md"
 }
 
-# build_body SRC DST writes SRC to DST; a SRC that does not fit is cut at a
-# line boundary, every <details> block left open by the cut is closed (after
-# an empty line, which also ends a table), and NOTE follows.
+# build_body SRC DST [MAX] writes SRC to DST; a SRC above MAX bytes (default
+# LIMIT) is cut at a line boundary, every <details> block left open by the cut
+# is closed (after an empty line, which also ends a table), and NOTE follows.
 build_body() {
-  local src=$1 dst=$2 size budget open closing
+  local src=$1 dst=$2 max=${3:-$LIMIT} size budget open closing
   size=$(LC_ALL=C wc -c <"$src")
-  if ((size <= LIMIT)); then
+  if ((size <= max)); then
     cat "$src" >"$dst"
     return 0
   fi
   printf '\n%s\n' "$NOTE" >"$WORK/tail.md"
-  budget=$((LIMIT - $(LC_ALL=C wc -c <"$WORK/tail.md")))
+  budget=$((max - $(LC_ALL=C wc -c <"$WORK/tail.md")))
   while :; do
     head -c "$budget" "$src" >"$WORK/cut.md"
     # the last line of the cut is partial unless the cut ends with a newline
@@ -93,8 +98,8 @@ build_body() {
     while ((open-- > 0)); do closing+=$'\n</details>\n'; done
     printf '%s' "$closing" >"$WORK/close.md"
     size=$(($(LC_ALL=C wc -c <"$WORK/cut.md") + $(LC_ALL=C wc -c <"$WORK/close.md") + $(LC_ALL=C wc -c <"$WORK/tail.md")))
-    ((size > LIMIT)) || break
-    budget=$((budget - (size - LIMIT)))
+    ((size > max)) || break
+    budget=$((budget - (size - max)))
   done
   cat "$WORK/cut.md" "$WORK/close.md" "$WORK/tail.md" >"$dst"
 }
@@ -110,13 +115,15 @@ find_issue() {
     die "listing issues failed: cannot parse API response"
 }
 
-# find_comment NUMBER prints the id of the oldest comment of the issue whose
-# first line is MARK, or nothing.
+# find_comment NUMBER prints the id of the oldest comment of the issue by
+# AUTHOR (any author if empty) whose first line is MARK, or nothing.
 find_comment() {
   gh api "repos/$REPO/issues/$1/comments?per_page=100" --paginate \
     >"$WORK/comments.json" 2>"$WORK/err" ||
     die "listing comments of issue #$1 failed: $(err_line "$WORK/err")"
-  jq -rs --arg mark "$MARK" 'add // [] | map(select((.body // "") | split("\n")[0] | rtrimstr("\r") == $mark))
+  jq -rs --arg mark "$MARK" --arg author "$AUTHOR" 'add // []
+    | map(select(($author == "" or .user.login == $author)
+        and ((.body // "") | split("\n")[0] | rtrimstr("\r")) == $mark))
     | sort_by(.id) | .[0].id // empty' "$WORK/comments.json" 2>/dev/null ||
     die "listing comments of issue #$1 failed: cannot parse API response"
 }
@@ -142,7 +149,19 @@ main() {
   ensure_label
   number=$(find_issue)
   split_report
-  build_body "$WORK/text.md" "$WORK/body.md"
+  if [[ -e $WORK/details.md ]]; then
+    # POINTER goes after the cut, in a paragraph of its own; its bytes are
+    # reserved
+    printf '\n%s\n' "$POINTER" >"$WORK/pointer.md"
+    build_body "$WORK/text.md" "$WORK/body.md" "$((LIMIT - $(LC_ALL=C wc -c <"$WORK/pointer.md")))"
+    if [[ -z $(tail -c2 "$WORK/body.md" | tr -d '\n') ]]; then
+      printf '%s\n' "$POINTER" >>"$WORK/body.md"
+    else
+      cat "$WORK/pointer.md" >>"$WORK/body.md"
+    fi
+  else
+    build_body "$WORK/text.md" "$WORK/body.md"
+  fi
   if [[ -n $number ]]; then
     jq -n --rawfile body "$WORK/body.md" --arg title "$TITLE" \
       '{title: $title, body: $body}' >"$WORK/request.json"

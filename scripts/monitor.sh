@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Daily maintenance monitor: validates the control file, builds the inventory,
 # runs every check script, renders the report and, if MONITOR_ISSUE_REPO is
-# set, updates the overview issue in that repository.
+# set, updates the overview issue and its monitor comment in that repository.
 #
 # Usage: monitor.sh            all phases, prints only the report (local run)
 #        monitor.sh PHASE      one phase, prints its log (one workflow step
@@ -15,8 +15,8 @@
 # as one JSON object for that matrix.
 #
 # Env: GH_TOKEN, MONITOR_CONFIG (default repos.yml), LISTS_TOKEN (default
-# GH_TOKEN), MONITOR_ISSUE_REPO and ISSUE_TOKEN (see monitor-issue.sh),
-# MONITOR_SCRIPTS_DIR (default: this script's directory), MONITOR_WORK.
+# GH_TOKEN), MONITOR_ISSUE_REPO, ISSUE_TOKEN and MONITOR_COMMENT_AUTHOR (see
+# monitor-issue.sh), MONITOR_SCRIPTS_DIR (default: this script's directory), MONITOR_WORK.
 # The report goes to $GITHUB_STEP_SUMMARY, or to stdout if that is not set.
 # Exit status: all phases: 1 if a red finding is left or the issue update
 # failed. One phase: 1 if it found a red finding that is not ignored or
