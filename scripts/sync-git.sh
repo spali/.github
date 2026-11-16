@@ -11,7 +11,8 @@
 #                     with a lease on the old sha of every ref, then checks the
 #                     target with ls-remote. On a mismatch it restores the old
 #                     shas (leases on the new ones) and fails. Prints
-#                     "<ref> <old>..<new> (<reason>)" per updated ref.
+#                     "<ref> <old>..<new> (<reason>)" per updated ref. The
+#                     caller must build TARGET_URL from the managed entry.
 #
 # env: plan: ENTRY (the object of managed_entry), TARGET_URL, UPSTREAM_URL,
 #      WORK, optional SYNC_BRANCH (a branch name or *: also rebase manual
@@ -19,8 +20,6 @@
 #      $WORK/contrib.txt (contribution branches, one per line),
 #      GIT_COMMITTER_NAME/EMAIL.
 #      push: TARGET_URL (without credentials), WORK, optional BACKUP_PREFIX.
-#      SYNC_TEST_VERIFY_FAIL=1 makes the verification fail; it is honoured
-#      only in bats (BATS_TEST_TMPDIR set, TARGET_URL a file:// URL below it).
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 source "$(dirname "$0")/lib.sh"
@@ -28,11 +27,12 @@ source "$(dirname "$0")/lib.sh"
 ZERO=0000000000000000000000000000000000000000
 BACKUP_PREFIX=${BACKUP_PREFIX:-refs/backup/}
 
-# Keep system config and prompts out; pin the settings that change what a
-# rebase does. GIT_CONFIG_COUNT/KEY/VALUE (credentials) stay untouched.
-export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1
-# no tracing that could print request headers
-unset GIT_TRACE GIT_TRACE_CURL GIT_TRACE_PACKET GIT_TRACE_PACKFILE GIT_CURL_VERBOSE
+# Keep system and global config and prompts out; pin the settings that
+# change what a rebase does. GIT_CONFIG_COUNT/KEY/VALUE (credentials) stay
+# untouched.
+export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+# no tracing that could print request headers (GIT_TRACE, GIT_TRACE2*, ...)
+unset "${!GIT_TRACE@}" GIT_CURL_VERBOSE
 GITC=(
   -c core.hooksPath=/dev/null
   -c core.autocrlf=false
@@ -364,13 +364,6 @@ state() {
   printf '%s\n' "${OBS[${P_REF[$1]}]:-$ZERO}"
 }
 
-# test_verify_fail succeeds only for SYNC_TEST_VERIFY_FAIL=1 inside a bats
-# test that pushes to a repository below its own temporary directory.
-test_verify_fail() {
-  [[ ${SYNC_TEST_VERIFY_FAIL:-} == 1 && -n ${BATS_TEST_TMPDIR:-} &&
-    $TARGET_URL == "file://$BATS_TEST_TMPDIR/"* ]]
-}
-
 # rollback WHAT restores the refs that the target shows at their new sha to
 # the old sha (leases on the new sha) in one atomic push and fails. A ref
 # that somebody else moved is never touched; then the backups stay too.
@@ -398,9 +391,17 @@ rollback() {
   die "$what, restored ${#restore[@]} refs"
 }
 
-push() {
+# report prints one line per planned ref.
+report() {
   local i
-  local -a all
+  for i in "${!P_REF[@]}"; do
+    printf '%s %s..%s (%s)\n' "${P_REF[i]}" "${P_OLD[i]:0:7}" "${P_NEW[i]:0:7}" "${P_WHY[i]}"
+  done
+}
+
+push() {
+  local i landed=0
+  local -a all missing=()
   need_env TARGET_URL WORK
   [[ $TARGET_URL != -* ]] || die "invalid URL"
   ! has_credentials "$TARGET_URL" || die "TARGET_URL must not contain credentials"
@@ -416,15 +417,27 @@ push() {
   declare -gA OBS=()
   all=("${!P_REF[@]}")
 
+  # A failed push is never rolled back: the refs at their new sha may come
+  # from another sync with the same plan.
   if ! push_refs P_OLD P_NEW "${all[@]}"; then
     cat "$WORK/push.out" >&2
-    observe || die "push failed, target state unknown"
-    # the push is atomic; an absent ref may be somebody else's delete, so
-    # only an update or create shows that it landed anyway
+    observe || die "push failed, target state unknown (atomic: either all old or all new)"
     for i in "${all[@]}"; do
-      [[ ${P_NEW[i]} == "$ZERO" || $(state "$i") != "${P_NEW[i]}" ]] || rollback "push failed"
+      if [[ $(state "$i") != "${P_NEW[i]}" ]]; then
+        missing+=("${P_REF[i]}")
+      elif [[ ${P_NEW[i]} != "$ZERO" ]]; then
+        # an absent ref may be somebody else's delete; only an update or
+        # create shows that the push landed
+        landed=1
+      fi
     done
-    die "push rejected, target unchanged"
+    if ((${#missing[@]})); then
+      ((landed)) || die "push rejected, target unchanged"
+      die "push failed, target in mixed state: ${missing[*]}"
+    fi
+    # every ref is at its new sha: the push landed, only its status was lost
+    report
+    return 0
   fi
 
   if ! observe; then
@@ -437,11 +450,7 @@ push() {
   for i in "${all[@]}"; do
     [[ $(state "$i") == "${P_NEW[i]}" ]] || rollback "verify failed"
   done
-  ! test_verify_fail || rollback "verify failed"
-
-  for i in "${all[@]}"; do
-    printf '%s %s..%s (%s)\n' "${P_REF[i]}" "${P_OLD[i]:0:7}" "${P_NEW[i]:0:7}" "${P_WHY[i]}"
-  done
+  report
 }
 
 case ${1:-} in
