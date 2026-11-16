@@ -218,6 +218,17 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   run ! grep -F 'compare/main...spali:f:main' "$GH_LOG"
 }
 
+@test "with refs all the default branch is compared with the same name upstream" {
+  # refs all mirrors upstream main onto the target main by name
+  jq '.managed[0].refs = "all"' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/up/f.git' -
+  refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/spali/f.git' -
+  respond_jq '*repos/up/f/compare/dev...spali:f:main' '{ahead_by: 9}'
+  respond_jq '*repos/up/f/compare/main...spali:f:main' '{ahead_by: 0}'
+  run_script
+  [ "$(count branch-undeclared)" -eq 0 ]
+}
+
 @test "declared default branch is not undeclared" {
   jq '.managed[0].branches.main = {onto: "dev", rebase: "auto"}' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
   respond_jq '*repos/up/f/compare/*...spali:f:main' '{ahead_by: 4}'

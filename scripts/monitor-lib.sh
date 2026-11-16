@@ -169,7 +169,7 @@ api_refs() {
 # with n > 0 own commits that is not declared (DECLARED_JSON: JSON array of
 # branch names) and not the head of an open upstream pull request from REPO
 # (OPEN_PRS_FILE: JSON array of {head_repo, head_ref}). Own commits of
-# TARGET_DEFAULT (the default branch of REPO) are counted against
+# TARGET_DEFAULT (the default branch of REPO, may be empty) are counted against
 # UPSTREAM_DEFAULT, never against an upstream branch of the same name (the
 # sync moves it onto the upstream default); those of any other branch against
 # the upstream branch of the same name, else UPSTREAM_DEFAULT. API errors are
