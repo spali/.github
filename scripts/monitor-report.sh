@@ -25,9 +25,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 # Each section has an explicit anchor on its own line above the heading, then
 # <br> and an empty line (keeps the heading clear of the sticky issue header):
 # GitHub issues give headings no ids, but keep <a name="x"> as id/name
-# "user-content-x", so the links point at #user-content-x directly. Each
-# Red/Info row with a repository starts with the anchor f-<check>-<slug>[-n]
-# that the overview icons link to.
+# "user-content-x", so the links point at #user-content-x directly. The line
+# <!-- maintenance-monitor:details --> right above the Red anchor splits the
+# report for monitor-issue.sh: issue text above, monitor comment from it on.
+# Each Red/Info row with a repository starts with the anchor
+# f-<check>-<slug>[-n] that the overview icons link to.
 # shellcheck disable=SC2016 # jq program, no shell expansion wanted
 REPORT_JQ='
 $cfg[0] as $cfg | . as $f
@@ -35,7 +37,8 @@ $cfg[0] as $cfg | . as $f
   def repo_link: "[\(.)](\(gh))";
   def cell: tostring | gsub("\\|"; "\\|") | gsub("[\\r\\n]+"; " ");
   def slug: ascii_downcase | gsub("[^a-z0-9-]"; "-");
-  def section($name; $title): "<a name=\"\($name)\"></a>\n<br>\n", "## \($title)\n";
+  def section($name; $title; $pre): "\($pre)<a name=\"\($name)\"></a>\n<br>\n", "## \($title)\n";
+  def section($name; $title): section($name; $title; "");
   # Where to fix a finding: [label, url] or null.
   def fix:
     .repo as $r | .check as $c
@@ -178,7 +181,7 @@ $cfg[0] as $cfg | . as $f
       section("todo"; "📝 TODO"),
       (if ($tasks | length) == 0 then "Nothing to do.\n" else ($tasks[] | task) end),
       (if $applies then section("overview"; "📋 Overview"), overview else empty end),
-      section("red"; "🔴 Red"),
+      section("red"; "🔴 Red"; "<!-- maintenance-monitor:details -->\n"),
       (if $nred == 0 then "✅ Nothing to fix.\n" else checks("red") end),
       section("info"; "🔵 Info"),
       (if $ninfo == 0 then "Nothing to note.\n" else checks("info") end),

@@ -27,7 +27,8 @@ you should fix the document that is wrong.
   `SECURITY.md`, issue templates, …) into `spali/.github` (they would become
   defaults for every repository of the owner);
 - make the maintenance monitor write anything on GitHub except its overview
-  issue (and the label `maintenance-monitor`) in the calling repository, with
+  issue, its one monitor comment on that issue and the label
+  `maintenance-monitor` in the calling repository, with
   that repository's `GITHUB_TOKEN`; everything else it does is `GET` requests
   and GraphQL queries with the read-only app token;
 - make the sync (`sync.yml`) write to a repository that is not listed under
@@ -92,7 +93,7 @@ pull request closed
 | `scripts/checksums.sh` | `checksums.txt` over the build files |
 | `scripts/publish.sh` | `release` / `next` / `pr`: create, replace, publish |
 | `scripts/cleanup-pr.sh` | delete `*-pr.<N>` releases and tags |
-| `scripts/monitor*.sh` | maintenance monitor: `monitor.sh` runs `monitor-repos.sh` (inventory), the check scripts, `monitor-report.sh` and `monitor-issue.sh`; `monitor.sh PHASE` runs one of them (shared dir `MONITOR_WORK`); `monitor.sh matrix` prints the jobs per check group for the workflow matrix (`monitor.jobs`, `monitor.runs-on` of the control file), `MONITOR_REPO` limits a check phase to one repository (empty: all) |
+| `scripts/monitor*.sh` | maintenance monitor: `monitor.sh` runs `monitor-repos.sh` (inventory), the check scripts, `monitor-report.sh` and `monitor-issue.sh` (issue body plus one monitor comment, split at the report line `<!-- maintenance-monitor:details -->`); `monitor.sh PHASE` runs one of them (shared dir `MONITOR_WORK`); `monitor.sh matrix` prints the jobs per check group for the workflow matrix (`monitor.jobs`, `monitor.runs-on` of the control file), `MONITOR_REPO` limits a check phase to one repository (empty: all) |
 | `scripts/sync.sh` | fork and mirror sync: `matrix` (repositories, runner), `exists`, `create` (`sync-create.sh`), `repo` (kind check, `sync-settings.sh`, contribution branches, `sync-git.sh plan` and `push`); `scripts/managed-lib.sh` normalizes the `managed:` entries |
 | `docs/monitor-checks.md` | explanation of each monitor check, linked from the overview issue (one `## <check id>` section each, tested) |
 | `tests/*.bats`, `tests/helpers/gh-stub.bash` | bats tests with a fake `gh` |
@@ -172,6 +173,7 @@ reason here needs the owner's decision.
 | `job.workflow_sha` with a fallback that fails checkout | Pinned scripts; never silently run the default branch | `github.workflow_sha` (that is the caller's) |
 | The monitor runs in a **private control repository** that calls reusable workflows; `spali/.github` only provides code | Private repository names can appear in logs, summary and issue without masking; the control file stays private | Cron in this public repository with masking and a private file merged in |
 | The overview issue is written with the caller's `GITHUB_TOKEN`, everything else read with the read-only app token | The app can never write; the only write is scoped to one repository | An app with `issues: write` on all repositories |
+| The overview issue holds summary, TODO and overview; Red, Info, Clean and Not checked go into one fixed monitor comment (the oldest comment starting with `<!-- maintenance-monitor:details -->`, edited in place) | The full report outgrew the 64 KB issue body; one edited comment adds no notifications or timeline entries, the anchor links still work on the same page | Everything in the body (cut); a new comment per run; a dynamic number of comments |
 | The monitor runs as **matrix jobs**, the control file chooses `monitor.jobs` (`per-group` default, `per-repo`) and `monitor.runs-on` | One workflow and one set of scripts for both: a job per repository only changes the matrix (`MONITOR_REPO`), so the variants cannot drift; `per-repo` costs about 55 billed minutes per run on hosted runners, so it is opt-in (own runner) | Two workflows (steps in one job vs. matrix); one job with steps only |
 
 ## 4. Procedures
@@ -427,8 +429,8 @@ Delete a tag: `git push --delete origin vA && git tag -d vA`.
 
 ### Monitor findings (check ids)
 
-Red unless marked info. The detail is in the job summary, the overview issue
-and the log of the failed step. Explanations for humans:
+Red unless marked info. The detail is in the job summary, the monitor comment of the overview
+issue and the log of the failed step. Explanations for humans:
 `docs/monitor-checks.md` (keep it in sync with this table).
 
 | Check id | Meaning | Action |

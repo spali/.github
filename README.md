@@ -395,8 +395,8 @@ control file `repos.yml`, the schedule and the results (logs, job summary and
 an overview issue name private repositories freely). `spali/.github` only
 provides the scripts and the reusable workflows `monitor.yml` and
 `monitor-config.yml`. The monitor reads with a read-only GitHub App token; the
-only thing it writes is the overview issue (and its label) in the control
-repository, with that repository's `GITHUB_TOKEN`.
+only thing it writes is the overview issue (with its monitor comment and its
+label) in the control repository, with that repository's `GITHUB_TOKEN`.
 
 It checks five groups (archived repositories are never checked):
 
@@ -584,9 +584,15 @@ inventory, in a local report, the section is left out). ⚪ Not checked
 (collapsed) explains that these checks did not run because they do not apply
 or the feature is not available there, and lists, per check, one line per
 reason with its repositories. Each check title has an ℹ️ link to its
-explanation in [`docs/monitor-checks.md`](docs/monitor-checks.md). A report
-above GitHub's size limit is
-cut and points to the run summary. The issue is a view, not a notification:
+explanation in [`docs/monitor-checks.md`](docs/monitor-checks.md). The
+issue body holds the summary line, 📝 TODO and 📋 Overview; 🔴 Red, 🔵 Info,
+✅ Clean and ⚪ Not checked are in the monitor comment right below it (the
+report is split at the line `<!-- maintenance-monitor:details -->`). The
+monitor comment is the oldest comment of the issue starting with that line:
+it is edited in place every run (created on the first run), other comments are
+left alone, and the links of the summary and the overview jump into it. Body
+and comment that are above GitHub's size limit are each
+cut and point to the run summary, which always shows the whole report. The issue is a view, not a notification:
 the failed-run e-mail stays the notification.
 
 **Run locally** (read-only: no issue is written unless `MONITOR_ISSUE_REPO`
