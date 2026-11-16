@@ -165,15 +165,18 @@ api_refs() {
 }
 
 # undeclared_branches CHECK REPO UPSTREAM_REPO UPSTREAM_DEFAULT DECLARED_JSON
-# OPEN_PRS_FILE prints "branch<TAB>n" for every branch of REPO with n > 0 own
-# commits that is not declared (DECLARED_JSON: JSON array of branch names) and
-# not the head of an open upstream pull request from REPO (OPEN_PRS_FILE: JSON
-# array of {head_repo, head_ref}). Own commits are counted against the
-# upstream branch of the same name, else UPSTREAM_DEFAULT. API errors are
+# OPEN_PRS_FILE TARGET_DEFAULT prints "branch<TAB>n" for every branch of REPO
+# with n > 0 own commits that is not declared (DECLARED_JSON: JSON array of
+# branch names) and not the head of an open upstream pull request from REPO
+# (OPEN_PRS_FILE: JSON array of {head_repo, head_ref}). Own commits of
+# TARGET_DEFAULT (the default branch of REPO) are counted against
+# UPSTREAM_DEFAULT, never against an upstream branch of the same name (the
+# sync moves it onto the upstream default); those of any other branch against
+# the upstream branch of the same name, else UPSTREAM_DEFAULT. API errors are
 # check-failed findings of CHECK; the function then returns 1 after printing
 # the branches found so far.
 undeclared_branches() {
-  local check=$1 repo=$2 up=$3 updef=$4 declared=$5 prs=$6 tb ub list branch base body n
+  local check=$1 repo=$2 up=$3 updef=$4 declared=$5 prs=$6 tdef=$7 tb ub list branch base body n
   tb=$(mktemp)
   ub=$(mktemp)
   # shellcheck disable=SC2064 # expand now
@@ -182,11 +185,11 @@ undeclared_branches() {
   paged "$check" "$repo" "repos/$up/branches?per_page=100" '{name}' "$ub" || return 1
   # shellcheck disable=SC2016 # jq program
   json_out "$check" "$repo" list -r --argjson d "$declared" --arg r "$repo" --arg def "$updef" \
-    --slurpfile u "$ub" --slurpfile p "$prs" '
+    --arg tdef "$tdef" --slurpfile u "$ub" --slurpfile p "$prs" '
     [$u[0][].name] as $un |
     [$p[0][] | select((.head_repo // "" | ascii_downcase) == ($r | ascii_downcase)) | .head_ref] as $contrib |
     .[] | .name | select(IN($d[]) or IN($contrib[]) | not) |
-    [., (if IN($un[]) then . else $def end)] | @tsv' "$tb" || return 1
+    [., (if . != $tdef and IN($un[]) then . else $def end)] | @tsv' "$tb" || return 1
   while IFS=$'\t' read -r branch base; do
     [[ -n $branch ]] || continue
     body=$(fetch "$check" "$repo" "repos/$up/compare/$base...${repo%%/*}:${repo#*/}:$branch") || return 1

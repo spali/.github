@@ -122,7 +122,8 @@ check_branches() {
 }
 
 # check_undeclared REPO ENTRY DEFAULT UPSTREAM_REPO UPSTREAM_DEFAULT: the
-# default branch counts as declared (the sync manages it).
+# default branch is compared with the upstream default branch (the sync
+# moves it there) and counts only when it is not declared.
 check_undeclared() {
   local repo=$1 entry=$2 default=$3 up=$4 updef=$5 prs found branch n
   prs=$(mktemp)
@@ -131,7 +132,7 @@ check_undeclared() {
   paged branch-undeclared "$repo" "repos/$up/pulls?state=open&per_page=100" \
     '{head_repo: (.head.repo.full_name // ""), head_ref: .head.ref}' "$prs" || return 0
   found=$(undeclared_branches branch-undeclared "$repo" "$up" "$updef" \
-    "$(jq -c --arg d "$default" '[.branches[].name, $d]' <<<"$entry")" "$prs") || true
+    "$(jq -c '[.branches[].name]' <<<"$entry")" "$prs" "$default") || true
   while IFS=$'\t' read -r branch n; do
     [[ -z $branch ]] || finding red branch-undeclared "$repo" "$branch: $n own commits, not declared in repos.yml"
   done <<<"$found"

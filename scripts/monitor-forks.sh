@@ -101,13 +101,14 @@ check_contributions() {
   done <<<"$rows"
 }
 
-# check_undeclared REPO PARENT PARENT_BRANCH PRS_FILE: no sync manages an
-# unmanaged fork, so every branch with own commits counts.
+# check_undeclared REPO BRANCH PARENT PARENT_BRANCH PRS_FILE: no sync manages
+# an unmanaged fork, so every branch with own commits counts; the default
+# BRANCH is compared with PARENT_BRANCH.
 check_undeclared() {
-  local repo=$1 parent=$2 pbranch=$3 prs=$4 found branch n
-  found=$(undeclared_branches branch-undeclared "$repo" "$parent" "$pbranch" '[]' "$prs") || true
-  while IFS=$'\t' read -r branch n; do
-    [[ -z $branch ]] || finding info branch-undeclared "$repo" "$branch: $n own commits, not declared in repos.yml"
+  local repo=$1 branch=$2 parent=$3 pbranch=$4 prs=$5 found b n
+  found=$(undeclared_branches branch-undeclared "$repo" "$parent" "$pbranch" '[]' "$prs" "$branch") || true
+  while IFS=$'\t' read -r b n; do
+    [[ -z $b ]] || finding info branch-undeclared "$repo" "$b: $n own commits, not declared in repos.yml"
   done <<<"$found"
 }
 
@@ -134,7 +135,7 @@ main() {
       '{head_repo: (.head.repo.full_name // ""), head_ref: .head.ref, number, created_at, html_url}' "$prs"; then
       check_delete_candidate "$repo" "$branch" "$parent" "$pbranch" "$prs"
       check_contributions "$repo" "$prs"
-      check_undeclared "$repo" "$parent" "$pbranch" "$prs"
+      check_undeclared "$repo" "$branch" "$parent" "$pbranch" "$prs"
     fi
     rm -f "$prs"
   done <<<"$forks"

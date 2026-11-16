@@ -201,7 +201,25 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   run ! grep -F 'compare/dev...spali:f:rel' "$GH_LOG"
 }
 
-@test "the default branch is never undeclared" {
+@test "default branch with own commits is branch-undeclared" {
+  respond_jq '*repos/up/f/compare/dev...spali:f:main' '{ahead_by: 4}'
+  run_script
+  [ "$(count branch-undeclared)" -eq 1 ]
+  [ "$(level branch-undeclared)" = red ]
+  [ "$(message branch-undeclared)" = "main: 4 own commits, not declared in repos.yml" ]
+}
+
+@test "default branch is compared with the upstream default, not the same name" {
+  # upstream still has an old main; the target main follows upstream dev
+  respond_jq '*repos/up/f/compare/main...spali:f:main' '{ahead_by: 9}'
+  respond_jq '*repos/up/f/compare/dev...spali:f:main' '{ahead_by: 0}'
+  run_script
+  [ "$(count branch-undeclared)" -eq 0 ]
+  run ! grep -F 'compare/main...spali:f:main' "$GH_LOG"
+}
+
+@test "declared default branch is not undeclared" {
+  jq '.managed[0].branches.main = {onto: "dev", rebase: "auto"}' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
   respond_jq '*repos/up/f/compare/*...spali:f:main' '{ahead_by: 4}'
   run_script
   [ "$(count branch-undeclared)" -eq 0 ]

@@ -274,12 +274,15 @@ says otherwise. The detail lists each difference
 
 🔴 A branch of a managed fork has own commits but is not declared in
 `branches:` and is not the head of an open pull request from the fork to
-upstream. Own commits are counted against the upstream branch of the same
-name, else the upstream default branch. The default branch counts as
-declared. The sync does not touch such a branch. (🔵 for an unmanaged fork,
-where no sync manages anything: there the default branch is checked too.)
+upstream. Own commits of the default branch are counted against the upstream
+default branch (never against an upstream branch of the same name), those of
+any other branch against the upstream branch of the same name, else the
+upstream default branch. The default branch counts too unless it is
+declared. The sync does not touch such a branch and its run fails. (🔵 for
+an unmanaged fork, where no sync manages anything.)
 
-**Fix:** declare the branch with its `onto` and `rebase`, or delete it.
+**Fix:** declare the branch with its `onto` and `rebase`, or delete it (or
+reset the default branch to upstream) by hand.
 
 ## rebase-pending
 
