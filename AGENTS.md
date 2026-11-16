@@ -383,10 +383,10 @@ and the log of the failed step. Explanations for humans:
 | `list-archived` (info) | an archived own repository is in a list other than the archive list | move it |
 | `managed-missing` | a repository under `managed:` does not exist (no other check runs for it) | let the sync create it, or fix the entry |
 | `managed-settings` | a managed repository's issues/pull requests/wiki/discussions/projects/Actions differ from its `settings:` (default all off) | correct the setting (owner approval) or the `settings:` entry |
-| `managed-behind` | a managed fork's default branch or `rebase: auto` branch misses upstream commits older than 48 h; a mirror or `refs: all` fork has refs differing from upstream and no push for 48 h | read the sync run |
-| `branch-undeclared` | a fork branch with own commits is neither declared in `branches:` nor the head of an open upstream PR from the fork (info for an unmanaged fork) | declare it or delete it |
+| `managed-behind` | a managed fork's default branch or `rebase: auto` branch misses upstream commits older than 48 h, or a declared branch is missing in the fork; a mirror or `refs: all` fork has refs differing from upstream and no push for 48 h | read the sync run |
+| `branch-undeclared` | a fork branch (not the default branch) with own commits is neither declared in `branches:` nor the head of an open upstream PR from the fork (info for an unmanaged fork) | declare it or delete it |
 | `rebase-pending` (info) | a `rebase: manual` branch is behind its `onto` upstream | rebase it by hand |
-| `sync-failed` | the newest completed run of `sync.yml` in the control repository did not succeed (skipped in a local run) | read the sync log |
+| `sync-failed` | the newest completed run of `sync.yml` in the control repository did not succeed (checked in Lists when `managed:` has entries; skipped in a local run) | read the sync log |
 | `contribution-stale` (info) | an open upstream pull request is older than 90 days | follow up or close it |
 | `unmanaged` (info) | a fork or mirror is not listed under `managed:` | add it to `managed:` or ignore |
 | `adoption` (info) | a repository does not use the release flow | adopt it (4.6) or ignore |

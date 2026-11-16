@@ -30,6 +30,26 @@ managed_entries() {
   jq -c --argjson defaults "$MANAGED_DEFAULT_SETTINGS" "$MANAGED_JQ" "$1"
 }
 
+# check_sync_failed CONFIG_JSON_FILE: with at least one managed entry, the
+# newest completed run of the workflow sync.yml in the control repository
+# ($GITHUB_REPOSITORY; unset: skip finding) must have succeeded. No run yet
+# is no finding. Findings have no repository.
+check_sync_failed() {
+  local n body url
+  json_out sync-failed - n '(.managed // []) | length' "$1" || return 0
+  ((n > 0)) || return 0
+  if [[ -z ${GITHUB_REPOSITORY:-} ]]; then
+    finding skip sync-failed - "sync-failed: no control repository (local run)"
+    return 0
+  fi
+  body=$(fetch sync-failed - \
+    "repos/$GITHUB_REPOSITORY/actions/workflows/sync.yml/runs?per_page=1&status=completed") || return 0
+  # shellcheck disable=SC2016 # jq program
+  json_out sync-failed - url -r '
+    .workflow_runs // [] | first // empty | select(.conclusion != "success") | .html_url' <<<"$body" || return 0
+  [[ -z $url ]] || finding red sync-failed - "last sync run failed: $url"
+}
+
 # managed_entry CONFIG_JSON_FILE REPO prints the object of one repo, or fails.
 managed_entry() {
   local entries entry

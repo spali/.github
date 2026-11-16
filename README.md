@@ -394,8 +394,8 @@ It checks five groups (archived repositories are never checked):
 | Release flow and settings | central repositories (those that use this flow) | stale dev builds and `-next` pre-releases, orphan tags, several drafts, pin behind the latest release, merge/alert/PVR/Actions settings, rulesets |
 | Health | all non-fork, non-mirror, unmanaged repositories | red `main`, open Renovate pull requests, disabled workflows, Dependabot and code scanning alerts |
 | Forks and mirrors | unmanaged forks, and mirror targets listed in `repos.yml` | upstream commits missing, sync workflow disabled, mirror refs behind the source |
-| Managed | forks and mirrors listed under `managed` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, undeclared branches with own commits, manual rebases pending, last sync run failed |
-| Lists | all repositories | GitHub Lists that contradict the archive state, forks or mirrors; repositories without the release flow |
+| Managed | forks and mirrors listed under `managed` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, undeclared branches with own commits, manual rebases pending |
+| Lists | all repositories | GitHub Lists that contradict the archive state, forks or mirrors; repositories without the release flow; the last run of the control repository's sync failed |
 
 The pin check also covers the control repository's own pin of `monitor.yml`.
 A repository that only calls the monitor workflows is not a release-flow

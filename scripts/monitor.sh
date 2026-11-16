@@ -113,10 +113,9 @@ phase_matrix() {
 
 # phase_check NAME runs monitor-NAME.sh and logs what it found. With
 # MONITOR_REPO the script sees only that repository (and that mirror or
-# managed entry); sync-failed, which concerns no repository, is then checked
-# only in the job of the first managed repository.
+# managed entry).
 phase_check() {
-  local name=$1 script=monitor-$1.sh from checked_file rows inv=$INVENTORY cfg=$CONFIG skip_sync='' first
+  local name=$1 script=monitor-$1.sh from checked_file rows inv=$INVENTORY cfg=$CONFIG
   checked_file="$WORK/checked-$name"
   : >"$checked_file"
   from=$(wc -l <"$FINDINGS")
@@ -127,10 +126,8 @@ phase_check() {
     jq --arg r "$MONITOR_REPO" '.mirrors = [(.mirrors // [])[] | select(.target == $r)] |
       .managed = [(.managed // [])[] | select((.repo | ascii_downcase) == ($r | ascii_downcase))]' \
       "$CONFIG" >"$cfg"
-    first=$(jq -r '[.managed // [] | .[].repo] | sort | first // ""' "$CONFIG")
-    [[ ${first,,} == "${MONITOR_REPO,,}" ]] || skip_sync=1
   fi
-  if ! MONITOR_CHECKED=$checked_file LISTS_TOKEN=${LISTS_TOKEN:-${GH_TOKEN:-}} MONITOR_SKIP_SYNC=$skip_sync \
+  if ! MONITOR_CHECKED=$checked_file LISTS_TOKEN=${LISTS_TOKEN:-${GH_TOKEN:-}} \
     INVENTORY=$inv CONFIG=$cfg "$DIR/$script" >/dev/null 2>&1; then
     finding red check-failed - "$script crashed"
   fi

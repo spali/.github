@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # GitHub Lists drift (list-none, list-contradiction, list-mirror-missing,
 # list-archived, config-invalid for unknown list names) and release-flow
-# adoption. Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths),
-# optional LISTS_TOKEN (used as GH_TOKEN for the GraphQL call only).
+# adoption, and sync-failed (managed-lib.sh; here because it runs once).
+# Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths),
+# optional LISTS_TOKEN (used as GH_TOKEN for the GraphQL call only),
+# GITHUB_REPOSITORY (the control repository, for sync-failed).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
-# shellcheck source=scripts/monitor-lib.sh
-source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
+# shellcheck source=scripts/managed-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/managed-lib.sh"
 
 need_env FINDINGS INVENTORY CONFIG
 
@@ -99,6 +101,7 @@ main() {
   fi
   rm -f "$tmp"
   check_adoption
+  check_sync_failed "$CONFIG"
   local names
   names=$(jq -r '.[].name' "$INVENTORY" 2>/dev/null) || names=
   while IFS= read -r repo; do

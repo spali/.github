@@ -11,6 +11,7 @@ setup() {
   export FINDINGS INVENTORY CONFIG
   : >"$FINDINGS"
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/monitor-lists.sh"
+  unset GITHUB_REPOSITORY
   STACK="🚀 My stack"
   ARCH="🗃️ My stack Archive"
   MIRR="👀  Mirrors"
@@ -260,4 +261,63 @@ GHEND
   echo '{"lists": {"archive": "🚀 My stack"}, "mirrors": []}' >"$CONFIG"
   run_script
   [ ! -s "$FINDINGS" ]
+}
+
+# --- sync-failed (runs once, here) --------------------------------------
+
+SYNC='*repos/ctl/x/actions/workflows/sync.yml/runs?per_page=1&status=completed'
+
+managed() {
+  jq '.managed = [{repo: "spali/f", upstream: "https://github.com/up/f"}]' "$CONFIG" >"$CONFIG.new" &&
+    mv "$CONFIG.new" "$CONFIG"
+}
+
+@test "no managed entries: no sync check" {
+  export GITHUB_REPOSITORY=ctl/x
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 0 ]
+  run ! grep -F 'sync.yml' "$GH_LOG"
+}
+
+@test "managed entries without a control repository skip sync-failed" {
+  managed
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 1 ]
+  [ "$(level sync-failed)" = skip ]
+  [ "$(message sync-failed)" = "sync-failed: no control repository (local run)" ]
+  run ! grep -F 'sync.yml' "$GH_LOG"
+}
+
+@test "failed sync run is sync-failed" {
+  managed
+  export GITHUB_REPOSITORY=ctl/x
+  jq -nc '{workflow_runs: [{conclusion: "failure", html_url: "https://github.com/ctl/x/actions/runs/9"}]}' |
+    gh_respond "$SYNC" -
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 1 ]
+  [ "$(level sync-failed)" = red ]
+  [ "$(jq -rs 'map(select(.check == "sync-failed")) | .[0].repo' "$FINDINGS")" = null ]
+  [ "$(message sync-failed)" = "last sync run failed: https://github.com/ctl/x/actions/runs/9" ]
+}
+
+@test "successful sync run is no finding" {
+  managed
+  export GITHUB_REPOSITORY=ctl/x
+  jq -nc '{workflow_runs: [{conclusion: "success", html_url: "u"}]}' | gh_respond "$SYNC" -
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 0 ]
+  grep -qF 'sync.yml' "$GH_LOG"
+}
+
+@test "no sync run yet is no finding" {
+  managed
+  export GITHUB_REPOSITORY=ctl/x
+  jq -nc '{total_count: 0, workflow_runs: []}' | gh_respond "$SYNC" -
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 0 ]
 }
