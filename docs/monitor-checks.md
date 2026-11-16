@@ -240,7 +240,9 @@ A fork has a `github.com` upstream, everything else is a mirror.
 🔴 A repository under `managed:` does not exist ("managed repository does
 not exist (the sync creates it)"). No other check runs for it.
 
-**Fix:** let the sync run, or fix the `repo` of the entry.
+**Fix:** let the sync run (it creates a missing fork; a missing mirror fails
+the sync job with the command to create it by hand once), or fix the `repo`
+of the entry.
 
 ## managed-settings
 

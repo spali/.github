@@ -1,0 +1,183 @@
+# Reusable: sync the managed forks and mirrors (key `managed:` of the control
+# file) with their upstream: create a missing fork, enforce the settings,
+# fast-forward, rebase or mirror the refs.
+#
+# Call it from the PRIVATE control repository that holds the control file:
+#
+#   on:
+#     push:
+#       branches: [main]
+#       paths: [repos.yml]
+#     schedule:
+#       - cron: "47 4 * * *"
+#     workflow_dispatch:
+#       inputs:
+#         repo:
+#           description: Only this managed repository (spali/name)
+#           type: string
+#         branch:
+#           description: Also rebase this manual branch (or * for all), needs repo
+#           type: string
+#   concurrency:
+#     group: sync
+#   permissions:
+#     contents: read
+#   jobs:
+#     sync:
+#       uses: spali/.github/.github/workflows/sync.yml@<sha> # vX.Y.Z
+#       with:
+#         app-client-id: ${{ vars.SYNC_APP_CLIENT_ID }}
+#         repo: ${{ inputs.repo }}
+#         branch: ${{ inputs.branch }}
+#       secrets:
+#         app-key: ${{ secrets.SYNC_APP_KEY }}
+#
+# The control file (default repos.yml) is read from the calling repository.
+# The sync writes only to the repositories listed under `managed:`, with a
+# write app (Administration, Contents and Workflows write; Pull requests,
+# Actions and Metadata read; installed on all repositories). Each repository
+# gets its own job and tokens: a metadata token checks that it exists, an
+# unscoped token creates a missing fork (forking needs one), and a token
+# scoped to that repository syncs it. A missing mirror fails with the
+# command to create it by hand. The caller owns the schedule and the
+# concurrency group; each repository also has its own group (sync-<repo>).
+#
+# Jobs: Managed repositories (control file, repository list) → Sync · <repo>
+# (one per managed repository, at most 4 at a time).
+name: Sync
+
+on:
+  workflow_call:
+    inputs:
+      app-client-id:
+        description: Client id of the write GitHub App
+        type: string
+        required: true
+      config:
+        description: Path of the control file in the calling repository
+        type: string
+        default: repos.yml
+      repo:
+        description: Only this managed repository (default all)
+        type: string
+        default: ""
+      branch:
+        description: Also rebase this manual branch (or * for all); needs repo
+        type: string
+        default: ""
+    secrets:
+      app-key:
+        description: Private key of the write GitHub App
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  MONITOR_CONFIG: ${{ inputs.config }}
+
+jobs:
+  plan:
+    name: Managed repositories
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      repos: ${{ steps.matrix.outputs.repos }}
+      runner: ${{ steps.matrix.outputs.runner }}
+    steps:
+      - &config
+        name: Checkout control file
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - &scripts
+        name: Checkout shared scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: spali/.github
+          ref: ${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
+          path: .sync
+          persist-credentials: false
+      - name: Repositories
+        id: matrix
+        env:
+          SYNC_REPO: ${{ inputs.repo }}
+          SYNC_BRANCH: ${{ inputs.branch }}
+        run: |
+          matrix=$(.sync/scripts/sync.sh matrix)
+          echo "repos=$(jq -c .repos <<<"$matrix")" >>"$GITHUB_OUTPUT"
+          echo "runner=$(jq -c '."runs-on"' <<<"$matrix")" >>"$GITHUB_OUTPUT"
+          jq -r '.repos[]' <<<"$matrix"
+          echo "runs-on: $(jq -c '."runs-on"' <<<"$matrix")"
+
+  sync:
+    name: Sync · ${{ matrix.repo }}
+    needs: plan
+    if: ${{ needs.plan.outputs.repos != '[]' }}
+    runs-on: ${{ fromJSON(needs.plan.outputs.runner) }}
+    timeout-minutes: 30
+    concurrency:
+      group: sync-${{ matrix.repo }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        repo: ${{ fromJSON(needs.plan.outputs.repos) }}
+    steps:
+      - *config
+      - *scripts
+      - name: Metadata token
+        id: meta-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-key }}
+          owner: spali
+          permission-metadata: read
+      - name: Check repository
+        id: exists
+        env:
+          GH_TOKEN: ${{ steps.meta-token.outputs.token }}
+          REPO: ${{ matrix.repo }}
+        run: .sync/scripts/sync.sh exists "$REPO"
+      # forking needs a token that is not scoped to repositories; a token
+      # cannot be scoped to a repository that does not exist yet
+      - name: Create token
+        id: create-token
+        if: ${{ steps.exists.outputs.exists != 'true' }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-key }}
+          owner: spali
+          permission-administration: write
+          permission-contents: read
+      - name: Create repository
+        id: create
+        if: ${{ steps.exists.outputs.exists != 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.create-token.outputs.token }}
+          REPO: ${{ matrix.repo }}
+        run: .sync/scripts/sync.sh create "$REPO"
+      - name: Repository token
+        id: repo-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-key }}
+          owner: spali
+          repositories: ${{ steps.exists.outputs.name }}
+          permission-administration: write
+          permission-contents: write
+          permission-workflows: write
+          permission-pull-requests: read
+          permission-metadata: read
+      - name: Sync ${{ matrix.repo }}
+        id: repo
+        env:
+          GH_TOKEN: ${{ steps.repo-token.outputs.token }}
+          SYNC_APP_SLUG: ${{ steps.repo-token.outputs.app-slug }}
+          SYNC_BRANCH: ${{ inputs.branch }}
+          REPO: ${{ matrix.repo }}
+        run: .sync/scripts/sync.sh repo "$REPO"
