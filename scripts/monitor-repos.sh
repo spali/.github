@@ -2,7 +2,8 @@
 # Builds the monitor's repository inventory: prints a JSON array to stdout.
 # Env: FINDINGS. In Actions (GITHUB_ACTIONS=true) the app's installation is
 # listed; locally the user token lists all owned repositories. A repository is
-# central when it pins a shared workflow other than the monitor's own ones.
+# central when it pins a shared workflow other than the maintenance ones
+# (monitor, its config check and the fork/mirror sync).
 set -euo pipefail
 # shellcheck source=scripts/monitor-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
@@ -26,6 +27,10 @@ list_repos() {
     jq -s 'add // []' <<<"$raw" || { parse_failed inventory -; return 1; }
   fi
 }
+
+# Shared workflows of the maintenance tooling: pinning only these does not make
+# a repository a release-flow (central) one.
+MAINTENANCE_WORKFLOWS='["monitor.yml","monitor-config.yml","sync.yml"]'
 
 # workflow_pins REPO BRANCH prints the central workflow pins as JSON lines
 # and returns 1 when the workflow directory could not be read.
@@ -84,9 +89,10 @@ main() {
     fi
     entries+=("$(jq -c --arg name "$name" --argjson parent "$parent" \
       --argjson pins "$(jq -s . <<<"$pins")" \
+      --argjson maintenance "$MAINTENANCE_WORKFLOWS" \
       '.[] | select(.full_name == $name) |
        {name: .full_name, private, fork, default_branch, pushed_at,
-        central: ($pins | any(.workflow != "monitor.yml" and .workflow != "monitor-config.yml")), pins: $pins, parent: $parent}' <<<"$repos")")
+        central: ($pins | any(.workflow | IN($maintenance[]) | not)), pins: $pins, parent: $parent}' <<<"$repos")")
   done < <(jq -r '.[] | [.full_name, .default_branch, .fork] | @tsv' <<<"$repos")
 
   printf '%s\n' "${entries[@]}" | jq -s 'sort_by(.name)'

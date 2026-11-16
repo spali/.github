@@ -110,6 +110,24 @@ YML
   [ "$(jq -c '.[0] | [.central, (.pins | map(.workflow))]' <<<"$output")" = '[false,["monitor.yml","monitor-config.yml"]]' ]
 }
 
+@test "a repo that also pins the sync workflow is not central" {
+  user_repos "$(repo spali/ctl true)"
+  gh_respond '*contents/.github/workflows?ref=main' - <<'JSON'
+[{"name":"x.yml","type":"file"}]
+JSON
+  gh_respond '*contents/.github/workflows/x.yml?ref=main' - <<'YML'
+jobs:
+  a:
+    uses: spali/.github/.github/workflows/monitor.yml@6f26c6b1dcac0797c52055241f0cfb74a797ebe3 # v1.0.0
+  b:
+    uses: spali/.github/.github/workflows/monitor-config.yml@6f26c6b1dcac0797c52055241f0cfb74a797ebe3 # v1.0.0
+  c:
+    uses: spali/.github/.github/workflows/sync.yml@6f26c6b1dcac0797c52055241f0cfb74a797ebe3 # v1.0.0
+YML
+  run --separate-stderr "$SCRIPT"
+  [ "$(jq -c '.[0] | [.central, (.pins | map(.workflow))]' <<<"$output")" = '[false,["monitor.yml","monitor-config.yml","sync.yml"]]' ]
+}
+
 @test "a repo that pins the monitor and another workflow is central" {
   user_repos "$(repo spali/a)"
   gh_respond '*contents/.github/workflows?ref=main' - <<'JSON'
