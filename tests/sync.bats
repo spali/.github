@@ -355,6 +355,22 @@ fi'
   [[ $stderr != *"kept with own commits"* ]]
 }
 
+@test "a refused accept has no accept hint" {
+  stub_step sync-git.sh '
+if [[ $1 == plan ]]; then
+  printf "refs/heads/main\tupstream rewritten (synced 1111111, upstream now 2222222, 1 synced commits gone upstream; target has 2 own commits; accept refused: own commits on top, declare the branch or reset it by hand)\n" >"$WORK/skipped.txt"
+else
+  echo "nothing to do"
+fi'
+  SYNC_ACCEPT=main run --separate-stderr "$SYNC" repo spali/tool
+  [ "$status" -eq 1 ]
+  local msg="error: refs/heads/main: upstream rewritten (synced 1111111, upstream now 2222222, 1 synced commits gone upstream; target has 2 own commits; accept refused: own commits on top, declare the branch or reset it by hand)"
+  [[ $stderr == *"$msg"* ]]
+  [[ $stderr != *"Check upstream"* && $stderr != *"accept=main"* ]]
+  grep -qF "$msg" "$GITHUB_STEP_SUMMARY"
+  ! grep -q 'Check upstream' "$GITHUB_STEP_SUMMARY"
+}
+
 # target_branches NAME...: the branches of spali/tool (two pages)
 target_branches() {
   jq -n '$ARGS.positional[:1] | map({name: .})' --args "$@"

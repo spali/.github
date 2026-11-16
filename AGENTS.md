@@ -362,8 +362,8 @@ The workflow `sync.yml` runs daily (04:47 UTC) and on every change of
    the old tip is kept in `refs/backup/<branch>` or `refs/backup-tags/<tag>`
    (one backup per ref, replaced by each later accept or rebase). A declared
    branch keeps only its own commits after the record; a default or followed
-   branch with own commits on top is refused (`accept refused`): declare it
-   (step 1) or reset it by hand.
+   branch with own commits on top is refused (`accept refused`, the error
+   line has no accept hint then): declare it (step 1) or reset it by hand.
 9. Right after the sync created a fork, the first fetch may fail once (GitHub
    is still copying the repository); the next run recovers, or re-run.
 10. Forks and mirrors are synced the same way; they differ only in how the
