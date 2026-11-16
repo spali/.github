@@ -72,3 +72,12 @@ setup() {
   [ "$(jq -r .kind <<<"$output")" = fork ]
   [ "$(jq -r .upstream_repo <<<"$output")" = Own/Nm ]
 }
+
+@test "follow defaults to []" {
+  jq -n '{managed: [{repo: "spali/c", upstream: "https://github.com/o/c"},
+    {repo: "spali/d", upstream: "https://github.com/o/d", follow: ["release/.*"]}]}' >"$CONFIG"
+  run managed_entry "$CONFIG" spali/c
+  [ "$(jq -c .follow <<<"$output")" = "[]" ]
+  run managed_entry "$CONFIG" spali/d
+  [ "$(jq -c .follow <<<"$output")" = '["release/.*"]' ]
+}

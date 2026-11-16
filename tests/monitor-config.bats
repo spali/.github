@@ -349,3 +349,38 @@ YAML
   [ "$status" -eq 1 ]
   [ "$stderr" = "error: $f: managed must be a list" ]
 }
+
+@test "managed: follow must be a list of strings" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: "release/.*"}' "managed[0].follow must be a list of strings"
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: [1]}' "managed[0].follow must be a list of strings"
+}
+
+@test "managed: follow pattern must be a valid regular expression" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: ["ok", "release/(v"]}' "managed[0].follow[1]: invalid regular expression"
+  # a pattern that only compiles inside the full-match wrapper is refused too
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: ["a)|(?:.*"]}' "managed[0].follow[0]: invalid regular expression"
+}
+
+@test "managed: follow only applies to forks with refs default" {
+  managed_bad '  - {repo: spali/a, upstream: "https://example.org/a", follow: ["x"]}' "managed[0]: follow only applies to forks with refs default"
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", refs: all, follow: ["x"]}' "managed[0]: follow only applies to forks with refs default"
+}
+
+@test "managed: valid follow passes" {
+  f=$(
+    mk ok.yml <<'YAML'
+version: 1
+managed:
+  - repo: spali/a
+    upstream: https://github.com/o/a
+    refs: default
+    follow: ['^release/v[0-9]+\.[0-9]+$', 'stable']
+  - repo: spali/b
+    upstream: https://github.com/o/b
+    follow: []
+YAML
+  )
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+}

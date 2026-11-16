@@ -87,22 +87,34 @@ check_refs() {
 
 # check_branches REPO ENTRY DEFAULT UPSTREAM_REPO UPSTREAM_DEFAULT CONTRIB:
 # compares each declared branch (and, with refs default, the undeclared
-# default branch onto the upstream default branch) with its onto upstream.
-# auto: missing commits older than 48 h are managed-behind; manual:
-# rebase-pending. A declared branch missing in the target is managed-behind.
-# The contribution branches CONTRIB (JSON array of names) are left out: the
-# sync never writes them.
+# default branch onto the upstream default branch) with its onto upstream,
+# and each upstream branch that matches a follow pattern (not the default,
+# not declared) with the target branch of the same name.
+# auto (and followed): missing commits older than 48 h are managed-behind;
+# manual: rebase-pending. A declared or followed branch missing in the target
+# is managed-behind. The contribution branches CONTRIB (JSON array of names)
+# are left out: the sync never writes them.
 check_branches() {
-  local repo=$1 entry=$2 default=$3 up=$4 updef=$5 contrib=$6 tb list name sha onto rebase body n date
+  local repo=$1 entry=$2 default=$3 up=$4 updef=$5 contrib=$6 tb ub list name sha onto rebase body n date
   tb=$(mktemp)
+  ub=$(mktemp)
   # shellcheck disable=SC2064 # expand now
-  trap "rm -f '$tb'; trap - RETURN" RETURN
+  trap "rm -f '$tb' '$ub'; trap - RETURN" RETURN
   paged managed-behind "$repo" "repos/$repo/branches?per_page=100" '{name, sha: .commit.sha}' "$tb" || return 0
+  if [[ $(jq -r '.follow // [] | length' <<<"$entry") -gt 0 ]]; then
+    paged managed-behind "$repo" "repos/$up/branches?per_page=100" '{name}' "$ub" || return 0
+  else
+    echo '[]' >"$ub"
+  fi
   json_out managed-behind "$repo" list -r --argjson e "$entry" --arg def "$default" --arg updef "$updef" \
-    --argjson c "$contrib" '
+    --argjson c "$contrib" --slurpfile u "$ub" '
     (map({key: .name, value: .sha}) | from_entries) as $sha |
-    (if $e.refs == "default" and ($def | IN($e.branches[].name) | not)
-     then [{name: $def, onto: $updef, rebase: "auto"}] else [] end) + $e.branches |
+    [$e.branches[].name] as $decl |
+    [$u[0][].name | select(. as $n | . != $def and (IN($decl[]) | not)
+      and any($e.follow // [] | .[]; . as $re | $n | test("^(?:" + $re + ")$")))
+     | {name: ., onto: ., rebase: "auto"}] as $fol |
+    (if $e.refs == "default" and ($def | IN($decl[]) | not)
+     then [{name: $def, onto: $updef, rebase: "auto"}] else [] end) + $e.branches + $fol |
     .[] | select(.name | IN($c[]) | not) | [.name, ($sha[.name] // "-"), .onto, .rebase] | @tsv' "$tb" || return 0
   while IFS=$'\t' read -r name sha onto rebase; do
     [[ -n $name ]] || continue

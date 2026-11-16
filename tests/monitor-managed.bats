@@ -296,6 +296,56 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   [ "$(count branch-undeclared)" -eq 0 ]
 }
 
+# follow: release branches rel/* are synced by name; rel/1 exists in the
+# target (sha 6), rel/2 does not, other only upstream.
+follow() {
+  jq '.managed[0].follow = ["rel/.*"]' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  respond_jq "$UB" '[{name: "dev"}, {name: "main"}, {name: "rel/1"}, {name: "other"}]'
+  jq -nc --arg a "$(sha 1)" --arg b "$(sha 2)" --arg c "$(sha 3)" --arg r "$(sha 6)" \
+    '[{name: "main", commit: {sha: $a}}, {name: "feat", commit: {sha: $b}}, {name: "wip", commit: {sha: $c}},
+      {name: "rel/1", commit: {sha: $r}}]' | gh_respond "$TB" -
+}
+
+@test "followed branch behind more than 48 h is managed-behind" {
+  follow
+  respond_jq "*repos/up/f/compare/$(sha 6)...rel/1" "$(behind 2 2026-11-01T00:00:00Z)"
+  run_script
+  [ "$(count managed-behind)" -eq 1 ]
+  [ "$(level managed-behind)" = red ]
+  [ "$(message managed-behind)" = "rel/1: 2 upstream commits missing, oldest from 2026-11-01T00:00:00Z" ]
+}
+
+@test "followed branch missing in the target is managed-behind" {
+  respond_jq "$UB" '[{name: "dev"}, {name: "main"}, {name: "rel/1"}, {name: "rel/2"}]'
+  follow
+  run_script
+  [ "$(count managed-behind)" -eq 1 ]
+  [ "$(level managed-behind)" = red ]
+  [ "$(message managed-behind)" = "rel/2: missing in the target" ]
+}
+
+@test "followed branch with own commits is compared with the same name upstream" {
+  follow
+  respond_jq '*repos/up/f/compare/rel/1...spali:f:rel/1' '{ahead_by: 3}'
+  run_script
+  [ "$(count branch-undeclared)" -eq 1 ]
+  [ "$(message branch-undeclared)" = "rel/1: 3 own commits, not declared in repos.yml" ]
+  run ! grep -F 'compare/dev...spali:f:rel/1' "$GH_LOG"
+}
+
+@test "unfollowed upstream branch is no finding" {
+  follow
+  respond_jq '*compare/*...other' "$(behind 2 2026-11-01T00:00:00Z)"
+  run_script
+  [ ! -s "$FINDINGS" ]
+  run ! grep -F 'other' "$GH_LOG"
+}
+
+@test "without follow the upstream branches are read once" {
+  run_script
+  [ "$(grep -c 'repos/up/f/branches' "$GH_LOG")" -eq 1 ]
+}
+
 @test "API error is check-failed" {
   gh_fail "$MAIN" 'gh: Server Error (HTTP 502)'
   run_script
