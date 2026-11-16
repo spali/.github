@@ -228,7 +228,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
     entry "$kind" '[]' '[".*"]'
     run --separate-stderr "$SCRIPT" plan
     [ "$status" -eq 1 ]
-    [ "$stderr" = "error: upstream has 0 refs, target 1: refusing (empty or broken source)" ]
+    [ "$stderr" = "error: upstream has 0 refs (branches and tags), target 1: refusing (empty or broken source)" ]
     [ ! -e "$WORK/plan.tsv" ]
   done
 }
@@ -241,7 +241,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   entry mirror '[]' '[".*"]'
   run --separate-stderr "$SCRIPT" plan
   [ "$status" -eq 1 ]
-  [ "$stderr" = "error: upstream has 2 refs, target 6: refusing (empty or broken source)" ]
+  [ "$stderr" = "error: upstream has 2 refs (branches and tags), target 6: refusing (empty or broken source)" ]
   [ ! -e "$WORK/plan.tsv" ]
   # exactly half is still enough
   set_ref "$UP" refs/heads/b "$A"
@@ -456,6 +456,38 @@ up_refs() {
   [ "$status" -eq 0 ]
   [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/tags/old\t%s\t%s\tdelete' "$A" "$ZERO")" ]
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/tags/mine\tunique commits')" ]
+}
+
+@test "moved upstream tag on an own commit is kept" {
+  O=$(commit "$A" o own)
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$UP" refs/tags/v1 "$B"
+  set_ref "$TG" refs/tags/v1 "$O"
+  entry fork
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/tags/v1\tunique commits')" ]
+}
+
+@test "tag commit on an unfetched upstream branch is no unique commit" {
+  R=$(commit "$A" r rel)
+  S=$(commit "$A" s rel2)
+  set_ref "$UP" refs/heads/rel "$R"
+  set_ref "$UP" refs/heads/rel2 "$S"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/tags/v0 "$R"
+  set_ref "$TG" refs/tags/v1 "$S"
+  set_ref "$UP" refs/tags/v1 "$B"
+  set_ref "$UP" refs/tags/keep "$B"
+  set_ref "$TG" refs/tags/keep "$B"
+  entry fork
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/tags/v1\t%s\t%s\tmirror\nrefs/tags/v0\t%s\t%s\tdelete' "$S" "$B" "$R" "$ZERO")" ]
+  [ ! -s "$WORK/skipped.txt" ]
+  # the extra heads are not synced
+  [ "$(git -C "$WORK/repo" for-each-ref --format='%(refname)' refs/up/heads/)" = refs/up/heads/main ]
 }
 
 @test "onto branches are fetched for declared branches" {

@@ -3,7 +3,8 @@
 #
 #   sync-git.sh plan  fetches upstream (only the default branch, the onto
 #                     branches, the branches matching a follow pattern and,
-#                     unless tags is false, all tags) and target into
+#                     unless tags is false, all tags; all branches only
+#                     to check a moved or gone tag) and target into
 #                     $WORK/repo, rebases the declared branches there and
 #                     writes $WORK/plan.tsv
 #                     (<ref> <old sha> <new sha> <reason>, tab separated;
@@ -147,6 +148,19 @@ contained() {
   [[ -n $(g for-each-ref --contains "$c" --format='%(refname)' refs/up/) ]]
 }
 
+# contained_tag SHA is contained, but first fetches all upstream heads once
+# into refs/up/extra/ (not read by load, never synced) when SHA is not in a
+# fetched upstream ref: a tag commit may be only on an unfetched branch.
+contained_tag() {
+  contained "$1" && return 0
+  if [[ -z ${EXTRA:-} ]]; then
+    EXTRA=1
+    g fetch -q --no-tags --no-write-fetch-head -- "$UPSTREAM_URL" \
+      '+refs/heads/*:refs/up/extra/*' || die "cannot fetch upstream"
+  fi
+  contained "$1"
+}
+
 # backups must not land in a namespace that is synced (refs/heads/, refs/tags/)
 check_backup_prefix() {
   if [[ $BACKUP_PREFIX != refs/?*/ || $BACKUP_PREFIX == refs/heads/* ||
@@ -238,6 +252,7 @@ plan() {
   git init -q "$REPO"
 
   declare -gA UPR=() TGR=() BKR=() DECL=() CONTRIB=() FOL=() SCOPE=()
+  EXTRA=
   FOLLOW=$(jq -c '.follow // []' <<<"$ENTRY")
   udef=$(default_branch "$UPSTREAM_URL" upstream)
   fetch_needed "$udef"
@@ -261,7 +276,7 @@ plan() {
 
   u=${#UPR[@]}
   n=${#TGR[@]}
-  ((u > 0)) || die "upstream has $u refs, target $n: refusing (empty or broken source)"
+  ((u > 0)) || die "upstream has $u refs (branches and tags), target $n: refusing (empty or broken source)"
   # the default branch and the refs mirrored by name (followed branches,
   # tags): upstream must have at least half as many as the target
   for name in "${!FOL[@]}"; do SCOPE[$name]=1; done
@@ -280,7 +295,7 @@ plan() {
     in_scope "$key" || [[ $key == "heads/$tdef" ]] || continue
     n=$((n + 1))
   done
-  ((2 * u >= n)) || die "upstream has $u refs, target $n: refusing (empty or broken source)"
+  ((2 * u >= n)) || die "upstream has $u refs (branches and tags), target $n: refusing (empty or broken source)"
 
   # declared branches; \x1f is no IFS whitespace, so empty fields stay empty,
   # control characters become ? (an invalid ref name)
@@ -343,18 +358,23 @@ plan() {
       skip "refs/heads/$name" "unique commits"
     fi
   done
-  # tags (only loaded when TAGS is true): new and moved ones by name (an
-  # annotated tag keeps its tag object), those gone upstream only when
-  # nothing is lost
+  # tags (only loaded when TAGS is true): new ones by name (an annotated tag
+  # keeps its tag object), moved and gone upstream ones only when nothing is
+  # lost (the old commit is in an upstream ref)
   mapfile -t keys < <(sorted_keys UPR | grep '^tags/' || true)
   for key in "${keys[@]}"; do
     [[ -n $key && ${TGR[$key]:-$ZERO} != "${UPR[$key]}" ]] || continue
-    add "refs/$key" "${TGR[$key]:-$ZERO}" "${UPR[$key]}" mirror
+    tg=${TGR[$key]:-$ZERO}
+    if [[ $tg == "$ZERO" ]] || contained_tag "$tg"; then
+      add "refs/$key" "$tg" "${UPR[$key]}" mirror
+    else
+      skip "refs/$key" "unique commits"
+    fi
   done
   mapfile -t keys < <(sorted_keys TGR | grep '^tags/' || true)
   for key in "${keys[@]}"; do
     [[ -n $key && -z ${UPR[$key]:-} ]] || continue
-    if contained "${TGR[$key]}"; then
+    if contained_tag "${TGR[$key]}"; then
       add "refs/$key" "${TGR[$key]}" "$ZERO" delete
     else
       skip "refs/$key" "unique commits"
