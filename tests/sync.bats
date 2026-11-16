@@ -331,6 +331,26 @@ fi'
   ! grep -q secret-token "$GH_LOG"
 }
 
+@test "the credential is masked in GitHub Actions before git runs" {
+  local b64
+  b64=$(printf '%s' 'x-access-token:secret-token' | base64 -w0)
+  GITHUB_ACTIONS=true run "$SYNC" repo spali/tool
+  [ "$status" -eq 0 ]
+  # the mask comes before any git step output
+  [[ $output == *"::add-mask::$b64"* ]]
+  local before=${output%%"::add-mask::$b64"*}
+  [[ $before != *"nothing to do"* ]]
+  [ "$(grep -cxF "::add-mask::$b64" <<<"$output")" -ge 1 ]
+  [[ $output != *secret-token* ]]
+  ! grep -q -e secret-token -e "$b64" "$GITHUB_STEP_SUMMARY"
+}
+
+@test "no mask command outside GitHub Actions" {
+  GITHUB_ACTIONS= run "$SYNC" repo spali/tool
+  [ "$status" -eq 0 ]
+  [[ $output != *"::add-mask::"* ]]
+}
+
 @test "committer is the app bot" {
   run "$SYNC" repo spali/tool
   [ "$status" -eq 0 ]
