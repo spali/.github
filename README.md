@@ -17,6 +17,7 @@ version, checks, publishing, attestation) comes from here.
 - [Interface](#interface)
 - [Maintenance](#maintenance)
 - [Maintenance monitor](#maintenance-monitor)
+- [Fork and mirror sync](#fork-and-mirror-sync)
 - [Troubleshooting](#troubleshooting)
 
 For AI agents: [AGENTS.md](AGENTS.md) has the same content as rules,
@@ -52,6 +53,7 @@ flowchart LR
 | [`.github/workflows/release-prepare.yml`](.github/workflows/release-prepare.yml) | Reusable: update the draft, check a pushed tag, decide kind and version |
 | [`.github/workflows/release-publish.yml`](.github/workflows/release-publish.yml) | Reusable: checksums, attestation, publish |
 | [`.github/workflows/monitor.yml`](.github/workflows/monitor.yml), [`monitor-config.yml`](.github/workflows/monitor-config.yml) | Reusable: the [maintenance monitor](#maintenance-monitor) and the validation of its control file, called from a private control repository |
+| [`.github/workflows/sync.yml`](.github/workflows/sync.yml) | Reusable: the [fork and mirror sync](#fork-and-mirror-sync) of the managed repositories, called from the private control repository |
 | [`scripts/`](scripts) | The logic of the reusable workflows (Bash), tested in [`tests/`](tests) |
 | [`docs/monitor-checks.md`](docs/monitor-checks.md) | What each check of the maintenance monitor means and how to fix a finding |
 | [`examples/caller/`](examples/caller) | Workflows to copy into a repository |
@@ -354,6 +356,10 @@ labeled, unlabeled, closed`. It never checks out code of the pull request, so
 `app-key`. **`monitor-config.yml`** (needs `contents: read`): input `config`.
 See [Maintenance monitor](#maintenance-monitor).
 
+**`sync.yml`** (needs `contents: read`): inputs `app-client-id` (required),
+`config` (default `repos.yml`), `repo` and `branch` (default empty), secret
+`app-key`. See [Fork and mirror sync](#fork-and-mirror-sync).
+
 The release workflow must keep the tag filters of the examples: `-next` and
 `-pr.*` tags must not start a release.
 
@@ -465,6 +471,7 @@ after 48 h.
 | `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `archive`, `mirrors`, `forks` (list of lists) |
 | `mirrors` | mirror targets: `target` (`spali/name`), `source` (`https://` URL), `interval_hours`, optional `script` |
 | `forks` | forks with their own sync workflow: `repo`, `sync_interval_hours` |
+| `managed` | forks and mirrors kept in sync by [`sync.yml`](#fork-and-mirror-sync): `repo`, `upstream`, optional `refs`, `branches`, `settings`, `private` |
 | `ignores` | accepted findings: `repo`, `check` (an id from the AGENTS.md catalog, not `check-failed`), `reason` (required) |
 
 ```yaml
@@ -573,6 +580,127 @@ scripts/monitor.sh config && scripts/monitor.sh inventory && scripts/monitor.sh 
 
 **Ignore a finding** with a pull request in the control repository that adds
 an entry to `ignores`.
+
+## Fork and mirror sync
+
+The reusable workflow `sync.yml` keeps the forks and mirrors listed under
+`managed:` of the control file in sync with their upstream, centrally from
+the control repository: no fork or mirror needs a sync workflow of its own.
+For each managed repository it
+
+1. creates a missing fork (a missing mirror must be created by hand once, see
+   below);
+2. enforces its settings: issues, pull requests, wiki, discussions, projects
+   and GitHub Actions are off unless `settings:` turns them on;
+3. syncs the refs from upstream: fast-forwards the default branch, rebases
+   the declared branches onto their upstream branch, mirrors all branches and
+   tags with `refs: all` (and for every mirror); there it deletes a target
+   ref that is gone upstream only when its commits are still in an upstream
+   ref.
+
+It writes **only to the repositories under `managed:`**. A branch with own
+commits that is not declared, and the head branch of an open upstream pull
+request from the fork, are never overwritten (the monitor reports the first
+one as `branch-undeclared`). A conflict pushes nothing for that repository.
+Every push is one atomic push with a lease on the old commit of each ref:
+if somebody pushed in between, nothing is overwritten and the job fails. The
+job summary lists, per repository, whether it existed or was created, the
+changed settings, the updated refs and the skipped refs with the reason.
+
+**Rebase and merge commits.** A rebase linearizes merge commits: changes made
+inside a merge (conflict resolutions, evil merges) are not carried over. The
+old tip of every rebased branch stays in the backup ref
+`refs/backup/<branch>` of the repository (written in the same push), so
+nothing is lost: `git fetch origin 'refs/backup/*:refs/remotes/backup/*'`.
+
+**The `managed:` entries:**
+
+| Key | Meaning |
+|---|---|
+| `repo` | the fork or mirror, `spali/name` |
+| `upstream` | `https://` URL of the source; on `github.com` the repository is a **fork**, anywhere else a **mirror** |
+| `refs` | forks only: `default` (the default, the default branch and the declared branches) or `all` (all branches and tags of upstream); mirrors always sync all branches and tags |
+| `branches` | own branches of a fork: `<branch>: {onto: <upstream branch>, rebase: auto}` or `rebase: manual`; `auto` rebases on every run, `manual` only when dispatched with `branch` |
+| `settings` | exceptions to the defaults (all `false`): `has_issues`, `has_pull_requests`, `has_wiki`, `has_discussions`, `has_projects`, `actions` |
+| `private` | mirrors: the visibility in the create command (default `false`) |
+
+```yaml
+managed:
+  - repo: spali/example-fork
+    upstream: https://github.com/someone/example
+    branches:
+      my-feature: {onto: main, rebase: auto}
+      experiment: {onto: develop, rebase: manual}
+    settings:
+      has_issues: true
+  - repo: spali/example-mirror
+    upstream: https://gitlab.com/someone/example.git
+    private: true
+```
+
+Other ref namespaces (`refs/pull/*`, `refs/merge-requests/*`, …) are never
+synced. Upstream ref names that git would not accept as a branch are dropped
+with a log line.
+
+**Set up the write app** (once). It is a second app, separate from the
+read-only monitor app:
+
+1. Create a GitHub App, no webhook, installable only on this account.
+   Repository permissions: Administration, Contents and Workflows **write**;
+   Pull requests, Actions and Metadata read.
+2. Install it on **all repositories** (forking needs an installation token
+   that is not limited to repositories), generate a private key.
+3. In the control repository set the variable `SYNC_APP_CLIENT_ID` and the
+   secret `SYNC_APP_KEY`.
+
+The rebased commits are committed by the app's bot user
+(`<app-slug>[bot]`).
+
+**Mirrors are created by hand once.** An app token cannot create a repository
+of a user account. When a mirror is missing, its job fails and prints the
+command to run, for example `gh repo create spali/example-mirror --private`;
+the monitor shows `managed-missing` until then. Forks are created by the sync.
+
+**Add `.github/workflows/sync.yml`** to the control repository (replace
+`<sha>` and `vX.Y.Z` like for the monitor):
+
+```yaml
+name: Sync
+on:
+  push:
+    branches: [main]
+    paths: [repos.yml]
+  schedule:
+    - cron: "47 4 * * *"
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Only this managed repository (spali/name)
+        type: string
+      branch:
+        description: Also rebase this manual branch (or * for all), needs repo
+        type: string
+concurrency:
+  group: sync
+permissions:
+  contents: read
+jobs:
+  sync:
+    uses: spali/.github/.github/workflows/sync.yml@<sha> # vX.Y.Z
+    with:
+      app-client-id: ${{ vars.SYNC_APP_CLIENT_ID }}
+      repo: ${{ inputs.repo }}
+      branch: ${{ inputs.branch }}
+    secrets:
+      app-key: ${{ secrets.SYNC_APP_KEY }}
+```
+
+**The run.** The job **Managed repositories** validates the control file and
+lists the repositories (only `repo` when dispatched with it). Then one job
+**Sync · spali/name** per repository runs, at most 4 at a time, on
+`monitor.runs-on`; a failure in one does not stop the others, and each
+repository has its own concurrency group. Rebase a `rebase: manual` branch:
+`gh workflow run sync.yml -f repo=spali/name -f branch=<branch>`.
 
 ## Troubleshooting
 

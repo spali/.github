@@ -30,6 +30,10 @@ you should fix the document that is wrong.
   issue (and the label `maintenance-monitor`) in the calling repository, with
   that repository's `GITHUB_TOKEN`; everything else it does is `GET` requests
   and GraphQL queries with the read-only app token;
+- make the sync (`sync.yml`) write to a repository that is not listed under
+  `managed:` of the control file, take a target URL from anything but the
+  entry, or pass a token in an argument, URL, log or artifact (git gets it
+  only through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`);
 - put the name of a private repository into `spali/.github`: not in code, docs,
   tests, fixtures, PRs or commits (say "the private control repository"; the
   monitor's control file lives there);
@@ -75,6 +79,7 @@ pull request closed
 | `.github/workflows/release-publish.yml` | reusable; job `publish` |
 | `.github/workflows/monitor.yml` | reusable; job `monitor`; run by the private control repository |
 | `.github/workflows/monitor-config.yml` | reusable; job `config`; validates the control file |
+| `.github/workflows/sync.yml` | reusable; jobs `plan` (Managed repositories) and `sync` (one per managed repository); run by the private control repository |
 | `scripts/lib.sh` | `die`, `out`, `need_env` |
 | `scripts/check-pr.sh` | title regex, release label present, warning on several |
 | `scripts/prepare.sh` | `next` / `release` / `pr`: decide kind, version, tag, sha |
@@ -82,6 +87,7 @@ pull request closed
 | `scripts/publish.sh` | `release` / `next` / `pr`: create, replace, publish |
 | `scripts/cleanup-pr.sh` | delete `*-pr.<N>` releases and tags |
 | `scripts/monitor*.sh` | maintenance monitor: `monitor.sh` runs `monitor-repos.sh` (inventory), the check scripts, `monitor-report.sh` and `monitor-issue.sh`; `monitor.sh PHASE` runs one of them (shared dir `MONITOR_WORK`); `monitor.sh matrix` prints the jobs per check group for the workflow matrix (`monitor.jobs`, `monitor.runs-on` of the control file), `MONITOR_REPO` limits a check phase to one repository (empty: all) |
+| `scripts/sync.sh` | fork and mirror sync: `matrix` (repositories, runner), `exists`, `create` (`sync-create.sh`), `repo` (kind check, `sync-settings.sh`, contribution branches, `sync-git.sh plan` and `push`); `scripts/managed-lib.sh` normalizes the `managed:` entries |
 | `docs/monitor-checks.md` | explanation of each monitor check, linked from the overview issue (one `## <check id>` section each, tested) |
 | `tests/*.bats`, `tests/helpers/gh-stub.bash` | bats tests with a fake `gh` |
 | `examples/caller/*.yml` | files a repository copies |
@@ -119,8 +125,11 @@ The reusable monitor workflows are part of the interface too.
 (default `repos.yml`), secret `app-key` (required), caller permissions
 `contents: read`, `issues: write`; it has no concurrency group and no
 schedule, the caller owns both. `monitor-config.yml` (job `config`): input
-`config`, permission `contents: read`. Renaming or removing an input or
-secret needs a new major version.
+`config`, permission `contents: read`. `sync.yml` (jobs `plan`, `sync`):
+inputs `app-client-id` (required), `config` (default `repos.yml`), `repo`
+and `branch` (default empty), secret `app-key` (required), caller permission
+`contents: read`; the caller owns the schedule and the concurrency group
+`sync`. Renaming or removing an input or secret needs a new major version.
 
 The reusable workflows check out `spali/.github` at `job.workflow_sha` (the
 commit the caller pinned) and load `release-drafter.yml` from the same commit.
@@ -316,6 +325,31 @@ pass.
   select different repositories; never change it to pass, fix the selection.
 - Never add a second workflow for another job layout.
 
+### 4.11 Add or change a managed repository
+
+The workflow `sync.yml` runs daily (04:47 UTC) and on every change of
+`repos.yml` from the private control repository. Code: `scripts/sync*.sh`.
+
+1. Add or change the entry under `managed:` of `repos.yml` with a PR in the
+   control repository (schema: README "Fork and mirror sync"). The `Config`
+   check validates it. Turning a setting on (`settings:`) needs the owner's
+   approval.
+2. After the merge the sync runs. A new fork is created by it; a new mirror
+   fails with `create <repo> by hand: gh repo create <repo> --public|--private`:
+   the owner runs that command once, then re-run the sync.
+3. A rebase conflict (`rebase onto <x> failed (conflict)`) pushes nothing for
+   that repository. Rebase the branch by hand (fetch upstream, `git rebase`,
+   resolve), push it, then run
+   `gh workflow run sync.yml -f repo=<repo>` in the control repository.
+4. Rebase a `rebase: manual` branch: `gh workflow run sync.yml -f repo=<repo>
+   -f branch=<branch>` (`-f branch='*'` for all manual branches of the repo).
+5. `RESTORE FAILED for …`: the push landed but its verification failed and the
+   restore did not succeed. Never push over it: the old tips are in
+   `refs/backup/<branch>` of the repository; compare and restore by hand with
+   the owner.
+6. A lease failure (`push rejected, target unchanged`) means somebody pushed to
+   the repository during the run: nothing was overwritten, re-run.
+
 ## 5. Error catalog
 
 | Message (in run log) | Cause | Action |
@@ -381,7 +415,7 @@ and the log of the failed step. Explanations for humans:
 | `list-contradiction` (info) | a repository is in both lists of an exclusive pair | fix the lists |
 | `list-mirror-missing` (info) | a mirror target is not in the mirrors list | add it to the list |
 | `list-archived` (info) | an archived own repository is in a list other than the archive list | move it |
-| `managed-missing` | a repository under `managed:` does not exist (no other check runs for it) | let the sync create it, or fix the entry |
+| `managed-missing` | a repository under `managed:` does not exist (no other check runs for it) | let the sync create it (a mirror: run the `gh repo create` command from the failed sync job once, 4.11), or fix the entry |
 | `managed-settings` | a managed repository's issues/pull requests/wiki/discussions/projects/Actions differ from its `settings:` (default all off) | correct the setting (owner approval) or the `settings:` entry |
 | `managed-behind` | a managed fork's default branch or `rebase: auto` branch misses upstream commits older than 48 h, or a declared branch is missing in the fork; a mirror or `refs: all` fork has refs differing from upstream and no push for 48 h | read the sync run |
 | `branch-undeclared` | a fork branch (not the default branch) with own commits is neither declared in `branches:` nor the head of an open upstream PR from the fork (info for an unmanaged fork) | declare it or delete it |
@@ -448,6 +482,20 @@ and the log of the failed step. Explanations for humans:
   comes from its own output.
 - `git ls-remote` on mirror targets only compares the refs of the source; extra
   refs in the target are fine.
+- Sync tokens (tested 2026-11-16): an installation token scoped
+  (`repositories:`) to a repository that does not exist cannot be created
+  (422). Forking needs an installation token that is not scoped to
+  repositories (one scoped to another repository gets 403). So `sync.yml`
+  checks existence with an unscoped metadata-only token, creates a missing
+  fork with an unscoped Administration write token, and syncs with a token
+  scoped to the repository. `POST /user/repos` is refused for app tokens:
+  mirrors (no fork parent) must be created by hand.
+- `has_pull_requests` is settable with `PATCH repos/{owner}/{repo}`, like the
+  other `has_*` settings.
+- GitHub accepts pushes to `refs/backup/*` (outside heads and tags); the sync
+  keeps the old tip of a rebased branch there.
+- The sync matches the dispatch input `repo` case-insensitively against
+  `managed:` and then uses the spelling of the control file.
 
 ## 7. Verify `spali/.github` locally
 
