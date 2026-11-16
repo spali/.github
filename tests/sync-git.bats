@@ -77,7 +77,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   entry fork default "$AUTO"
   run --separate-stderr "$SCRIPT" plan
   [ "$status" -eq 1 ]
-  [[ $stderr == *"error: "*"main"* ]]
+  [ "${stderr_lines[-1]}" = "error: branch main: rebase onto main failed (conflict)" ]
   [ ! -e "$WORK/plan.tsv" ]
   [ "$(ref "$TG" refs/heads/main)" = "$O" ]
 }
@@ -294,4 +294,94 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   [ "$status" -eq 0 ]
   [ "$(plan_line refs/tags/backup/main)" = "$(printf '%s\t%s\tbackup' "$ZERO" "$OM")" ]
   [ "$(plan_line refs/tags/backup/feat)" = "$(printf '%s\t%s\tbackup' "$ZERO" "$OF")" ]
+}
+
+@test "missing onto fails without own commits" {
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/heads/feat "$B"
+  for refs in default all; do
+    fresh_work
+    entry fork "$refs" '[{"name": "feat", "onto": "dev", "rebase": "auto"}]'
+    run --separate-stderr "$SCRIPT" plan
+    [ "$status" -eq 1 ]
+    [ "$stderr" = "error: branch feat: onto dev missing upstream" ]
+    [ ! -e "$WORK/plan.tsv" ]
+  done
+}
+
+@test "target default branch is never deleted" {
+  git -C "$TG" symbolic-ref HEAD refs/heads/master
+  set_ref "$TG" refs/heads/master "$A"
+  set_ref "$TG" refs/heads/main "$B"
+  entry mirror all
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/master\tdefault branch')" ]
+}
+
+@test "target default follows the upstream default" {
+  git -C "$TG" symbolic-ref HEAD refs/heads/master
+  set_ref "$TG" refs/heads/master "$A"
+  entry fork default
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/master\t%s\t%s\tff' "$A" "$B")" ]
+  # diverged: skipped, upstream main is not created
+  fresh_work
+  set_ref "$TG" refs/heads/master "$(commit "$A" o own)"
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/master\tundeclared')" ]
+}
+
+@test "contribution branches are never planned in default mode" {
+  O=$(commit "$A" o own)
+  set_ref "$TG" refs/heads/main "$A"
+  set_ref "$TG" refs/heads/feat "$O"
+  printf '%s\n' main feat >"$WORK/contrib.txt"
+  entry fork default '[{"name": "feat", "onto": "main", "rebase": "auto"}]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/feat\tcontribution\nrefs/heads/main\tcontribution')" ]
+}
+
+@test "rebase needs a committer identity" {
+  set_ref "$TG" refs/heads/main "$B"
+  entry fork default
+  for v in GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL; do
+    fresh_work
+    run --separate-stderr env -u "$v" "$SCRIPT" plan
+    [ "$status" -eq 1 ]
+    [ "$stderr" = "error: $v is required" ]
+  done
+}
+
+@test "backup prefix must not be a branch or tag namespace" {
+  set_ref "$TG" refs/heads/main "$B"
+  entry fork default
+  for p in refs/heads/ refs/heads/backup/ refs/tags/ refs/backup refs/; do
+    fresh_work
+    BACKUP_PREFIX=$p run --separate-stderr "$SCRIPT" plan
+    [ "$status" -eq 1 ]
+    [ "$stderr" = "error: invalid BACKUP_PREFIX $p" ]
+  done
+  for p in refs/backup/ refs/tags/backup/; do
+    fresh_work
+    BACKUP_PREFIX=$p run "$SCRIPT" plan
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "declared branch with an empty field is skipped" {
+  O=$(commit "$A" o own)
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/heads/feat "$O"
+  entry fork default '[{"name": "feat", "onto": "", "rebase": "auto"}, {"name": "", "onto": "main", "rebase": "auto"}]'
+  SYNC_BRANCH=feat run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/\tinvalid ref name\nrefs/heads/feat\tinvalid ref name')" ]
 }
