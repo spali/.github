@@ -27,6 +27,15 @@
 #                     (same reason, the plan goes on); a target tag that
 #                     differs from upstream is skipped as "upstream moved tag
 #                     (...)". These skips write no record.
+#                     SYNC_ACCEPT follows such a stop with a backup of the
+#                     old tip: a default or followed branch is set to
+#                     upstream when it equals its record (else it stays,
+#                     "; accept refused: own commits on top, ..."); a declared
+#                     branch moves only its own commits (rebase --onto onto
+#                     <record>) when it contains its record (else it stays,
+#                     "; accept refused: record not in branch, ..."); a
+#                     moved tag is set to upstream. Without a stop it does
+#                     nothing.
 #   sync-git.sh push  pushes $WORK/plan.tsv to TARGET_URL in one atomic push
 #                     with a lease on the old sha of every ref, then checks the
 #                     target with ls-remote. On a mismatch it restores the old
@@ -37,11 +46,14 @@
 # env: plan: ENTRY (the object of managed_entry), TARGET_URL, UPSTREAM_URL,
 #      WORK, optional SYNC_BRANCH (a branch name or *: also rebase manual
 #      branches; a missing manual branch is always created from its onto),
+#      optional SYNC_ACCEPT (a branch name, tags/<name> or *: accept the
+#      upstream rewrite of that branch or the moved tag, * all of them),
 #      optional $WORK/contrib.txt (contribution branches, one per line),
 #      GIT_COMMITTER_NAME/EMAIL.
 #      push: TARGET_URL (without credentials), WORK.
-#      both: optional BACKUP_PREFIX (branch backups, default refs/backup/),
-#      TAG_BACKUP_PREFIX (tag backups, default refs/backup-tags/),
+#      both: optional BACKUP_PREFIX (branch backups <prefix><branch>,
+#      default refs/backup/), TAG_BACKUP_PREFIX (tag backups <prefix><tag>,
+#      default refs/backup-tags/),
 #      RECORD_PREFIX (records, default refs/sync/upstream/); each under
 #      refs/, not refs/heads/..., not refs/tags/ itself, and none inside
 #      another. Upstream refs under them are skipped as invalid, target refs
@@ -146,6 +158,25 @@ wants_rebase() {
   [[ $1 == auto || ${SYNC_BRANCH:-} == "$2" || ${SYNC_BRANCH:-} == '*' ]]
 }
 
+# accepts KEY (heads/x or tags/x) succeeds when SYNC_ACCEPT accepts a
+# rewrite of the branch or a move of the tag: *, the branch name or tags/x.
+accepts() {
+  local a=${SYNC_ACCEPT:-}
+  [[ -n $a ]] || return 1
+  [[ $a == '*' ]] && return 0
+  if [[ $1 == heads/* ]]; then
+    [[ $a == "${1#heads/}" ]]
+  else
+    [[ $a == "$1" ]]
+  fi
+}
+
+# backup_line REF OLD NEW plans the backup REF (now OLD) at NEW unless it is
+# there already.
+backup_line() {
+  [[ $2 == "$3" ]] || add "$1" "$2" "$3" backup
+}
+
 # record_line BRANCH NEW plans the record of BRANCH at NEW (zero: delete)
 # unless it is there already.
 record_line() {
@@ -174,31 +205,59 @@ rewrite_reason() {
     "${rec:0:7}" "${2:0:7}" "$gone" "$own"
 }
 
-# skip_rewrite BRANCH UP TG skips BRANCH with its rewrite_reason.
+# skip_rewrite BRANCH UP TG [SUFFIX] skips BRANCH with its rewrite_reason
+# (and SUFFIX).
 skip_rewrite() {
   local why
-  why=$(rewrite_reason "$@")
-  skip "refs/heads/$1" "$why"
+  why=$(rewrite_reason "$1" "$2" "$3")
+  skip "refs/heads/$1" "$why${4:-}"
+}
+
+# rewrite_branch BRANCH UP TG REASON handles a rewritten default or followed
+# branch: skipped unless accepted; accepted, it is set to UP (REASON ff or
+# mirror) with a backup of TG when TG is its record, else refused.
+rewrite_branch() {
+  local b=$1 up=$2 tg=$3
+  if ! accepts "heads/$b"; then
+    skip_rewrite "$b" "$up" "$tg"
+  elif [[ $tg != "${RECR[$b]}" ]]; then
+    skip_rewrite "$b" "$up" "$tg" "; accept refused: own commits on top, declare the branch or reset it by hand"
+  else
+    add "refs/heads/$b" "$tg" "$up" "$4"
+    backup_line "$BACKUP_PREFIX$b" "${BKR[$b]:-$ZERO}" "$tg"
+    record_line "$b" "$up"
+  fi
 }
 
 # rebase_branch BRANCH ONTO rebases the target branch onto the upstream
-# branch and plans it with a backup of the old tip and its record. A branch
-# whose record is in it but no longer in onto is skipped (upstream rewritten).
+# branch and plans it with a backup of the old tip and its record. When the
+# record is no longer in onto (upstream rewritten), a branch that contains
+# its record is skipped, or with SYNC_ACCEPT rebased with only the commits
+# after its record; a branch without its record is rebased as usual, but
+# refused with SYNC_ACCEPT.
 rebase_branch() {
-  local b=$1 onto=$2 old new bk
+  local b=$1 onto=$2 old new
+  local -a base=("refs/up/heads/$onto")
   [[ -n ${UPR[heads/$onto]:-} ]] || die "branch $b: onto $onto missing upstream"
   old=${TGR[heads/$b]:-$ZERO}
-  if [[ $old != "$ZERO" && -n ${RECR[$b]:-} ]] && is_ancestor "${RECR[$b]}" "$old" &&
-    rewritten "$b" "${UPR[heads/$onto]}"; then
-    skip_rewrite "$b" "${UPR[heads/$onto]}" "$old"
-    return 0
+  if [[ $old != "$ZERO" ]] && rewritten "$b" "${UPR[heads/$onto]}"; then
+    if is_ancestor "${RECR[$b]}" "$old"; then
+      if ! accepts "heads/$b"; then
+        skip_rewrite "$b" "${UPR[heads/$onto]}" "$old"
+        return 0
+      fi
+      base=(--onto "refs/up/heads/$onto" "${RECR[$b]}")
+    elif accepts "heads/$b"; then
+      skip_rewrite "$b" "${UPR[heads/$onto]}" "$old" "; accept refused: record not in branch, rebase by hand"
+      return 0
+    fi
   fi
   if [[ $old == "$ZERO" ]]; then
     new=${UPR[heads/$onto]}
     g update-ref "refs/heads/$b" "$new"
   else
     g switch -q --no-guess -C "$b" "refs/tg/heads/$b"
-    if ! g rebase -q --no-autosquash --empty=drop "refs/up/heads/$onto" >&2; then
+    if ! g rebase -q --no-autosquash --empty=drop "${base[@]}" >&2; then
       g rebase --abort >&2 || true
       die "branch $b: rebase onto $onto failed (conflict)"
     fi
@@ -207,8 +266,7 @@ rebase_branch() {
   fi
   if [[ $new != "$old" ]]; then
     add "refs/heads/$b" "$old" "$new" rebase
-    bk=${BKR[$b]:-$ZERO}
-    [[ $old == "$ZERO" || $bk == "$old" ]] || add "$BACKUP_PREFIX$b" "$bk" "$old" backup
+    [[ $old == "$ZERO" ]] || backup_line "$BACKUP_PREFIX$b" "${BKR[$b]:-$ZERO}" "$old"
   fi
   # also when the rebase changed nothing: the branch sits on onto now
   record_line "$b" "${UPR[heads/$onto]}"
@@ -323,6 +381,8 @@ plan() {
   [[ -d $WORK ]] || die "WORK $WORK is not a directory"
   [[ $UPSTREAM_URL != -* && $TARGET_URL != -* ]] || die "invalid URL"
   check_prefixes
+  [[ -z ${SYNC_ACCEPT:-} || $SYNC_ACCEPT == '*' ]] || valid_branch "$SYNC_ACCEPT" ||
+    die "invalid SYNC_ACCEPT"
   # shellcheck disable=SC2153 # ENTRY comes from the environment
   TAGS=$(jq -r '.tags != false' <<<"$ENTRY")
 
@@ -334,7 +394,7 @@ plan() {
   : >"$WORK/skipped.txt"
   git init -q "$REPO"
 
-  declare -gA UPR=() TGR=() BKR=() RECR=() DECL=() CONTRIB=() FOL=() SCOPE=()
+  declare -gA UPR=() TGR=() BKR=() TBKR=() RECR=() DECL=() CONTRIB=() FOL=() SCOPE=()
   EXTRA=
   FOLLOW=$(jq -c '.follow // []' <<<"$ENTRY")
   udef=$(default_branch "$UPSTREAM_URL" upstream)
@@ -344,7 +404,7 @@ plan() {
   [[ $TAGS != true ]] || tgspecs+=('+refs/tags/*:refs/tg/tags/*')
   g fetch -q --no-tags --no-write-fetch-head -- "$TARGET_URL" \
     "${tgspecs[@]}" "+${BACKUP_PREFIX}*:refs/tg/backup/*" \
-    "+${RECORD_PREFIX}*:refs/tg/record/*" ||
+    "+${TAG_BACKUP_PREFIX}*:refs/tg/backup-tags/*" "+${RECORD_PREFIX}*:refs/tg/record/*" ||
     die "cannot fetch target"
 
   load up UPR
@@ -352,6 +412,9 @@ plan() {
   while IFS=$'\t' read -r sha name; do
     BKR[${name#refs/tg/backup/}]=$sha
   done < <(g for-each-ref --format=$'%(objectname)\t%(refname)' refs/tg/backup/)
+  while IFS=$'\t' read -r sha name; do
+    TBKR[${name#refs/tg/backup-tags/}]=$sha
+  done < <(g for-each-ref --format=$'%(objectname)\t%(refname)' refs/tg/backup-tags/)
   while IFS=$'\t' read -r sha name; do
     RECR[${name#refs/tg/record/}]=$sha
   done < <(g for-each-ref --format=$'%(objectname)\t%(refname)' refs/tg/record/)
@@ -416,7 +479,7 @@ plan() {
       add "refs/heads/$tdef" "$tg" "$up" ff
       record_line "$tdef" "$up"
     elif [[ $tg != "$up" ]] && rewritten "$tdef" "$up"; then
-      skip_rewrite "$tdef" "$up" "$tg"
+      rewrite_branch "$tdef" "$up" "$tg" ff
     elif [[ $tg != "$up" ]]; then
       skip "refs/heads/$tdef" undeclared
     else
@@ -436,7 +499,7 @@ plan() {
       record_line "$name" "$up"
     elif [[ $tg != "$ZERO" ]] && ! is_ancestor "$tg" "$up"; then
       if rewritten "$name" "$up"; then
-        skip_rewrite "$name" "$up" "$tg"
+        rewrite_branch "$name" "$up" "$tg" mirror
       else
         skip "refs/heads/$name" undeclared
       fi
@@ -459,7 +522,8 @@ plan() {
     fi
   done
   # tags (only loaded when TAGS is true): new ones by name (an annotated tag
-  # keeps its tag object); a moved one is never followed; a gone upstream one
+  # keeps its tag object); a moved one only with SYNC_ACCEPT (with a backup
+  # of the old one); a gone upstream one
   # is deleted only when nothing is lost (its commit is in an upstream ref)
   mapfile -t keys < <(sorted_keys UPR | grep '^tags/' || true)
   for key in "${keys[@]}"; do
@@ -467,6 +531,9 @@ plan() {
     tg=${TGR[$key]:-$ZERO}
     if [[ $tg == "$ZERO" ]]; then
       add "refs/$key" "$tg" "${UPR[$key]}" mirror
+    elif accepts "$key"; then
+      add "refs/$key" "$tg" "${UPR[$key]}" mirror
+      backup_line "$TAG_BACKUP_PREFIX${key#tags/}" "${TBKR[${key#tags/}]:-$ZERO}" "$tg"
     else
       skip "refs/$key" "upstream moved tag (target ${tg:0:7}, upstream ${UPR[$key]:0:7})"
     fi
@@ -594,7 +661,7 @@ rollback() {
   for i in "${!P_REF[@]}"; do
     [[ -z ${bad[$i]:-}${foreign[$i]:-} ]] || failed+=("${P_REF[i]}")
   done
-  ((${#failed[@]} == 0)) || die "RESTORE FAILED for ${failed[*]}, backups at $BACKUP_PREFIX"
+  ((${#failed[@]} == 0)) || die "RESTORE FAILED for ${failed[*]}, backups at $BACKUP_PREFIX and $TAG_BACKUP_PREFIX"
   die "$what, restored ${#restore[@]} refs"
 }
 

@@ -671,6 +671,220 @@ rewrite_skip() {
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/main\tundeclared\nrefs/heads/rel\tundeclared')" ]
 }
 
+@test "force-pushed default branch stops, followed branch and tag sync" {
+  C=$(commit "$A" c x)
+  R=$(commit "$A" r rel)
+  set_ref "$UP" refs/heads/main "$C"
+  set_ref "$UP" refs/heads/rel "$R"
+  set_ref "$UP" refs/tags/v1 "$A"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" "$REC/main" "$B"
+  entry mirror '[]' '[".*"]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ -z "$(plan_line refs/heads/main)" ]
+  no_record main
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/rel\t%s\t%s\tmirror\n%s/rel\t%s\t%s\trecord\nrefs/tags/v1\t%s\t%s\tmirror' \
+    "$ZERO" "$R" "$REC" "$ZERO" "$R" "$ZERO" "$A")" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(rewrite_skip refs/heads/main "$B" "$C" 1 'no own commits')" ]
+}
+
+# rewrite_setup: upstream main rewritten from B to C (both on A), target
+# main at B with record B.
+rewrite_setup() {
+  C=$(commit "$A" c x)
+  set_ref "$UP" refs/heads/main "$C"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" "$REC/main" "$B"
+}
+
+@test "accepted default branch follows upstream with a backup" {
+  rewrite_setup
+  entry fork
+  SYNC_ACCEPT=main run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\tff\nrefs/backup/main\t%s\t%s\tbackup\n%s/main\t%s\t%s\trecord' \
+    "$B" "$C" "$ZERO" "$B" "$REC" "$B" "$C")" ]
+  [ ! -s "$WORK/skipped.txt" ]
+  run "$SCRIPT" push
+  [ "$status" -eq 0 ]
+  [ "$(ref "$TG" refs/heads/main)" = "$C" ]
+  [ "$(ref "$TG" refs/backup/main)" = "$B" ]
+  [ "$(ref "$TG" "$REC/main")" = "$C" ]
+  # a backup that already holds the old tip writes no line
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" "$REC/main" "$B"
+  fresh_work
+  SYNC_ACCEPT=main run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ -z "$(plan_line refs/backup/main)" ]
+  [ "$(plan_line refs/heads/main)" = "$(printf '%s\t%s\tff' "$B" "$C")" ]
+}
+
+@test "accept refused with own commits on a followed branch" {
+  R1=$(commit "$A" r one)
+  R2=$(commit "$A" r two)
+  O=$(commit "$R1" o own)
+  set_ref "$UP" refs/heads/rel "$R2"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/heads/rel "$O"
+  set_ref "$TG" "$REC/rel" "$R1"
+  entry mirror '[]' '["rel"]'
+  SYNC_ACCEPT=rel run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ -z "$(plan_line refs/heads/rel)" ]
+  [ -z "$(plan_line refs/backup/rel)" ]
+  no_record rel
+  [ "$(cat "$WORK/skipped.txt")" = "$(rewrite_skip refs/heads/rel "$R1" "$R2" 1 '1 own commits'); accept refused: own commits on top, declare the branch or reset it by hand" ]
+}
+
+@test "accepted declared branch moves exactly the own commits" {
+  O1=$(commit "$B" o1 one "own one")
+  O2=$(commit "$O1" o2 two "own two")
+  C=$(commit "$A" c x)
+  set_ref "$UP" refs/heads/main "$C"
+  set_ref "$TG" refs/heads/main "$O2"
+  set_ref "$TG" "$REC/main" "$B"
+  entry fork "$AUTO"
+  SYNC_ACCEPT=main run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/skipped.txt" ]
+  N=$(git -C "$WORK/repo" rev-parse refs/heads/main)
+  [ "$(git -C "$WORK/repo" rev-list --reverse --format=%s --no-commit-header "$C..$N" | tr '\n' ,)" = "own one,own two," ]
+  [ "$(git -C "$WORK/repo" rev-parse "$N~2")" = "$C" ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\trebase\nrefs/backup/main\t%s\t%s\tbackup\n%s/main\t%s\t%s\trecord' \
+    "$O2" "$N" "$ZERO" "$O2" "$REC" "$B" "$C")" ]
+  # a conflict fails as before
+  fresh_work
+  K=$(commit "$A" o1 other)
+  set_ref "$UP" refs/heads/main "$K"
+  SYNC_ACCEPT=main run --separate-stderr "$SCRIPT" plan
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"branch main: rebase onto main failed (conflict)"* ]]
+  [ ! -e "$WORK/plan.tsv" ]
+}
+
+@test "accept refused when the record is not in the branch" {
+  X=$(commit "$A" x old)
+  O=$(commit "$A" o own)
+  set_ref "$TG" refs/heads/main "$O"
+  set_ref "$TG" "$REC/main" "$X"
+  entry fork "$AUTO"
+  SYNC_ACCEPT=main run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(rewrite_skip refs/heads/main "$X" "$B" 1 '1 own commits'); accept refused: record not in branch, rebase by hand" ]
+}
+
+@test "accepted moved tag with backup" {
+  T1=$(atag v2 "$A")
+  T2=$(atag v2 "$B")
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/tags/v1 "$A"
+  set_ref "$UP" refs/tags/v1 "$B"
+  set_ref "$TG" refs/tags/v2 "$T1"
+  set_ref "$UP" refs/tags/v2 "$T2"
+  entry fork
+  SYNC_ACCEPT=tags/v1 run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(synced)" = "$(printf 'refs/tags/v1\t%s\t%s\tmirror\nrefs/backup-tags/v1\t%s\t%s\tbackup' "$A" "$B" "$ZERO" "$A")" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/tags/v2\tupstream moved tag (target %s, upstream %s)' "${T1:0:7}" "${T2:0:7}")" ]
+  run "$SCRIPT" push
+  [ "$status" -eq 0 ]
+  [ "$(ref "$TG" refs/tags/v1)" = "$B" ]
+  [ "$(ref "$TG" refs/backup-tags/v1)" = "$A" ]
+  # an annotated tag keeps its tag object in the backup
+  fresh_work
+  SYNC_ACCEPT=tags/v2 run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(synced)" = "$(printf 'refs/tags/v2\t%s\t%s\tmirror\nrefs/backup-tags/v2\t%s\t%s\tbackup' "$T1" "$T2" "$ZERO" "$T1")" ]
+  # a backup that already holds the old tag writes no line
+  fresh_work
+  set_ref "$TG" refs/backup-tags/v2 "$T1"
+  SYNC_ACCEPT=tags/v2 run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(synced)" = "$(printf 'refs/tags/v2\t%s\t%s\tmirror' "$T1" "$T2")" ]
+}
+
+@test "accept * accepts all stops of the repo" {
+  rewrite_setup
+  R1=$(commit "$A" r one)
+  R2=$(commit "$A" r two)
+  set_ref "$UP" refs/heads/rel "$R2"
+  set_ref "$TG" refs/heads/rel "$R1"
+  set_ref "$TG" "$REC/rel" "$R1"
+  set_ref "$TG" refs/tags/v1 "$A"
+  set_ref "$UP" refs/tags/v1 "$B"
+  entry mirror '[]' '[".*"]'
+  SYNC_ACCEPT='*' run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/skipped.txt" ]
+  [ "$(LC_ALL=C sort "$WORK/plan.tsv")" = "$(printf '%s\t%s\t%s\tbackup\n%s\t%s\t%s\tbackup\n%s\t%s\t%s\tbackup\n%s\t%s\t%s\tff\n%s\t%s\t%s\tmirror\n%s\t%s\t%s\trecord\n%s\t%s\t%s\trecord\n%s\t%s\t%s\tmirror' \
+    refs/backup-tags/v1 "$ZERO" "$A" refs/backup/main "$ZERO" "$B" refs/backup/rel "$ZERO" "$R1" \
+    refs/heads/main "$B" "$C" refs/heads/rel "$R1" "$R2" \
+    "$REC/main" "$B" "$C" "$REC/rel" "$R1" "$R2" refs/tags/v1 "$A" "$B")" ]
+}
+
+@test "accept of another branch changes nothing" {
+  rewrite_setup
+  set_ref "$TG" refs/tags/v1 "$A"
+  set_ref "$UP" refs/tags/v1 "$B"
+  entry fork
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  plan=$(cat "$WORK/plan.tsv") skipped=$(cat "$WORK/skipped.txt")
+  [ -n "$skipped" ]
+  for a in dev tags/v2 tags/main main/x; do
+    fresh_work
+    SYNC_ACCEPT=$a run "$SCRIPT" plan
+    [ "$status" -eq 0 ]
+    [ "$(cat "$WORK/plan.tsv")" = "$plan" ]
+    [ "$(cat "$WORK/skipped.txt")" = "$skipped" ]
+  done
+  # without a stop an accept has no effect
+  fresh_work
+  set_ref "$UP" refs/heads/main "$B"
+  set_ref "$TG" refs/tags/v1 "$B"
+  SYNC_ACCEPT='*' run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ ! -s "$WORK/skipped.txt" ]
+}
+
+@test "invalid accept is refused" {
+  set_ref "$TG" refs/heads/main "$B"
+  entry fork
+  for a in -x tags/ a..b '@{-1}' 'a b' '**'; do
+    fresh_work
+    SYNC_ACCEPT=$a run --separate-stderr "$SCRIPT" plan
+    [ "$status" -eq 1 ]
+    [ "$stderr" = "error: invalid SYNC_ACCEPT" ]
+    [ ! -e "$WORK/plan.tsv" ]
+  done
+}
+
+@test "push of an accepted tag keeps branch backups apart" {
+  R1=$(commit "$A" r one)
+  R2=$(commit "$A" r two)
+  set_ref "$UP" refs/heads/tags/v1 "$R2"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/heads/tags/v1 "$R1"
+  set_ref "$TG" "$REC/tags/v1" "$R1"
+  set_ref "$UP" refs/tags/v1 "$B"
+  set_ref "$TG" refs/tags/v1 "$A"
+  entry mirror '[]' '[".*"]'
+  SYNC_ACCEPT=tags/v1 run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/skipped.txt" ]
+  run "$SCRIPT" push
+  [ "$status" -eq 0 ]
+  [ "$(ref "$TG" refs/heads/tags/v1)" = "$R2" ]
+  [ "$(ref "$TG" refs/tags/v1)" = "$B" ]
+  [ "$(ref "$TG" refs/backup/tags/v1)" = "$R1" ]
+  [ "$(ref "$TG" refs/backup-tags/v1)" = "$A" ]
+  [ "$(ref "$TG" "$REC/tags/v1")" = "$R2" ]
+}
+
 # up_refs prints the upstream refs fetched into the work repository.
 up_refs() {
   git -C "$WORK/repo" for-each-ref --format='%(refname)' refs/up/
@@ -1082,7 +1296,7 @@ full_plan() {
   hook post-receive "git update-ref refs/heads/main $A; rm -f \"\$0\""
   run --separate-stderr "$SCRIPT" push
   [ "$status" -eq 1 ]
-  [ "${stderr_lines[-1]}" = "error: RESTORE FAILED for refs/heads/main, backups at refs/backup/" ]
+  [ "${stderr_lines[-1]}" = "error: RESTORE FAILED for refs/heads/main, backups at refs/backup/ and refs/backup-tags/" ]
   [ -z "$output" ]
   [ "$(ref "$TG" refs/heads/main)" = "$A" ]
   [ "$(ref "$TG" refs/backup/main)" = "$OM" ]
@@ -1095,7 +1309,7 @@ full_plan() {
   hook post-receive 'git update-ref -d refs/heads/dev; printf "#!/bin/sh\nexit 1\n" >hooks/pre-receive; chmod +x hooks/pre-receive; rm -f "$0"'
   run --separate-stderr "$SCRIPT" push
   [ "$status" -eq 1 ]
-  [ "${stderr_lines[-1]}" = "error: RESTORE FAILED for refs/heads/main refs/backup/main refs/sync/upstream/main refs/sync/upstream/dev, backups at refs/backup/" ]
+  [ "${stderr_lines[-1]}" = "error: RESTORE FAILED for refs/heads/main refs/backup/main refs/sync/upstream/main refs/sync/upstream/dev, backups at refs/backup/ and refs/backup-tags/" ]
   [ "$(ref "$TG" refs/heads/main)" = "$(plan_line refs/heads/main | cut -f2)" ]
   [ "$(ref "$TG" refs/backup/main)" = "$OM" ]
 }
@@ -1113,7 +1327,7 @@ full_plan() {
   hook post-receive "git update-ref refs/heads/main $U; rm -f \"\$0\""
   run --separate-stderr "$SCRIPT" push
   [ "$status" -eq 1 ]
-  [ "${stderr_lines[-1]}" = "error: RESTORE FAILED for refs/heads/main, backups at refs/backup/" ]
+  [ "${stderr_lines[-1]}" = "error: RESTORE FAILED for refs/heads/main, backups at refs/backup/ and refs/backup-tags/" ]
   [ "$(ref "$TG" refs/heads/main)" = "$U" ]
   [ "$(ref "$TG" refs/backup-tags/v1)" = "$A" ]
   run git -C "$TG" rev-parse --verify --quiet "$REC/main"
