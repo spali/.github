@@ -131,3 +131,42 @@ card() {
   run --separate-stderr "$SCRIPT" commit
   [ "$status" -eq 2 ]
 }
+
+# wf QUERY runs yq QUERY on the reusable workflow.
+wf() {
+  yq -r "$1" "$BATS_TEST_DIRNAME/../.github/workflows/profile-cards.yml"
+}
+
+@test "workflow checks the card list before rendering" {
+  run wf '.jobs.card.steps[].id // ""'
+  [ "$status" -eq 0 ]
+  [[ $output == *$'check\n'*render* ]]
+  [ "$(wf '.jobs.card.steps[] | select(.id == "check") | .env.PROFILE_CARDS')" = '${{ inputs.cards }}' ]
+  [ "$(wf '.jobs.card.strategy.matrix.include')" = '${{ fromJSON(inputs.cards) }}' ]
+}
+
+@test "workflow fails the card job on a data error" {
+  [ "$(wf '.jobs.card.steps[] | select(.id == "render") | .with.fail_on_error')" = true ]
+  [ "$(wf '.jobs.card.steps[] | select(.id == "render") | .with.token')" = '${{ secrets.token }}' ]
+  [[ $(wf '.jobs.card.steps[] | select(.id == "render") | .uses') == stats-organization/github-readme-stats-action@2c498845f71017821efaad14293ebc736156ef21 ]]
+}
+
+@test "workflow commits only after all cards succeeded" {
+  [ "$(wf '.jobs.commit.needs')" = card ]
+  [ "$(wf '.jobs.commit.if // ""')" = "" ]
+}
+
+@test "workflow scopes the app token to the profile repository" {
+  run wf '.jobs.commit.steps[] | select(.id == "app-token") | .with | keys | .[]'
+  [ "$output" = $'client-id\nprivate-key\nowner\nrepositories\npermission-contents\npermission-metadata' ]
+  [ "$(wf '.jobs.commit.steps[] | select(.id == "app-token") | .with.permission-contents')" = write ]
+  [ "$(wf '.jobs.commit.steps[] | select(.id == "app-token") | .with.permission-metadata')" = read ]
+  [ "$(wf '.jobs.commit.steps[] | select(.id == "app-token") | .with.repositories')" = '${{ steps.target.outputs.name }}' ]
+}
+
+@test "workflow keeps tokens out of checkouts and run lines" {
+  run wf '[.jobs[].steps[] | select(.uses // "" | test("^actions/checkout@")) | .with.persist-credentials] | unique | .[]'
+  [ "$output" = false ]
+  ! grep -E 'run:.*\$\{\{' "$BATS_TEST_DIRNAME/../.github/workflows/profile-cards.yml"
+  [ "$(wf '.permissions.contents')" = read ]
+}

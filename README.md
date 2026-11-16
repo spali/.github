@@ -54,6 +54,7 @@ flowchart LR
 | [`.github/workflows/release-publish.yml`](.github/workflows/release-publish.yml) | Reusable: checksums, attestation, publish |
 | [`.github/workflows/monitor.yml`](.github/workflows/monitor.yml), [`monitor-config.yml`](.github/workflows/monitor-config.yml) | Reusable: the [maintenance monitor](#maintenance-monitor) and the validation of its control file, called from a private control repository |
 | [`.github/workflows/sync.yml`](.github/workflows/sync.yml) | Reusable: the [fork and mirror sync](#fork-and-mirror-sync) of the managed repositories, called from the private control repository |
+| [`.github/workflows/profile-cards.yml`](.github/workflows/profile-cards.yml) | Reusable: the [profile cards](#profile-cards) of the profile repository, called from the private control repository |
 | [`scripts/`](scripts) | The logic of the reusable workflows (Bash), tested in [`tests/`](tests) |
 | [`docs/monitor-checks.md`](docs/monitor-checks.md) | What each check of the maintenance monitor means and how to fix a finding |
 | [`examples/caller/`](examples/caller) | Workflows to copy into a repository |
@@ -360,6 +361,10 @@ See [Maintenance monitor](#maintenance-monitor).
 `config` (default `repos.yml`), `repo` and `branch` (default empty), secret
 `app-key`. See [Fork and mirror sync](#fork-and-mirror-sync).
 
+**`profile-cards.yml`** (needs `contents: read`): inputs `app-client-id` and
+`cards` (required), `repository` and `branch` (default empty), secrets `token`
+and `app-key`. See [Profile cards](#profile-cards).
+
 The release workflow must keep the tag filters of the examples: `-next` and
 `-pr.*` tags must not start a release.
 
@@ -404,8 +409,8 @@ It checks five groups (archived repositories are never checked):
 | Lists | all repositories | GitHub Lists that contradict the archive state, forks or mirrors; repositories without the release flow; the last run of the control repository's sync failed |
 
 The pin check also covers the control repository's own pin of `monitor.yml`.
-A repository that only calls the monitor workflows is not a release-flow
-repository.
+A repository that only calls the maintenance workflows (monitor, sync,
+profile cards) is not a release-flow repository.
 
 **Levels.** `red` is something to fix, `info` is a hint, `skip` (shown as
 "not checked") means the check did not run in that repository because it does
@@ -805,6 +810,30 @@ repository has its own concurrency group. Rebase a `rebase: manual` branch:
 `gh workflow run sync.yml -f repo=spali/name -f branch=<branch>`. Accept an
 upstream rewrite (see "Upstream rewrites"):
 `gh workflow run sync.yml -f repo=spali/name -f accept=<branch|tags/name|*>`.
+
+## Profile cards
+
+The reusable workflow `profile-cards.yml` renders
+[GitHub readme stats](https://github.com/stats-organization/github-readme-stats-action)
+cards and commits them to the profile repository (`<owner>/<owner>`), so the
+profile README embeds them as files (`./profile/stats.svg`) instead of
+loading them from a public instance on every view. Copy
+[`examples/caller/profile-cards.yml`](examples/caller/profile-cards.yml) into
+the private control repository.
+
+- **Cards:** input `cards`, a JSON array of `{card, options, path}`: `card`
+  is `stats`, `top-langs`, `pin`, `wakatime` or `gist`; `options` the query
+  string of the card; `path` a unique relative `.svg` path. One job
+  **Card · path** per card renders it (`fail_on_error`).
+- **Read token:** secret `token`, a read-only personal access token of the
+  owner: a GitHub App cannot see the owner's private contributions.
+- **Write:** the job **Commit** runs only when all cards succeeded. It uses
+  the write app of the sync (input `app-client-id`, secret `app-key`) with a
+  token scoped to the target repository and contents write, writes only the
+  card paths, commits only a change (`chore: update profile cards`, committer
+  `<app>[bot]`) and never force-pushes.
+- **Cost:** one job per card plus one; each job counts as at least one minute
+  in a private repository.
 
 ## Troubleshooting
 

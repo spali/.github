@@ -1,0 +1,31 @@
+# .github/workflows/profile-cards.yml of the private control repository.
+# Replace SHA with the commit of the spali/.github release you use.
+name: Profile cards
+
+on:
+  schedule:
+    - cron: "37 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: profile-cards
+
+permissions:
+  contents: read
+
+jobs:
+  profile-cards:
+    name: profile-cards
+    uses: spali/.github/.github/workflows/profile-cards.yml@SHA # vX.Y.Z
+    with:
+      app-client-id: ${{ vars.SYNC_APP_CLIENT_ID }}
+      cards: >-
+        [
+          {"card": "stats", "path": "profile/stats.svg",
+           "options": "username=octocat&theme_light=light_github&theme_dark=dark_github&hide_title=true&show_icons=true"},
+          {"card": "top-langs", "path": "profile/top-langs.svg",
+           "options": "username=octocat&theme_light=light_github&theme_dark=dark_github&hide_title=true&layout=compact"}
+        ]
+    secrets:
+      token: ${{ secrets.ACCOUNT_READ_TOKEN }}
+      app-key: ${{ secrets.SYNC_APP_KEY }}
