@@ -115,7 +115,7 @@ rebase_branch() {
     g switch -q --no-guess -C "$b" "refs/tg/heads/$b"
     if ! g rebase -q --no-autosquash --empty=drop "refs/up/heads/$onto" >&2; then
       g rebase --abort >&2 || true
-      die "branch $b: rebase onto $onto has conflicts"
+      die "branch $b: rebase onto $onto failed (conflict)"
     fi
     new=$(g rev-parse --verify "refs/heads/$b")
     g switch -q --detach
@@ -143,10 +143,12 @@ sorted_keys() {
 plan() {
   local mode kind name onto how key up tg tdef udef n u sha
   local -a keys
-  need_env ENTRY TARGET_URL UPSTREAM_URL WORK
+  need_env ENTRY TARGET_URL UPSTREAM_URL WORK GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
   [[ -d $WORK ]] || die "WORK $WORK is not a directory"
   [[ $UPSTREAM_URL != -* && $TARGET_URL != -* ]] || die "invalid URL"
-  if [[ $BACKUP_PREFIX != refs/?*/ ]] || ! git check-ref-format "${BACKUP_PREFIX}x"; then
+  # backups must not land in a namespace that is synced (refs/heads/, refs/tags/)
+  if [[ $BACKUP_PREFIX != refs/?*/ || $BACKUP_PREFIX == refs/heads/* ||
+    $BACKUP_PREFIX == refs/tags/ ]] || ! git check-ref-format "${BACKUP_PREFIX}x"; then
     die "invalid BACKUP_PREFIX $BACKUP_PREFIX"
   fi
   # shellcheck disable=SC2153 # ENTRY comes from the environment
@@ -189,8 +191,9 @@ plan() {
     die "upstream has $u refs, target $n: refusing (empty or broken source)"
   fi
 
-  # declared branches
-  while IFS=$'\t' read -r name onto how; do
+  # declared branches; \x1f is no IFS whitespace, so empty fields stay empty,
+  # control characters become ? (an invalid ref name)
+  while IFS=$'\x1f' read -r name onto how; do
     if ! valid_branch "$name"; then
       skip "refs/heads/$name" "invalid ref name"
       continue
@@ -203,7 +206,8 @@ plan() {
     elif wants_rebase "$how" "$name"; then
       rebase_branch "$name" "$onto"
     fi
-  done < <(jq -r '.branches[] | [.name, .onto, .rebase] | @tsv' <<<"$ENTRY")
+  done < <(jq -r '.branches[] | [.name, .onto, .rebase]
+    | map((. // "") | tostring | explode | map(if . < 32 or . == 127 then 63 else . end) | implode) | join("\u001f")' <<<"$ENTRY")
 
   if [[ $mode == default ]]; then
     udef=$(default_branch "$UPSTREAM_URL" upstream)
@@ -243,12 +247,17 @@ plan() {
       fi
       add "refs/$key" "$tg" "$up" mirror
     done
+    tdef=$(default_branch "$TARGET_URL" target)
     mapfile -t keys < <(sorted_keys TGR)
     for key in "${keys[@]}"; do
       [[ -z ${UPR[$key]:-} ]] || continue
       name=${key#*/}
       if [[ $key == heads/* ]]; then
         [[ -z ${DECL[$name]:-} ]] || continue
+        if [[ $name == "$tdef" ]]; then
+          skip "refs/$key" "default branch"
+          continue
+        fi
         if [[ -n ${CONTRIB[$name]:-} ]]; then
           skip "refs/$key" contribution
           continue
