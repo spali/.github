@@ -5,9 +5,14 @@
 #
 # Writes the report into the open issue labelled maintenance-monitor of
 # $MONITOR_ISSUE_REPO (the lowest number if there are several), or creates it.
-# Creates the label if it is missing. This is the only thing the monitor ever
-# writes. The body is the report as it is (its summary line carries the time
-# and the run link). Env: MONITOR_ISSUE_REPO (owner/name), ISSUE_TOKEN (used
+# Creates the label if it is missing. The report is split at its line MARK:
+# the part above is the issue body (plus a line pointing to the comment), the
+# part from MARK on is the monitor comment, the oldest comment of the issue
+# that starts with MARK (updated in place, created if there is none; other
+# comments are left alone). Without MARK the whole report is the body and no
+# comment is touched. Issue, label and that comment are the only things the
+# monitor ever writes. The report needs no footer (its summary line carries
+# the time and the run link). Env: MONITOR_ISSUE_REPO (owner/name), ISSUE_TOKEN (used
 # as GH_TOKEN for the gh calls of this script only).
 # Failure: one "error: ..." line on stderr, exit 1.
 set -euo pipefail
@@ -16,8 +21,10 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 
 LABEL=maintenance-monitor
-LIMIT=65536 # GitHub's limit for an issue body; counted in bytes to be safe
+LIMIT=65536 # GitHub's limit for an issue or comment body; counted in bytes to be safe
 NOTE='… truncated, see the run summary.'
+MARK='<!-- maintenance-monitor:details -->'
+POINTER='Details (red, info, clean, not checked) are in the monitor comment below.'
 
 REPORT=${1:-}
 TITLE=${2:-}
@@ -49,21 +56,33 @@ ensure_label() {
     -f name="$LABEL" -f color=0e8a16 -f description="Overview of the maintenance monitor"
 }
 
-# build_body writes the issue body to $WORK/body.md: the report; a report
-# that does not fit is cut at a line boundary, every <details> block left open
-# by the cut is closed (after an empty line, which also ends a table), and
-# NOTE follows.
+# split_report writes the issue text to $WORK/text.md and, if the report has
+# the line MARK, the details from that line on to $WORK/details.md.
+split_report() {
+  local n
+  n=$(grep -nxF -m1 -- "$MARK" "$REPORT" | cut -d: -f1 || true)
+  if [[ -z $n ]]; then
+    cp "$REPORT" "$WORK/text.md"
+    return 0
+  fi
+  { head -n "$((n - 1))" "$REPORT"; printf '%s\n' "$POINTER"; } >"$WORK/text.md"
+  tail -n "+$n" "$REPORT" >"$WORK/details.md"
+}
+
+# build_body SRC DST writes SRC to DST; a SRC that does not fit is cut at a
+# line boundary, every <details> block left open by the cut is closed (after
+# an empty line, which also ends a table), and NOTE follows.
 build_body() {
-  local size budget open closing
-  size=$(LC_ALL=C wc -c <"$REPORT")
+  local src=$1 dst=$2 size budget open closing
+  size=$(LC_ALL=C wc -c <"$src")
   if ((size <= LIMIT)); then
-    cat "$REPORT" >"$WORK/body.md"
+    cat "$src" >"$dst"
     return 0
   fi
   printf '\n%s\n' "$NOTE" >"$WORK/tail.md"
   budget=$((LIMIT - $(LC_ALL=C wc -c <"$WORK/tail.md")))
   while :; do
-    head -c "$budget" "$REPORT" >"$WORK/cut.md"
+    head -c "$budget" "$src" >"$WORK/cut.md"
     # the last line of the cut is partial unless the cut ends with a newline
     if [[ -n $(tail -c1 "$WORK/cut.md") ]]; then
       head -n -1 "$WORK/cut.md" >"$WORK/cut2.md"
@@ -77,7 +96,7 @@ build_body() {
     ((size > LIMIT)) || break
     budget=$((budget - (size - LIMIT)))
   done
-  cat "$WORK/cut.md" "$WORK/close.md" "$WORK/tail.md" >"$WORK/body.md"
+  cat "$WORK/cut.md" "$WORK/close.md" "$WORK/tail.md" >"$dst"
 }
 
 # find_issue prints the lowest number of the open issues with the label
@@ -91,11 +110,39 @@ find_issue() {
     die "listing issues failed: cannot parse API response"
 }
 
+# find_comment NUMBER prints the id of the oldest comment of the issue whose
+# first line is MARK, or nothing.
+find_comment() {
+  gh api "repos/$REPO/issues/$1/comments?per_page=100" --paginate \
+    >"$WORK/comments.json" 2>"$WORK/err" ||
+    die "listing comments of issue #$1 failed: $(err_line "$WORK/err")"
+  jq -rs --arg mark "$MARK" 'add // [] | map(select((.body // "") | split("\n")[0] | rtrimstr("\r") == $mark))
+    | sort_by(.id) | .[0].id // empty' "$WORK/comments.json" 2>/dev/null ||
+    die "listing comments of issue #$1 failed: cannot parse API response"
+}
+
+# write_comment NUMBER NEW: the monitor comment of the issue gets
+# $WORK/details.md (NEW=1: the issue was just created, it has no comments).
+write_comment() {
+  local number=$1 id=
+  build_body "$WORK/details.md" "$WORK/comment.md"
+  jq -n --rawfile body "$WORK/comment.md" '{body: $body}' >"$WORK/request.json"
+  [[ $2 == 1 ]] || id=$(find_comment "$number")
+  if [[ -n $id ]]; then
+    gh_write "updating the monitor comment of issue #$number" -X PATCH \
+      "repos/$REPO/issues/comments/$id" --input "$WORK/request.json"
+  else
+    gh_write "creating the monitor comment of issue #$number" -X POST \
+      "repos/$REPO/issues/$number/comments" --input "$WORK/request.json"
+  fi
+}
+
 main() {
-  local number
+  local number new=0
   ensure_label
   number=$(find_issue)
-  build_body
+  split_report
+  build_body "$WORK/text.md" "$WORK/body.md"
   if [[ -n $number ]]; then
     jq -n --rawfile body "$WORK/body.md" --arg title "$TITLE" \
       '{title: $title, body: $body}' >"$WORK/request.json"
@@ -103,8 +150,16 @@ main() {
   else
     jq -n --rawfile body "$WORK/body.md" --arg title "$TITLE" --arg label "$LABEL" \
       '{title: $title, body: $body, labels: [$label]}' >"$WORK/request.json"
-    gh_write "creating the issue" -X POST "repos/$REPO/issues" --input "$WORK/request.json"
+    gh api -X POST "repos/$REPO/issues" --input "$WORK/request.json" >"$WORK/created.json" 2>"$WORK/err" ||
+      die "creating the issue failed: $(err_line "$WORK/err")"
+    new=1
   fi
+  [[ -e $WORK/details.md ]] || return 0
+  if ((new)); then
+    number=$(jq -er '.number | numbers' "$WORK/created.json" 2>/dev/null) ||
+      die "creating the issue failed: cannot parse API response"
+  fi
+  write_comment "$number" "$new"
 }
 
 main

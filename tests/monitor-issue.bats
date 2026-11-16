@@ -249,3 +249,163 @@ long_report() {
   [ "$stderr" = "error: MONITOR_ISSUE_REPO is required" ]
   [ ! -s "$GH_LOG" ]
 }
+
+MARK='<!-- maintenance-monitor:details -->'
+DETAILS_LINE='Details (red, info, clean, not checked) are in the monitor comment below.'
+
+# split_report writes a report with the details marker: text above, details
+# from the marker on.
+split_report() {
+  printf '## Maintenance monitor\n\n1 red\n\n<a name="overview"></a>\nmatrix [x](#user-content-red)\n\n%s\n<a name="red"></a>\n<br>\n\n## 🔴 Red\n\nrow\n' "$MARK" >"$REPORT"
+}
+
+# comments JSON answers the comment listing of issue N.
+comments() { gh_respond "*repos/spali/ctl/issues/$1/comments?per_page=100 --paginate" - <<<"$2"; }
+
+@test "a new issue gets the text, then one monitor comment with the details" {
+  split_report
+  issues '[]'
+  gh_respond '*-X POST repos/spali/ctl/issues --input *' - <<<'{"number":12,"title":"t"}'
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  run gh_calls
+  [[ ${lines[2]} == "api -X POST repos/spali/ctl/issues --input "* ]]
+  [[ ${lines[3]} == "api -X POST repos/spali/ctl/issues/12/comments --input "* ]]
+  [ "${#lines[@]}" -eq 4 ]
+  sent 3 | jq -j .body >"$BATS_TEST_TMPDIR/body.md"
+  [ "$(<"$BATS_TEST_TMPDIR/body.md")" = "$(sed -n '1,7p' "$REPORT")"$'\n\n'"$DETAILS_LINE" ]
+  [ "$(sent 4 | jq -c keys)" = '["body"]' ]
+  sent 4 | jq -j .body >"$BATS_TEST_TMPDIR/comment.md"
+  sed -n '8,$p' "$REPORT" >"$BATS_TEST_TMPDIR/details.md"
+  cmp "$BATS_TEST_TMPDIR/comment.md" "$BATS_TEST_TMPDIR/details.md"
+  [ "$(head -n1 "$BATS_TEST_TMPDIR/comment.md")" = "$MARK" ]
+}
+
+@test "an open issue without a monitor comment gets one, other comments stay" {
+  split_report
+  issues '[{"number":7}]'
+  comments 7 '[{"id":50,"body":"a human comment"},{"id":51,"body":"mentions <!-- maintenance-monitor:details --> later"}]'
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  run gh_calls
+  [[ ${lines[2]} == "api -X PATCH repos/spali/ctl/issues/7 --input "* ]]
+  [ "${lines[3]}" = "api repos/spali/ctl/issues/7/comments?per_page=100 --paginate" ]
+  [[ ${lines[4]} == "api -X POST repos/spali/ctl/issues/7/comments --input "* ]]
+  [ "${#lines[@]}" -eq 5 ]
+  [[ "$(sent 3 | jq -r .body)" == *"$DETAILS_LINE" ]]
+  [[ "$(sent 3 | jq -r .body)" != *"🔴 Red"* ]]
+  [[ "$(sent 5 | jq -r .body)" == "$MARK"*"🔴 Red"* ]]
+}
+
+@test "the oldest monitor comment is updated in place, the others stay" {
+  split_report
+  issues '[{"number":7}]'
+  comments 7 "$(jq -cn --arg m "$MARK" '[{id: 90, body: "human"}, {id: 82, body: ($m + "\nnewer")},
+    {id: 81, body: ($m + "\r\nold")}, {id: 95, body: ($m + "\nnewest")}]')"
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  run gh_calls
+  [[ ${lines[4]} == "api -X PATCH repos/spali/ctl/issues/comments/81 --input "* ]]
+  [ "${#lines[@]}" -eq 5 ]
+  [ "$(sent 5 | jq -c keys)" = '["body"]' ]
+  [[ "$(sent 5 | jq -r .body)" == "$MARK"*"🔴 Red"* ]]
+}
+
+@test "reads every page of the comments" {
+  split_report
+  issues '[{"number":7}]'
+  { echo '[{"id":10,"body":"human"}]'; jq -cn --arg m "$MARK" '[{id: 11, body: ($m + "\nx")}]'; } |
+    gh_respond '*issues/7/comments?per_page=100 --paginate' -
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  [[ "$(gh_calls)" == *"-X PATCH repos/spali/ctl/issues/comments/11 "* ]]
+  run ! grep -q 'POST repos/spali/ctl/issues/7/comments' "$GH_LOG"
+}
+
+@test "a report without the marker touches no comment" {
+  issues '[{"number":7}]'
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  run ! grep -q comments "$GH_LOG"
+  sent 3 | jq -j .body >"$BATS_TEST_TMPDIR/body.md"
+  cmp "$BATS_TEST_TMPDIR/body.md" "$REPORT"
+}
+
+@test "text and comment are each cut to GitHub's limit" {
+  { echo '## Maintenance monitor'; echo
+    for i in $(seq 1 1000); do printf 'text %06d %s\n' "$i" "$(head -c 62 /dev/zero | tr '\0' x)"; done
+    echo "$MARK"
+    for i in $(seq 1 1000); do printf 'det %06d %s\n' "$i" "$(head -c 62 /dev/zero | tr '\0' x)"; done; } >"$REPORT"
+  issues '[{"number":7}]'
+  comments 7 '[]'
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  sent 3 | jq -j .body >"$BATS_TEST_TMPDIR/body.md"
+  sent 5 | jq -j .body >"$BATS_TEST_TMPDIR/comment.md"
+  for f in body comment; do
+    [ "$(stat -c %s "$BATS_TEST_TMPDIR/$f.md")" -le 65536 ]
+    [ "$(stat -c %s "$BATS_TEST_TMPDIR/$f.md")" -gt 65000 ]
+    [[ $(<"$BATS_TEST_TMPDIR/$f.md") == *$'\n… truncated, see the run summary.' ]]
+  done
+  run ! grep -q '^det ' "$BATS_TEST_TMPDIR/body.md"
+  [ "$(head -n1 "$BATS_TEST_TMPDIR/comment.md")" = "$MARK" ]
+  run ! grep -q '^text ' "$BATS_TEST_TMPDIR/comment.md"
+}
+
+@test "an unparsable answer to creating the issue fails before the comment" {
+  split_report
+  issues '[]'
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: creating the issue failed: cannot parse API response" ]
+  run ! grep -q comments "$GH_LOG"
+}
+
+@test "a failing comment listing fails after the issue update" {
+  split_report
+  issues '[{"number":7}]'
+  gh_fail '*issues/7/comments?*' 'gh: Bad Gateway (HTTP 502)'
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: listing comments of issue #7 failed: gh: Bad Gateway (HTTP 502)" ]
+}
+
+@test "an unparsable comment listing fails" {
+  split_report
+  issues '[{"number":7}]'
+  comments 7 'not json'
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: listing comments of issue #7 failed: cannot parse API response" ]
+}
+
+@test "a failing comment update or creation fails the run" {
+  split_report
+  issues '[{"number":7}]'
+  comments 7 "$(jq -cn --arg m "$MARK" '[{id: 81, body: $m}]')"
+  gh_fail '*-X PATCH repos/spali/ctl/issues/comments/*' 'gh: Forbidden (HTTP 403)'
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: updating the monitor comment of issue #7 failed: gh: Forbidden (HTTP 403)" ]
+
+  stub_gh
+  issues '[{"number":7}]'
+  comments 7 '[]'
+  gh_fail '*-X POST repos/spali/ctl/issues/7/comments*' 'gh: Forbidden (HTTP 403)'
+  run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: creating the monitor comment of issue #7 failed: gh: Forbidden (HTTP 403)" ]
+}
+
+@test "the comment calls use ISSUE_TOKEN too" {
+  split_report
+  issues '[{"number":7}]'
+  comments 7 '[]'
+  run "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$GH_TOKENS")" -eq 5 ]
+  [ "$(sort -u "$GH_TOKENS")" = issue-token ]
+}

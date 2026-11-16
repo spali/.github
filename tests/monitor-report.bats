@@ -14,9 +14,10 @@ setup() {
 }
 
 # section NAME prints the part of $output from the section heading NAME up
-# to the anchor of the next section (or the next heading).
+# to the anchor (or the details marker) of the next section (or the next
+# heading).
 section() {
-  awk -v h="$1" '/^<a name="[a-z-]+"><\/a>$/ { on = 0 } /^## / { on = index(substr($0, 4), h) == 1 } on' <<<"$output"
+  awk -v h="$1" '/^(<a name="[a-z-]+"><\/a>|<!-- maintenance-monitor:details -->)$/ { on = 0 } /^## / { on = index(substr($0, 4), h) == 1 } on' <<<"$output"
 }
 
 # anchored NAME TITLE: the section anchor NAME stands right above the heading
@@ -291,6 +292,17 @@ J
   # every section anchor stands on a line of its own, never in a heading
   [ "$(grep -c '^<a name="[a-z-]*"></a>$' <<<"$output")" -eq 6 ]
   run ! grep -q '^## .*<a name' <<<"$output"
+}
+
+@test "the details marker stands once, right above the red anchor" {
+  export INVENTORY="$FIX/inventory.json"
+  run "$REPORT"
+  [ "$(grep -c '^<!-- maintenance-monitor:details -->$' <<<"$output")" -eq 1 ]
+  [[ $output == *$'\n\n<!-- maintenance-monitor:details -->\n<a name="red"></a>\n<br>\n\n## 🔴 Red\n'* ]]
+  # without an inventory too
+  unset INVENTORY
+  run "$REPORT"
+  [[ $output == *$'\n<!-- maintenance-monitor:details -->\n<a name="red"></a>\n'* ]]
 }
 
 @test "each check links where to fix it" {
