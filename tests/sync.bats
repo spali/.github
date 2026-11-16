@@ -3,6 +3,8 @@
 bats_require_minimum_version 1.5.0
 
 setup() {
+  # CI sets GITHUB_ACTIONS=true; tests that need it set it themselves.
+  unset GITHUB_ACTIONS
   REAL="$BATS_TEST_DIRNAME/../scripts"
   # A scripts dir with the real libs and config check and stubbed sync steps.
   export MONITOR_SCRIPTS_DIR="$BATS_TEST_TMPDIR/scripts"
