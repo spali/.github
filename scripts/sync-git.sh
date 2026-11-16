@@ -29,7 +29,8 @@
 #                     (...)". These skips write no record.
 #                     SYNC_ACCEPT follows such a stop with a backup of the
 #                     old tip: a default or followed branch is set to
-#                     upstream when it equals its record (else it stays,
+#                     upstream when it has no own commits (it is its
+#                     record or an ancestor of it; else it stays,
 #                     "; accept refused: own commits on top, ..."); a declared
 #                     branch moves only its own commits (rebase --onto onto
 #                     <record>) when it contains its record (else it stays,
@@ -215,12 +216,13 @@ skip_rewrite() {
 
 # rewrite_branch BRANCH UP TG REASON handles a rewritten default or followed
 # branch: skipped unless accepted; accepted, it is set to UP (REASON ff or
-# mirror) with a backup of TG when TG is its record, else refused.
+# mirror) with a backup of TG when TG has no own commits (TG is its record
+# or an ancestor of it), else refused.
 rewrite_branch() {
   local b=$1 up=$2 tg=$3
   if ! accepts "heads/$b"; then
     skip_rewrite "$b" "$up" "$tg"
-  elif [[ $tg != "${RECR[$b]}" ]]; then
+  elif ! is_ancestor "$tg" "${RECR[$b]}"; then
     skip_rewrite "$b" "$up" "$tg" "; accept refused: own commits on top, declare the branch or reset it by hand"
   else
     add "refs/heads/$b" "$tg" "$up" "$4"

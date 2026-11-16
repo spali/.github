@@ -721,6 +721,26 @@ rewrite_setup() {
   [ "$(plan_line refs/heads/main)" = "$(printf '%s\t%s\tff' "$B" "$C")" ]
 }
 
+@test "accepted branch behind its record follows upstream" {
+  B2=$(commit "$B" f b2)
+  C=$(commit "$A" c x)
+  R1=$(commit "$A" r one)
+  R2=$(commit "$R1" r two)
+  R3=$(commit "$A" r three)
+  set_ref "$UP" refs/heads/main "$C"
+  set_ref "$UP" refs/heads/rel "$R3"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" "$REC/main" "$B2"
+  set_ref "$TG" refs/heads/rel "$R1"
+  set_ref "$TG" "$REC/rel" "$R2"
+  entry mirror '[]' '["rel"]'
+  SYNC_ACCEPT='*' run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/skipped.txt" ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\tff\nrefs/backup/main\t%s\t%s\tbackup\n%s/main\t%s\t%s\trecord\nrefs/heads/rel\t%s\t%s\tmirror\nrefs/backup/rel\t%s\t%s\tbackup\n%s/rel\t%s\t%s\trecord' \
+    "$B" "$C" "$ZERO" "$B" "$REC" "$B2" "$C" "$R1" "$R3" "$ZERO" "$R1" "$REC" "$R2" "$R3")" ]
+}
+
 @test "accept refused with own commits on a followed branch" {
   R1=$(commit "$A" r one)
   R2=$(commit "$A" r two)
