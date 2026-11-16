@@ -24,6 +24,8 @@ OWN='*repos/up/f/compare/dev...spali:f:main'
 PRS='*repos/up/f/pulls?state=open&per_page=100 --paginate'
 FB='*repos/spali/f/branches?per_page=100 --paginate'
 PB='*repos/up/f/branches?per_page=100 --paginate'
+SAME='*repos/up/f/compare/main...spali:f:main'
+CLOSED='*repos/up/f/pulls?state=closed&per_page=100 --paginate'
 
 respond_jq() { jq -nc "$2" | gh_respond "$1" -; }
 
@@ -35,6 +37,7 @@ run_script() {
   respond_jq "$PRS" '[]'
   respond_jq "$FB" '[{name: "main"}]'
   respond_jq "$PB" '[{name: "dev"}, {name: "main"}]'
+  respond_jq "$SAME" '{ahead_by: 0}'
   run --separate-stderr "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -194,4 +197,90 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
   run_script
   [ ! -s "$GH_LOG" ]
   [ ! -s "$FINDINGS" ]
+}
+
+@test "own commits on an unmanaged fork are info" {
+  respond_jq "$FB" '[{name: "main"}, {name: "feat"}, {name: "dev"}]'
+  respond_jq "$PB" '[{name: "dev"}, {name: "main"}]'
+  respond_jq '*repos/up/f/compare/dev...spali:f:feat' '{ahead_by: 3}'
+  respond_jq '*repos/up/f/compare/dev...spali:f:dev' '{ahead_by: 0}'
+  run_script
+  [ "$(count branch-undeclared)" -eq 1 ]
+  [ "$(level branch-undeclared)" = info ]
+  [ "$(message branch-undeclared)" = "feat: 3 own commits, not declared in repos.yml" ]
+}
+
+@test "the default branch of an unmanaged fork is checked too" {
+  respond_jq "$SAME" '{ahead_by: 2}'
+  run_script
+  [ "$(message branch-undeclared)" = "main: 2 own commits, not declared in repos.yml" ]
+}
+
+@test "a branch that is an open PR head is not undeclared" {
+  respond_jq "$FB" '[{name: "main"}, {name: "feat"}]'
+  respond_jq '*repos/up/f/compare/dev...spali:f:feat' '{ahead_by: 3}'
+  respond_jq "$PRS" '[{number: 1, created_at: "2026-11-10T00:00:00Z", html_url: "u", head: {ref: "feat", repo: {full_name: "spali/f"}}}]'
+  run_script
+  [ "$(count branch-undeclared)" -eq 0 ]
+}
+
+@test "the open pulls are fetched once per fork" {
+  respond_jq "$OWN" '{ahead_by: 0}'
+  run_script
+  [ "$(grep -c 'pulls?state=open' "$GH_LOG")" -eq 1 ]
+}
+
+pr_aged() {
+  respond_jq "$PRS" "[{number: 12, created_at: \"$1\", html_url: \"https://github.com/up/f/pull/12\", head: {ref: \"feat\", repo: {full_name: \"spali/f\"}}}]"
+}
+
+@test "PR open 91 days is contribution-stale" {
+  pr_aged "$(date -u -d '2026-11-14T12:00:00Z - 91 days' +%FT%TZ)"
+  run_script
+  [ "$(count contribution-stale)" -eq 1 ]
+  [ "$(level contribution-stale)" = info ]
+  [ "$(message contribution-stale)" = "PR #12 open for 91 days: https://github.com/up/f/pull/12" ]
+}
+
+@test "PR open 89 days is not" {
+  pr_aged "$(date -u -d '2026-11-14T12:00:00Z - 89 days' +%FT%TZ)"
+  run_script
+  [ "$(count contribution-stale)" -eq 0 ]
+}
+
+@test "PR of another fork is not contribution-stale" {
+  respond_jq "$PRS" '[{number: 3, created_at: "2020-01-01T00:00:00Z", html_url: "u", head: {ref: "x", repo: {full_name: "o/f"}}}]'
+  run_script
+  [ "$(count contribution-stale)" -eq 0 ]
+}
+
+@test "merged PR branch does not block delete candidate" {
+  respond_jq "$OWN" '{ahead_by: 0}'
+  respond_jq "$FB" '[{name: "main"}, {name: "feature"}]'
+  respond_jq "$CLOSED" '[{head: {ref: "feature", repo: {full_name: "spali/f"}}}, {head: {ref: "other", repo: null}}]'
+  run_script
+  [ "$(count fork-delete-candidate)" -eq 1 ]
+}
+
+@test "closed PR of another branch does not unblock delete candidate" {
+  respond_jq "$OWN" '{ahead_by: 0}'
+  respond_jq "$FB" '[{name: "main"}, {name: "feature"}]'
+  respond_jq "$CLOSED" '[{head: {ref: "feature", repo: {full_name: "o/f"}}}, {head: {ref: "x", repo: {full_name: "spali/f"}}}]'
+  run_script
+  [ "$(count fork-delete-candidate)" -eq 0 ]
+}
+
+@test "open PR still blocks delete candidate" {
+  respond_jq "$OWN" '{ahead_by: 0}'
+  respond_jq "$FB" '[{name: "main"}, {name: "feature"}]'
+  respond_jq "$PRS" '[{number: 1, created_at: "2026-11-10T00:00:00Z", html_url: "u", head: {ref: "feature", repo: {full_name: "spali/f"}}}]'
+  respond_jq "$CLOSED" '[{head: {ref: "feature", repo: {full_name: "spali/f"}}}]'
+  run_script
+  [ "$(count fork-delete-candidate)" -eq 0 ]
+}
+
+@test "closed pulls are only fetched when a branch is missing upstream" {
+  respond_jq "$OWN" '{ahead_by: 0}'
+  run_script
+  ! grep -q 'state=closed' "$GH_LOG"
 }
