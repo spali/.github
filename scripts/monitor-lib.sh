@@ -15,6 +15,116 @@ MONITOR_CHECKS=(
   adoption check-failed config-invalid ignore-unused
 )
 
+# The TODO entry of each check in the overview issue (tests: one complete
+# entry per MONITOR_CHECKS id): category of its info findings (decide or
+# cleanup; red findings are always "Fix now"), task title, one sentence of
+# explanation, and the overview areas (check groups) it can belong to, first
+# match wins: the first group that applies to the repository, else the first
+# one. check-failed takes the area of the check named before ":" in its
+# message; config-invalid and ignore-unused concern no repository.
+# shellcheck disable=SC2016,SC2034 # Markdown backticks; used by monitor-report.sh
+MONITOR_TODO='{
+  "devbuild-closed-pr": {"category": "cleanup", "areas": ["release"], "title": "Delete dev builds of closed pull requests",
+    "text": "A `-pr.N` pre-release is left for a pull request that is closed: delete the release and its tag."},
+  "orphan-tag": {"category": "cleanup", "areas": ["release"], "title": "Delete tags without a release",
+    "text": "A `-next` or `-pr.N` tag has no release: delete the tag."},
+  "several-drafts": {"category": "cleanup", "areas": ["release"], "title": "Keep one release draft",
+    "text": "More than one draft release exists: keep the current one and delete the others."},
+  "next-stale": {"category": "cleanup", "areas": ["release"], "title": "Refresh the -next pre-release",
+    "text": "The `-next` pre-release is older than the latest release: re-run the build on `main`, or delete it."},
+  "pin-behind": {"category": "cleanup", "areas": ["release"], "title": "Update pinned shared workflows",
+    "text": "A caller pins an older release of the shared workflows: merge or fix the Renovate pull request."},
+  "settings-merge": {"category": "cleanup", "areas": ["settings"], "title": "Fix the merge settings",
+    "text": "The merge options differ from the documented setup: fix the setting."},
+  "settings-alerts": {"category": "cleanup", "areas": ["settings"], "title": "Turn on Dependabot alerts",
+    "text": "Dependabot alerts are off, so vulnerable dependencies go unnoticed: enable them."},
+  "settings-pvr": {"category": "cleanup", "areas": ["settings"], "title": "Turn on private vulnerability reporting",
+    "text": "Reporters of a public repository cannot send a vulnerability privately: enable private vulnerability reporting."},
+  "settings-actions": {"category": "cleanup", "areas": ["settings"], "title": "Fix the Actions permissions",
+    "text": "Workflows get write permissions by default, or Actions may approve pull requests: make them read-only."},
+  "ruleset-main": {"category": "cleanup", "areas": ["settings"], "title": "Restore the main ruleset",
+    "text": "The ruleset that protects `main` is missing or differs from the documented one: restore it."},
+  "ruleset-tags": {"category": "cleanup", "areas": ["settings"], "title": "Restore the tag ruleset",
+    "text": "The ruleset that protects release tags is missing or differs from the documented one: restore it."},
+  "main-red": {"category": "cleanup", "areas": ["health"], "title": "Fix failing workflows on the default branch",
+    "text": "The latest run of a workflow on the default branch failed: fix the cause and re-run it."},
+  "renovate-stale": {"category": "cleanup", "areas": ["health"], "title": "Merge or close old Renovate pull requests",
+    "text": "A Renovate pull request is open for more than 7 days: review and merge it, or close it."},
+  "workflow-disabled": {"category": "cleanup", "areas": ["health", "forks"], "title": "Enable disabled workflows",
+    "text": "GitHub disabled a workflow after 60 days without activity: enable it again, or delete it."},
+  "dependabot-alert": {"category": "cleanup", "areas": ["health"], "title": "Handle Dependabot alerts",
+    "text": "A dependency has a known vulnerability: update it, or dismiss the alert with a reason."},
+  "code-scanning-alert": {"category": "cleanup", "areas": ["health"], "title": "Handle code scanning alerts",
+    "text": "Code scanning found a problem in the code: fix it, or dismiss the alert with a reason."},
+  "fork-behind": {"category": "cleanup", "areas": ["forks"], "title": "Bring forks up to date",
+    "text": "A fork is behind its upstream: sync it with the Sync fork button, or add it to `managed:` so the central sync keeps it current."},
+  "fork-sync-stale": {"category": "cleanup", "areas": ["forks"], "title": "Fix the own sync of forks",
+    "text": "A fork with its own sync workflow misses upstream commits for too long: check its sync workflow."},
+  "fork-workflows-active": {"category": "cleanup", "areas": ["forks"], "title": "Turn off Actions in forks",
+    "text": "Upstream workflows run in the fork and cost minutes or fail: disable them if unwanted."},
+  "fork-delete-candidate": {"category": "decide", "areas": ["forks"], "title": "Delete forks without own work?",
+    "text": "No own commits and no open pull request upstream: keep the fork only if it is in a List on purpose or you plan to work on it, else delete it."},
+  "mirror-behind": {"category": "cleanup", "areas": ["mirrors"], "title": "Fix mirrors that fall behind",
+    "text": "A mirror target lacks refs of its source for too long: check the mirror job."},
+  "list-none": {"category": "cleanup", "areas": ["lists"], "title": "Add repositories to a List",
+    "text": "Your GitHub Lists document which repositories are what, and this one is in none: add it to a List."},
+  "list-contradiction": {"category": "decide", "areas": ["lists"], "title": "Choose one of two exclusive Lists",
+    "text": "The repository is in both Lists of an exclusive pair: decide which one fits and remove it from the other."},
+  "list-mirror-missing": {"category": "cleanup", "areas": ["lists"], "title": "Add mirrors to the mirrors List",
+    "text": "A mirror target is not in the mirrors List: add it."},
+  "list-archived": {"category": "cleanup", "areas": ["lists"], "title": "Move archived repositories to the archive List",
+    "text": "An archived repository is still in another List: move it to the archive List."},
+  "managed-missing": {"category": "cleanup", "areas": ["managed"], "title": "Create missing managed repositories",
+    "text": "A repository under `managed:` does not exist: let the sync create it, or fix the entry."},
+  "managed-settings": {"category": "cleanup", "areas": ["managed"], "title": "Fix the settings of managed repositories",
+    "text": "A managed repository differs from its `settings:`: correct the setting or the entry."},
+  "managed-behind": {"category": "cleanup", "areas": ["managed"], "title": "Bring managed repositories up to date",
+    "text": "A managed repository misses upstream commits or tags for too long: read the sync run."},
+  "branch-undeclared": {"category": "decide", "areas": ["managed", "forks"], "title": "Declare or delete branches with own commits",
+    "text": "A branch with own commits that the sync does not manage: declare it under `branches:` in the control file to keep it, or delete it."},
+  "rebase-pending": {"category": "decide", "areas": ["managed"], "title": "Rebase manual branches?",
+    "text": "A `rebase: manual` branch is behind its upstream: run the sync for this branch when you are ready."},
+  "sync-failed": {"category": "cleanup", "areas": ["managed"], "title": "Fix failed syncs",
+    "text": "The last sync of a managed repository did not succeed: read the sync log."},
+  "contribution-stale": {"category": "decide", "areas": ["forks"], "title": "Follow up old pull requests upstream",
+    "text": "An own pull request upstream is open for more than 90 days: ping, close or keep it."},
+  "unmanaged": {"category": "decide", "areas": ["lists"], "title": "Manage repositories in the mirrors List?",
+    "text": "A repository in the mirrors List is neither managed nor a mirror target: add it to `managed:`, or ignore it."},
+  "adoption": {"category": "decide", "areas": ["lists"], "title": "Adopt the release flow?",
+    "text": "An own repository does not use the central release flow: adopt it, or ignore the finding."},
+  "check-failed": {"category": "cleanup", "areas": ["release", "settings", "health", "forks", "mirrors", "managed", "lists"], "title": "Fix checks that could not run",
+    "text": "A check could not run (API error, missing access, bad response): read the detail and fix the cause; never ignore it."},
+  "config-invalid": {"category": "cleanup", "areas": [], "title": "Fix the control file",
+    "text": "The control file is missing or invalid, or names an unknown List or check: fix the file."},
+  "ignore-unused": {"category": "cleanup", "areas": [], "title": "Remove unused ignores",
+    "text": "An ignore in the control file matched no finding: remove it, or fix its repository or check."}
+}'
+
+# jq definitions of the repositories each check group looks at, shared by
+# the workflow matrix (monitor.sh) and the overview of the report:
+# groups($c; $inv) with $c the control file and $inv the inventory (anything
+# but an array counts as empty) is {release, settings, health, forks, mirrors,
+# managed: [names, sorted]}. Managed repositories (names compared
+# case-insensitively) are left out of health and forks; the group managed
+# takes the names of the control file.
+# shellcheck disable=SC2016,SC2034 # jq program; used by monitor.sh and monitor-report.sh
+MONITOR_GROUPS_JQ='
+  def groups($c; $inv):
+    ([$c.mirrors // [] | .[].target]) as $m |
+    ([$c.managed // [] | .[].repo]) as $mg |
+    ([$mg[] | ascii_downcase]) as $mgl |
+    def unmanaged: (.name | ascii_downcase | IN($mgl[])) | not;
+    (if ($inv | type) == "array" then $inv else [] end) as $inv |
+    def names(f): [$inv[] | select(f) | .name] | sort;
+    {
+      release: names(.central or ((.pins // []) | length > 0)),
+      settings: names(.central == true),
+      health: names(.fork == false and ([.name] | inside($m) | not) and unmanaged),
+      forks: names(.fork == true and .parent != null and ([.name] | inside($m) | not) and unmanaged),
+      mirrors: ($m | sort),
+      managed: ($mg | sort)
+    };'
+
 # API answers that mean "not applicable" (matched as fixed substrings of the
 # whole gh stderr). "Vulnerability alerts are disabled." and a plain
 # "Not Found" are deliberately not listed.

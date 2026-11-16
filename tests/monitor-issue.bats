@@ -35,7 +35,10 @@ sent() { cat "$GH_INPUTS/$1"; }
   [[ ${lines[2]} == "api -X POST repos/spali/ctl/issues --input "* ]]
   [ "${#lines[@]}" -eq 3 ]
   [ "$(sent 3 | jq -c '[.title, .labels]')" = '["Maintenance monitor: 1 red · 0 info",["maintenance-monitor"]]' ]
-  [ "$(sent 3 | jq -r .body)" = "$(printf '%s\n\nUpdated 2026-11-15T05:17:00Z' "$(cat "$REPORT")")" ]
+  # the body is the report as it is: no footer (time and run are in the
+  # summary line of the report)
+  sent 3 | jq -j .body >"$BATS_TEST_TMPDIR/body.md"
+  cmp "$BATS_TEST_TMPDIR/body.md" "$REPORT"
 }
 
 @test "creates the label first when GET answers 404" {
@@ -102,24 +105,14 @@ sent() { cat "$GH_INPUTS/$1"; }
   [[ "$(gh_calls)" != *"red · 0 info · 0 not checked"* ]]
 }
 
-@test "footer without run variables" {
-  issues '[]'
-  run "$SCRIPT" "$REPORT" "$TITLE"
-  [ "$(sent 3 | jq -j .body | tail -n1)" = "Updated 2026-11-15T05:17:00Z" ]
-}
-
-@test "footer links the run when the variables are set" {
+@test "the body has no footer, also with the run variables set" {
   issues '[]'
   GITHUB_SERVER_URL=https://github.com GITHUB_REPOSITORY=spali/ctl GITHUB_RUN_ID=42 \
     run "$SCRIPT" "$REPORT" "$TITLE"
   [ "$status" -eq 0 ]
-  [ "$(sent 3 | jq -j .body | tail -n1)" = "Updated 2026-11-15T05:17:00Z · [run](https://github.com/spali/ctl/actions/runs/42)" ]
-}
-
-@test "footer omits the link when a run variable is missing" {
-  issues '[]'
-  GITHUB_SERVER_URL=https://github.com GITHUB_REPOSITORY=spali/ctl run "$SCRIPT" "$REPORT" "$TITLE"
-  [ "$(sent 3 | jq -j .body | tail -n1)" = "Updated 2026-11-15T05:17:00Z" ]
+  sent 3 | jq -j .body >"$BATS_TEST_TMPDIR/body.md"
+  cmp "$BATS_TEST_TMPDIR/body.md" "$REPORT"
+  run ! grep -qiE 'updated|\[run\]' "$BATS_TEST_TMPDIR/body.md"
 }
 
 # long_report LINES writes a report of numbered lines of 80 bytes each.
@@ -138,8 +131,7 @@ long_report() {
   sent 3 | jq -j .body >"$BATS_TEST_TMPDIR/body.md"
   [ "$(stat -c %s "$BATS_TEST_TMPDIR/body.md")" -le 65536 ]
   [ "$(stat -c %s "$BATS_TEST_TMPDIR/body.md")" -gt 65000 ]
-  [ "$(tail -n1 "$BATS_TEST_TMPDIR/body.md")" = "Updated 2026-11-15T05:17:00Z · [run](https://github.com/spali/ctl/actions/runs/42)" ]
-  grep -qxF '… truncated, see the run summary.' "$BATS_TEST_TMPDIR/body.md"
+  [ "$(tail -n1 "$BATS_TEST_TMPDIR/body.md")" = '… truncated, see the run summary.' ]
   # every kept report line is complete and in order
   kept=$(grep -c '^line ' "$BATS_TEST_TMPDIR/body.md")
   [ "$kept" -lt 1000 ]
@@ -148,7 +140,7 @@ long_report() {
 
 @test "a complete last line is kept when the cut falls right after a newline" {
   issues '[]'
-  tail2=$(printf '\n%s\n\nUpdated 2026-11-15T05:17:00Z\n' '… truncated, see the run summary.' | wc -c)
+  tail2=$(printf '\n%s\n' '… truncated, see the run summary.' | wc -c)
   budget=$((65536 - tail2))
   { head -c "$((budget - 1))" /dev/zero | tr '\0' k; echo
     for i in 1 2 3; do printf 'extra %s %0100d\n' "$i" 0; done; } >"$REPORT"
@@ -163,12 +155,11 @@ long_report() {
 @test "a report that just fits is not cut" {
   issues '[]'
   long_report 100
-  # pad to exactly the limit minus the footer (blank line + 21 + 1 bytes)
-  footer_len=$((1 + $(printf 'Updated 2026-11-15T05:17:00Z\n' | wc -c)))
-  pad=$((65536 - footer_len - $(stat -c %s "$REPORT")))
+  # pad to exactly the limit
+  pad=$((65536 - $(stat -c %s "$REPORT")))
   head -c "$((pad - 1))" /dev/zero | tr '\0' y >>"$REPORT"
   echo >>"$REPORT"
-  [ "$(($(stat -c %s "$REPORT") + footer_len))" -eq 65536 ]
+  [ "$(stat -c %s "$REPORT")" -eq 65536 ]
   run "$SCRIPT" "$REPORT" "$TITLE"
   [ "$status" -eq 0 ]
   sent 3 | jq -j .body >"$BATS_TEST_TMPDIR/body.md"
@@ -186,7 +177,7 @@ long_report() {
   [ "$status" -eq 0 ]
   [ -z "$stderr" ]
   [[ "$(gh_calls)" == *"-X PATCH repos/spali/ctl/issues/71 "* ]]
-  [ "$(sent 3 | jq -r .body | wc -c)" -le 65536 ]
+  [ "$(sent 3 | jq -j .body | wc -c)" -le 65536 ]
 }
 
 @test "a label lookup error other than 404 fails and writes nothing" {

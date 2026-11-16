@@ -360,7 +360,7 @@ next line"'
   phase report
   [ "$status" -eq 0 ]
   grep -qF '**[1 red](#user-content-red)**' "$GITHUB_STEP_SUMMARY"
-  [ "$output" = "✓ report: 1 red · 0 info · 3 clean · 0 not checked" ]
+  [ "$output" = "✓ report: 1 red · 0 info · 3 clean · 0 not checked · 1 to do" ]
 }
 
 @test "report phase fails when the report script crashes" {
@@ -373,7 +373,7 @@ next line"'
 }
 
 @test "issue phase updates the issue with the title of the report" {
-  export MONITOR_ISSUE_REPO=spali/ctl
+  export MONITOR_ISSUE_REPO=spali/ctl GITHUB_SERVER_URL=https://github.com GITHUB_REPOSITORY=spali/ctl GITHUB_RUN_ID=42
   check_stub lists 'finding red adoption spali/a x'
   phase config
   phase inventory

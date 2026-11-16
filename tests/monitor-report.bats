@@ -8,14 +8,21 @@ setup() {
   export FINDINGS="$FIX/findings.jsonl"
   export CONFIG="$FIX/config.json"
   export MONITOR_DOCS_URL=https://docs.example/checks.md
-  unset MONITOR_CONFIG_URL INVENTORY
+  unset MONITOR_CONFIG_URL INVENTORY GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID
+  export MONITOR_NOW
+  MONITOR_NOW=$(date -u -d 2026-11-16T19:45:30Z +%s)
 }
 
 # section NAME prints the part of $output from the section heading NAME up
-# to the next section heading.
+# to the anchor of the next section (or the next heading).
 section() {
-  # headings may start with an anchor: ## <a name="x"></a>Title
-  awk -v h="$1" '/^## / { t = $0; sub(/^## (<a name="[^"]*"><\/a>)?/, "", t); on = index(t, h) == 1 } on' <<<"$output"
+  awk -v h="$1" '/^<a name="[a-z-]+"><\/a>$/ { on = 0 } /^## / { on = index(substr($0, 4), h) == 1 } on' <<<"$output"
+}
+
+# anchored NAME TITLE: the section anchor NAME stands right above the heading
+# TITLE: a line <a name="NAME"></a>, a line <br>, an empty line, "## TITLE".
+anchored() {
+  [[ $output == *$'\n<a name="'"$1"$'"></a>\n<br>\n\n## '"$2"$'\n'* ]]
 }
 
 # findings sets $FINDINGS to the lines on stdin.
@@ -139,7 +146,7 @@ J
 J
   run "$REPORT"
   [[ $output == *'| a \| b |'* ]]
-  [[ $output == *'## <a name="red"></a>🔴 Red'$'\n'*'## <a name="info"></a>🔵 Info'$'\n'*'## <a name="not-checked"></a>⚪ Not checked'$'\n'* ]]
+  [[ $output == *$'\n## 🔴 Red\n'*$'\n## 🔵 Info\n'*$'\n## ⚪ Not checked\n'* ]]
   red=$(section "🔴 Red")
   # main-red (other, pub) before settings-pvr
   [[ $red == *"main-red"*"spali/other"*"spali/pub"*"settings-pvr"* ]]
@@ -217,14 +224,14 @@ J
 
 @test "without an inventory there is no clean section" {
   run "$REPORT"
-  [[ $output != *"Clean"* && $output != *"clean"* ]]
+  [[ $output != *"✅ Clean"* && $output != *"clean]("* && $output != *"user-content-clean"* ]]
 }
 
 @test "an empty inventory counts as none" {
   echo '[]' >"$BATS_TEST_TMPDIR/inv.json"
   export INVENTORY="$BATS_TEST_TMPDIR/inv.json"
   run "$REPORT"
-  [[ $output != *"Clean"* && $output != *"clean"* ]]
+  [[ $output != *"✅ Clean"* && $output != *"clean]("* && $output != *"user-content-clean"* ]]
 }
 
 @test "a broken inventory counts as none" {
@@ -232,22 +239,22 @@ J
   export INVENTORY="$BATS_TEST_TMPDIR/inv.json"
   run --separate-stderr "$REPORT"
   [ "$status" -eq 1 ]
-  [[ $output != *"Clean"* ]]
+  [[ $output != *"✅ Clean"* && $output != *"user-content-clean"* ]]
   [ -z "$stderr" ]
 }
 
 @test "without not checked findings the section says every check ran" {
   findings </dev/null
   run "$REPORT"
-  [[ "$(section "⚪ Not checked")" == $'## <a name="not-checked"></a>⚪ Not checked\n\nEvery check ran.' ]]
+  [[ "$(section "⚪ Not checked")" == $'## ⚪ Not checked\n\nEvery check ran.' ]]
 }
 
-@test "with an inventory the summary links all four sections in order" {
+@test "with an inventory the summary links the sections, all in order" {
   export INVENTORY="$FIX/inventory.json"
   run "$REPORT"
   [ "$status" -eq 1 ]
-  [[ $output == *$'> [!CAUTION]\n> **[2 red](#user-content-red)** · [1 info](#user-content-info) · [0 clean](#user-content-clean) · [1 not checked](#user-content-not-checked)\n'* ]]
-  [[ $output == *$'\n## <a name="red"></a>🔴 Red\n'*$'\n## <a name="info"></a>🔵 Info\n'*$'\n## <a name="clean"></a>✅ Clean\n'*$'\n## <a name="not-checked"></a>⚪ Not checked\n'* ]]
+  [[ $output == *$'> [!CAUTION]\n> **[2 red](#user-content-red)** · [1 info](#user-content-info) · [0 clean](#user-content-clean) · [1 not checked](#user-content-not-checked) · [3 to do](#user-content-todo) · updated 2026-11-16 19:45 UTC\n'* ]]
+  [[ $output == *$'\n## 📝 TODO\n'*$'\n## 📋 Overview\n'*$'\n## 🔴 Red\n'*$'\n## 🔵 Info\n'*$'\n## ✅ Clean\n'*$'\n## ⚪ Not checked\n'* ]]
   [[ "$(section "✅ Clean")" == *"No repository without findings."* ]]
 }
 
@@ -275,9 +282,15 @@ J
 @test "the section anchors stay the same whatever the counts" {
   export INVENTORY="$FIX/inventory.json"
   run "$REPORT"
-  for h in 'red">🔴 Red' 'info">🔵 Info' 'clean">✅ Clean' 'not-checked">⚪ Not checked'; do
-    grep -qxF "## <a name=\"${h%%\">*}\"></a>${h#*\">}" <<<"$output"
-  done
+  anchored todo "📝 TODO"
+  anchored overview "📋 Overview"
+  anchored red "🔴 Red"
+  anchored info "🔵 Info"
+  anchored clean "✅ Clean"
+  anchored not-checked "⚪ Not checked"
+  # every section anchor stands on a line of its own, never in a heading
+  [ "$(grep -c '^<a name="[a-z-]*"></a>$' <<<"$output")" -eq 6 ]
+  run ! grep -q '^## .*<a name' <<<"$output"
 }
 
 @test "each check links where to fix it" {
@@ -356,8 +369,9 @@ J
     run "$REPORT"
     [ "$status" -eq 1 ]
     [[ $output == *"**[3 red](#user-content-red)**"* ]]
-    [ "$(grep -c '^| \[spali/knx.js\](https://github.com/spali/knx.js) | last sync of this repository failed: \[job\](https://github.com/ctl/x/actions/runs/9/job/7) |  |' <<<"$output")" -eq 1 ]
-    [ "$(grep -c '^| - | sync run failed before the repositories: \[run\](https://github.com/ctl/x/actions/runs/9) |  |' <<<"$output")" -eq 1 ]
+    red=$(section "🔴 Red")
+    [ "$(grep -c '^| <a name="f-sync-failed-spali-knx-js"></a>\[spali/knx.js\](https://github.com/spali/knx.js) | last sync of this repository failed: \[job\](https://github.com/ctl/x/actions/runs/9/job/7) |  |' <<<"$red")" -eq 1 ]
+    [ "$(grep -c '^| - | sync run failed before the repositories: \[run\](https://github.com/ctl/x/actions/runs/9) |  |' <<<"$red")" -eq 1 ]
   done
 }
 
@@ -370,4 +384,262 @@ J
   run "$REPORT"
   [[ $output == *"| [o/r](https://github.com/o/r) | last sync of this repository failed: [job](https://github.com/o/ctl/actions/runs/9/job/7) | [Sync runs](https://github.com/o/ctl/actions/workflows/sync.yml) |"* ]]
   [[ $output == *"| - | sync run failed before the repositories: [run](https://github.com/o/ctl/actions/runs/9) | [Sync runs](https://github.com/o/ctl/actions/workflows/sync.yml) |"* ]]
+}
+
+# --- layout F: TODO, overview matrix, row anchors, summary line ----------
+
+# layout sets a realistic inventory, control file and findings: red and info
+# of several checks, a repo-less finding, a not checked finding, a managed
+# repository outside the inventory (other case in the control file).
+layout() {
+  jq -n '[
+    {name: "o/central", central: true, fork: false, pins: []},
+    {name: "o/plain", central: false, fork: false, pins: []},
+    {name: "o/fork", central: false, fork: true, parent: {name: "up/fork"}, pins: []},
+    {name: "o/mirror", central: false, fork: false, pins: []},
+    {name: "o/clean", central: false, fork: false, pins: []}]' >"$BATS_TEST_TMPDIR/inv.json"
+  export INVENTORY="$BATS_TEST_TMPDIR/inv.json"
+  config <<'J'
+{"mirrors":[{"target":"o/mirror","source":"https://src.example/m.git","interval_hours":24}],
+ "managed":[{"repo":"o/Man","upstream":"https://src.example/p.git"}],"ignores":[]}
+J
+  findings <<'J'
+{"level":"red","check":"main-red","repo":"o/plain","message":"CI failed"}
+{"level":"info","check":"adoption","repo":"o/plain","message":"no central release flow"}
+{"level":"info","check":"fork-behind","repo":"o/fork","message":"3 commits behind upstream"}
+{"level":"info","check":"branch-undeclared","repo":"o/fork","message":"b: 2 own commits"}
+{"level":"info","check":"branch-undeclared","repo":"o/fork","message":"a: 1 own commits"}
+{"level":"red","check":"check-failed","repo":"o/mirror","message":"mirror-behind: target not visible"}
+{"level":"info","check":"list-none","repo":"o/central","message":"in no list"}
+{"level":"skip","check":"ruleset-tags","repo":"o/central","message":"rulesets not available"}
+{"level":"red","check":"config-invalid","repo":null,"message":"repos.yml: bad"}
+{"level":"red","check":"managed-behind","repo":"o/man","message":"2 tags differ"}
+J
+}
+
+# todo_titles prints the summary lines of the TODO entries, in order.
+todo_titles() { section "📝 TODO" | grep '^<details'; }
+
+@test "summary line counts the TODO entries, with time and run link, and there is no footer" {
+  layout
+  export GITHUB_SERVER_URL=https://github.com GITHUB_REPOSITORY=o/ctl GITHUB_RUN_ID=42
+  run "$REPORT"
+  [ "$status" -eq 1 ]
+  grep -qxF '> **[4 red](#user-content-red)** · [5 info](#user-content-info) · [1 clean](#user-content-clean) · [1 not checked](#user-content-not-checked) · [8 to do](#user-content-todo) · updated 2026-11-16 19:45 UTC · [run](https://github.com/o/ctl/actions/runs/42)' <<<"$output"
+  [[ ${lines[-1]} != *"Updated"* && ${lines[-1]} != *"updated"* ]]
+  [ "$(grep -c 'updated 2026' <<<"$output")" -eq 1 ]
+}
+
+@test "summary line has no run link when a run variable is missing" {
+  export GITHUB_SERVER_URL=https://github.com GITHUB_REPOSITORY=o/ctl
+  run "$REPORT"
+  [[ $output == *$'[1 not checked](#user-content-not-checked) · [3 to do](#user-content-todo) · updated 2026-11-16 19:45 UTC\n'* ]]
+  [[ $output != *"· [run]("* ]]
+}
+
+@test "TODO: one entry per check and category, Fix now open first, then Decide, then Clean up" {
+  layout
+  run "$REPORT"
+  run todo_titles
+  [ "${#lines[@]}" -eq 8 ]
+  [ "${lines[0]}" = '<details open><summary>🔴 <b>Fix now</b> · Fix checks that could not run · 1 repository · <code>check-failed</code></summary>' ]
+  [[ ${lines[1]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · 1 entry · <code>config-invalid</code></summary>' ]]
+  [[ ${lines[2]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · 1 repository · <code>main-red</code></summary>' ]]
+  [[ ${lines[3]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · <code>managed-behind</code></summary>' ]]
+  [[ ${lines[4]} == '<details><summary>🤔 <b>Decide</b> · '*' · 1 repository · <code>adoption</code></summary>' ]]
+  [[ ${lines[5]} == '<details><summary>🤔 <b>Decide</b> · '*' · 2 entries · <code>branch-undeclared</code></summary>' ]]
+  [[ ${lines[6]} == '<details><summary>🧹 <b>Clean up</b> · '*' · <code>fork-behind</code></summary>' ]]
+  [[ ${lines[7]} == '<details><summary>🧹 <b>Clean up</b> · '*' · <code>list-none</code></summary>' ]]
+}
+
+@test "TODO: an entry explains the check, links its docs and lists the rows like the details" {
+  layout
+  run "$REPORT"
+  todo=$(section "📝 TODO")
+  entry=$(awk '/<code>main-red<\/code>/ { on = 1 } on; on && /^<\/details>$/ { exit }' <<<"$todo")
+  [[ $entry == *$'</summary>\n\n> '*$' [ℹ️](https://docs.example/checks.md#main-red)\n\n| Repository | Details | Fix at |\n| --- | --- | --- |\n| [o/plain](https://github.com/o/plain) | CI failed | [Actions](https://github.com/o/plain/actions) |\n\n</details>' ]]
+  # repo-less rows show "-", TODO rows carry no anchors
+  [[ $todo == *'| - | repos.yml: bad |'* ]]
+  [[ $todo != *'<a name="f-'* ]]
+}
+
+@test "TODO: a check with red and info findings has a Fix now and a Decide entry" {
+  findings <<'J'
+{"level":"red","check":"branch-undeclared","repo":"o/a","message":"x: 3 own commits"}
+{"level":"info","check":"branch-undeclared","repo":"o/b","message":"y: differs"}
+J
+  run "$REPORT"
+  run todo_titles
+  [ "${#lines[@]}" -eq 2 ]
+  [[ ${lines[0]} == '<details open><summary>🔴 <b>Fix now</b> · '*'<code>branch-undeclared</code></summary>' ]]
+  [[ ${lines[1]} == '<details><summary>🤔 <b>Decide</b> · '*'<code>branch-undeclared</code></summary>' ]]
+}
+
+@test "TODO: nothing to do without red or info findings" {
+  findings <<'J'
+{"level":"skip","check":"settings-pvr","repo":"o/a","message":"private repository"}
+J
+  run "$REPORT"
+  [[ "$(section "📝 TODO")" == $'## 📝 TODO\n\nNothing to do.' ]]
+  [[ $output == *"[0 to do](#user-content-todo)"* ]]
+}
+
+@test "TODO: pipes in the explanation-free rows stay escaped" {
+  findings <<'J'
+{"level":"info","check":"list-none","repo":"o/a","message":"a | b"}
+J
+  run "$REPORT"
+  [[ "$(section "📝 TODO")" == *'| [o/a](https://github.com/o/a) | a \| b |'* ]]
+}
+
+@test "every check in MONITOR_CHECKS has a TODO entry: category, title and sentence" {
+  # shellcheck source=../scripts/monitor-lib.sh
+  source "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
+  for c in "${MONITOR_CHECKS[@]}"; do
+    jq -e --arg c "$c" '.[$c] | (.category == "decide" or .category == "cleanup")
+      and (.title | type == "string" and length > 0)
+      and (.text | type == "string" and length > 0 and endswith("."))
+      and (.areas | type == "array" and all(.[]; IN("release", "settings", "health", "forks", "mirrors", "managed", "lists")))' \
+      <<<"$MONITOR_TODO" >/dev/null || { echo "no complete TODO entry: $c"; return 1; }
+  done
+  # and no entry for an unknown check
+  extra=$(jq -r 'keys[]' <<<"$MONITOR_TODO" | while read -r c; do [[ " ${MONITOR_CHECKS[*]} " == *" $c "* ]] || echo "$c"; done)
+  [ -z "$extra" ]
+}
+
+@test "TODO: the categories follow the agreed mapping" {
+  source "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
+  run jq -r 'to_entries | map(select(.value.category == "decide") | .key) | sort | join(" ")' <<<"$MONITOR_TODO"
+  [ "$output" = "adoption branch-undeclared contribution-stale fork-delete-candidate list-contradiction rebase-pending unmanaged" ]
+}
+
+@test "TODO: a check without an entry is Clean up, titled by its id, without sentence" {
+  source "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
+  findings <<'J'
+{"level":"info","check":"brand-new","repo":"o/a","message":"m"}
+J
+  run "$REPORT"
+  [[ "$(section "📝 TODO")" == *$'<details><summary>🧹 <b>Clean up</b> · brand-new · 1 repository · <code>brand-new</code></summary>\n\n> [ℹ️](https://docs.example/checks.md#brand-new)\n'* ]]
+}
+
+@test "overview: repos with findings, red first then by name, one icon per finding" {
+  layout
+  run "$REPORT"
+  ov=$(section "📋 Overview")
+  run grep '^| ' <<<"$ov"
+  [ "${lines[0]}" = '| Repository | Release | Settings | Health | Fork / Mirror | Sync | Lists |' ]
+  [ "${lines[1]}" = '| :-- | :-: | :-: | :-: | :-: | :-: | :-: |' ]
+  [ "${lines[2]}" = '| [o/man](https://github.com/o/man) | – | – | – | – | [🔴](#user-content-f-managed-behind-o-man) | – |' ]
+  [ "${lines[3]}" = '| [o/mirror](https://github.com/o/mirror) | – | – | – | [🔴](#user-content-f-check-failed-o-mirror) | – | ✅ |' ]
+  [ "${lines[4]}" = '| [o/plain](https://github.com/o/plain) | – | – | [🔴](#user-content-f-main-red-o-plain) | – | – | [🔵](#user-content-f-adoption-o-plain) |' ]
+  [ "${lines[5]}" = '| [o/central](https://github.com/o/central) | ✅ | ⚪ | ✅ | – | – | [🔵](#user-content-f-list-none-o-central) |' ]
+  [ "${lines[6]}" = '| [o/fork](https://github.com/o/fork) | – | – | – | [🔵](#user-content-f-branch-undeclared-o-fork)[🔵](#user-content-f-branch-undeclared-o-fork-2)[🔵](#user-content-f-fork-behind-o-fork) | – | ✅ |' ]
+  [ "${#lines[@]}" -eq 7 ]
+  # the clean repository and the repo-less finding are not in the matrix
+  [[ $ov != *"o/clean"* && $ov != *"config-invalid"* ]]
+  [[ $ov == *"🔴 fix · 🔵 note · ✅ ok · ⚪ not checked · – does not apply"* ]]
+}
+
+@test "overview: 🔴 before 🔵 in one cell" {
+  layout
+  findings <<'J'
+{"level":"info","check":"dependabot-alert","repo":"o/plain","message":"1 low"}
+{"level":"red","check":"main-red","repo":"o/plain","message":"x"}
+J
+  run "$REPORT"
+  [[ "$(section "📋 Overview")" == *'| [o/plain](https://github.com/o/plain) | – | – | [🔴](#user-content-f-main-red-o-plain)[🔵](#user-content-f-dependabot-alert-o-plain) | – | – | ✅ |'* ]]
+}
+
+@test "every matrix link resolves to exactly one row anchor, and row anchors are unique" {
+  layout
+  f=$(cat "$FINDINGS"; echo '{"level":"red","check":"branch-undeclared","repo":"o/fork","message":"c: 9 own commits"}')
+  findings <<<"$f"
+  run "$REPORT"
+  links=$(section "📋 Overview" | grep -o '(#user-content-f-[^)]*)' | sed 's/^(#user-content-//; s/)$//')
+  [ "$(wc -l <<<"$links")" -eq 9 ]
+  for l in $links; do
+    [ "$(grep -cF "<a name=\"$l\"></a>" <<<"$output")" -eq 1 ] || { echo "not one anchor: $l"; return 1; }
+  done
+  [ -z "$(grep -o '<a name="f-[^"]*"' <<<"$output" | sort | uniq -d)" ]
+  # the red branch-undeclared row comes first, the info rows continue its numbering
+  [[ "$(section "🔴 Red")" == *'| <a name="f-branch-undeclared-o-fork"></a>[o/fork](https://github.com/o/fork) | c: 9 own commits |'* ]]
+  [[ "$(section "🔵 Info")" == *'| <a name="f-branch-undeclared-o-fork-2"></a>[o/fork](https://github.com/o/fork) | b: 2 own commits |'* ]]
+}
+
+@test "row anchor slug: repository lowercased, other characters become -" {
+  findings <<'J'
+{"level":"info","check":"list-none","repo":"O/My.Repo_x","message":"m"}
+{"level":"red","check":"config-invalid","repo":null,"message":"bad"}
+J
+  run "$REPORT"
+  [[ $output == *'| <a name="f-list-none-o-my-repo-x"></a>[O/My.Repo_x](https://github.com/O/My.Repo_x) | m |'* ]]
+  # a repo-less row has no anchor
+  [[ $output == *$'\n| - | bad |'* ]]
+}
+
+@test "info ends with a link back to the overview" {
+  layout
+  run "$REPORT"
+  [[ "$(section "🔵 Info")" == *$'\n[↑ overview](#user-content-overview)' ]]
+}
+
+@test "ignored findings appear neither in TODO nor in the overview" {
+  layout
+  c=$(jq -c '.ignores = [{repo: "o/central", check: "list-none", reason: "ok"}, {repo: "o/plain", check: "main-red", reason: "known"}]' "$CONFIG")
+  config <<<"$c"
+  run "$REPORT"
+  [[ "$(section "📝 TODO")" != *"list-none"* && "$(section "📝 TODO")" != *"main-red"* ]]
+  ov=$(section "📋 Overview")
+  [[ $ov != *"o/central"* && $ov != *"main-red"* ]]
+  [[ $ov == *'| [o/plain](https://github.com/o/plain) | – | – | ✅ | – | – | [🔵](#user-content-f-adoption-o-plain) |'* ]]
+}
+
+@test "an old adoption ignore without repository becomes a visible ignore-unused" {
+  layout
+  c=$(jq -c '.ignores = [{repo: null, check: "adoption", reason: "later"}]' "$CONFIG")
+  config <<<"$c"
+  run --separate-stderr "$REPORT"
+  [ "$status" -eq 1 ]
+  [ -z "$stderr" ]
+  [[ "$(section "📝 TODO")" == *'<details><summary>🧹 <b>Clean up</b> · '*' · 1 entry · <code>ignore-unused</code></summary>'* ]]
+  [[ "$(section "🔵 Info")" == *'| - | unused ignore: later |'* ]]
+  [[ "$(section "📋 Overview")" != *"ignore-unused"* ]]
+  # the adoption finding itself stays
+  [[ "$(section "📋 Overview")" == *'[🔵](#user-content-f-adoption-o-plain)'* ]]
+}
+
+@test "without an inventory the overview is left out, TODO stays" {
+  layout
+  unset INVENTORY
+  run "$REPORT"
+  [ "$status" -eq 1 ]
+  [[ $output != *"📋 Overview"* && $output != *"user-content-overview"* ]]
+  [ "$(todo_titles | wc -l)" -eq 8 ]
+}
+
+@test "per-repo job mode renders the same overview" {
+  layout
+  run "$REPORT"
+  want=$(section "📋 Overview")
+  c=$(jq -c '.monitor = {jobs: "per-repo"}' "$CONFIG")
+  config <<<"$c"
+  run "$REPORT"
+  [ "$(section "📋 Overview")" = "$want" ]
+}
+
+@test "the overview says so when no repository has findings" {
+  layout
+  findings </dev/null
+  run "$REPORT"
+  [[ "$(section "📋 Overview")" == *"No repository with findings."* ]]
+  [[ "$(section "📋 Overview")" != *"| Repository |"* ]]
+}
+
+@test "details blocks keep valid Markdown: blank line after summary and before the end" {
+  layout
+  run "$REPORT"
+  [ "$(grep -c '^<details' <<<"$output")" -eq "$(grep -c '^</details>$' <<<"$output")" ]
+  awk '/^<details/ { getline n; if (n != "") { print "no blank line after: " $0; bad = 1 } }
+       /^<\/details>$/ { if (prev != "") { print "no blank line before </details>"; bad = 1 } }
+       { prev = $0 } END { exit bad }' <<<"$output"
 }
