@@ -294,7 +294,7 @@ finding red check-failed - "health: boom"'
   ✗ check-failed: health: boom
 ::endgroup::
 ✓ spali/a
-::group::✗ spali/b: 1 red, 1 info, 1 skipped
+::group::✗ spali/b: 1 red, 1 info, 1 not checked
   ✗ main-red: main is red
   ℹ renovate-stale: PR #1 open
   – code-scanning-alert: not enabled
@@ -304,7 +304,7 @@ finding red check-failed - "health: boom"'
 ::endgroup::
 ::error title=check-failed::health: boom
 ::error title=main-red::spali/b: main is red
-health: 3 repositories · 2 red · 1 info · 1 skipped · 1 ignored
+health: 3 repositories · 2 red · 1 info · 1 not checked · 1 ignored
 EOS
 )
   [ "$output" = "$expected" ]
@@ -317,7 +317,7 @@ finding info pin-behind spali/a "pinned to v1"'
   phase inventory
   phase release
   [ "$status" -eq 0 ]
-  [ "${lines[-1]}" = "release: 1 repositories · 0 red · 1 info · 0 skipped · 0 ignored" ]
+  [ "${lines[-1]}" = "release: 1 repositories · 0 red · 1 info · 0 not checked · 0 ignored" ]
 }
 
 @test "a crashing check phase is red and hides the script output" {
@@ -348,7 +348,7 @@ next line"'
   phase release
   phase settings
   [ "$status" -eq 0 ]
-  [ "$output" = $'✓ spali/a\nsettings: 1 repositories · 0 red · 0 info · 0 skipped · 0 ignored' ]
+  [ "$output" = $'✓ spali/a\nsettings: 1 repositories · 0 red · 0 info · 0 not checked · 0 ignored' ]
 }
 
 @test "report phase writes the summary and does not fail for red findings" {

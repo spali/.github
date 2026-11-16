@@ -73,22 +73,26 @@ $cfg[0] as $cfg | . as $f
     | "### `\($c)` [ℹ️](\($docs)#\($c))\n\n| Repository | Details | Fix at |\n| --- | --- | --- |\n"
       + ($cr | map(row) | join("\n")) + "\n";
   # The not checked findings of one check: one line per reason (the message
-  # without "<check>: " and "gh: "), its repositories sorted.
+  # without "<check>: " and "gh: ", Markdown escaped), its repositories
+  # sorted; without a repository only the reason.
   def reasons($r):
     $r | map(.check) | unique[] as $c
     | "### `\($c)` [ℹ️](\($docs)#\($c))\n\n"
       + ($r | map(select(.check == $c))
          | map(.reason = (.message // "" | tostring | gsub("[\\r\\n]+"; " ")
-             | ltrimstr("\($c): ") | ltrimstr("gh: ")))
+             | ltrimstr("\($c): ") | ltrimstr("gh: ")
+             | if test("^\\s*$") then "(no details)" else gsub("(?<m>[\\\\`*_\\[\\]<>])"; "\\\(.m)") end))
          | group_by(.reason)
-         | map("- \(.[0].reason): \(map(.repo // empty) | unique | map(repo_link) | join(", "))")
+         | map("- \(.[0].reason)"
+             + (map(.repo // empty) | unique | if length > 0 then ": " + (map(repo_link) | join(", ")) else "" end))
          | join("\n")) + "\n";
   def count($n; $one; $more): "\($n) \(if $n == 1 then $one else $more end)";
   (level_rows("red") | length) as $nred
 | (level_rows("info") | length) as $ninfo
 | (level_rows("skip") | length) as $nskip
-  # ignore-unused and findings without a repository concern no repository
-| ($inv[0] | if type == "array" then
+  # ignore-unused and findings without a repository concern no repository;
+  # an empty inventory counts as none
+| ($inv[0] | if type == "array" and length > 0 then
       ($rows | map(select(.level != "skip" and .check != "ignore-unused") | .repo // empty)) as $dirty
       | map(.name) | unique | map(select(. as $n | $dirty | index($n) | not))
     else null end) as $clean
@@ -112,8 +116,8 @@ $cfg[0] as $cfg | . as $f
        else empty end),
       "## ⚪ Not checked\n",
       (if $nskip == 0 then "Every check ran.\n"
-       else "Checks that could not run in these repositories because the feature is off there; the repositories were checked otherwise.\n",
-         "<details><summary>\(count($nskip; "check"; "checks")), click to show</summary>\n", reasons(level_rows("skip")), "</details>\n" end)
+       else "Checks that did not run in these repositories because they do not apply or the feature is not available there; the repositories were checked otherwise. Each line gives the reason.\n",
+         "<details><summary>\(count($nskip; "entry"; "entries")), click to show</summary>\n", reasons(level_rows("skip")), "</details>\n" end)
     ] | join("\n"))
   }'
 

@@ -408,9 +408,9 @@ A repository that only calls the monitor workflows is not a release-flow
 repository.
 
 **Levels.** `red` is something to fix, `info` is a hint, `skip` (shown as
-"not checked") means the check could not run in that repository because the
-feature is off there (for example rulesets on private repositories of a Free
-account); it is only listed. The run **fails while any red finding is open or the
+"not checked") means the check did not run in that repository because it does
+not apply or the feature is not available there (for example rulesets on
+private repositories of a Free account); it is only listed with its reason. The run **fails while any red finding is open or the
 issue update failed**; GitHub's failed-run mail is the notification.
 
 **Thresholds.** A Renovate pull request is stale after 7 days. A pin is behind
@@ -523,7 +523,7 @@ least one Actions minute). **Report** collects the findings of all jobs,
 writes the job summary and the overview issue. A check job is red while it
 found a red finding that is not ignored; the other jobs still run. Its log
 lists every repository it looked at: ✓ for one without findings, otherwise a
-group to unfold with each finding (✗ red, ℹ info, – skipped, ◌ ignored). Red
+group to unfold with each finding (✗ red, ℹ info, – not checked, ◌ ignored). Red
 findings also appear as annotations on the run page.
 
 **Jobs and runner.** Both settings live in `monitor` of the control file; a
@@ -566,8 +566,9 @@ counts red, info, clean and not checked, each count linked to its section.
 link to where to fix it. ✅ Clean (collapsed) lists the repositories of the
 inventory without a red or info finding (ignored and not checked findings
 count as clean; without an inventory, in a local report, the section is left
-out). ⚪ Not checked (collapsed) lists, per check, one line per reason with its
-repositories. Each check title has an ℹ️ link to its explanation in
+out). ⚪ Not checked (collapsed) explains that these checks did not run because
+they do not apply or the feature is not available there, and lists, per
+check, one line per reason with its repositories. Each check title has an ℹ️ link to its explanation in
 [`docs/monitor-checks.md`](docs/monitor-checks.md). The body ends with the
 time of the update and a link to the run. A report above GitHub's size limit is
 cut and points to the run summary. The issue is a view, not a notification:

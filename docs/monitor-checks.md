@@ -5,9 +5,9 @@ looks at, why a finding matters and how to fix it. The overview issue links
 each check title here.
 
 **Levels:** 🔴 red is something to fix (the run fails while one is open),
-🔵 info is a hint, ⚪ not checked means the check could not run in that
-repository because the feature is off there (the repository was checked
-otherwise); it is only listed.
+🔵 info is a hint, ⚪ not checked means the check did not run in that
+repository because it does not apply or the feature is not available there
+(the repository was checked otherwise); it is only listed with its reason.
 To accept a finding, add `{repo, check, reason}` to `ignores` in the control
 file `repos.yml`. Settings and rulesets change only with the owner's approval.
 
