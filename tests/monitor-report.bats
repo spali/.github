@@ -531,13 +531,24 @@ J
   [ "${lines[1]}" = '| :-- | :-: | :-: | :-: | :-: | :-: | :-: |' ]
   [ "${lines[2]}" = '| [o/man](https://github.com/o/man) | – | – | – | – | [🔴](#user-content-f-managed-behind-o-man) | – |' ]
   [ "${lines[3]}" = '| [o/mirror](https://github.com/o/mirror) | – | – | – | [🔴](#user-content-f-check-failed-o-mirror) | – | ✅ |' ]
-  [ "${lines[4]}" = '| [o/plain](https://github.com/o/plain) | – | – | [🔴](#user-content-f-main-red-o-plain) | – | – | [🔵](#user-content-f-adoption-o-plain) |' ]
+  # adoption sits in Release although release does not apply to o/plain
+  [ "${lines[4]}" = '| [o/plain](https://github.com/o/plain) | [🔵](#user-content-f-adoption-o-plain) | – | [🔴](#user-content-f-main-red-o-plain) | – | – | ✅ |' ]
   [ "${lines[5]}" = '| [o/central](https://github.com/o/central) | ✅ | ⚪ | ✅ | – | – | [🔵](#user-content-f-list-none-o-central) |' ]
   [ "${lines[6]}" = '| [o/fork](https://github.com/o/fork) | – | – | – | [🔵](#user-content-f-branch-undeclared-o-fork)[🔵](#user-content-f-branch-undeclared-o-fork-2)[🔵](#user-content-f-fork-behind-o-fork) | – | ✅ |' ]
   [ "${#lines[@]}" -eq 7 ]
   # the clean repository and the repo-less finding are not in the matrix
   [[ $ov != *"o/clean"* && $ov != *"config-invalid"* ]]
   [[ $ov == *"🔴 fix · 🔵 note · ✅ ok · ⚪ not checked · – does not apply"* ]]
+}
+
+@test "overview: a finding shows in the column of its check even where that area does not apply" {
+  layout
+  findings <<'J'
+{"level":"info","check":"adoption","repo":"o/plain","message":"no central release flow"}
+{"level":"info","check":"fork-behind","repo":"o/plain","message":"1 commit behind upstream"}
+J
+  run "$REPORT"
+  [[ "$(section "📋 Overview")" == *'| [o/plain](https://github.com/o/plain) | [🔵](#user-content-f-adoption-o-plain) | – | ✅ | [🔵](#user-content-f-fork-behind-o-plain) | – | ✅ |'* ]]
 }
 
 @test "overview: 🔴 before 🔵 in one cell" {
@@ -591,7 +602,7 @@ J
   [[ "$(section "📝 TODO")" != *"list-none"* && "$(section "📝 TODO")" != *"main-red"* ]]
   ov=$(section "📋 Overview")
   [[ $ov != *"o/central"* && $ov != *"main-red"* ]]
-  [[ $ov == *'| [o/plain](https://github.com/o/plain) | – | – | ✅ | – | – | [🔵](#user-content-f-adoption-o-plain) |'* ]]
+  [[ $ov == *'| [o/plain](https://github.com/o/plain) | [🔵](#user-content-f-adoption-o-plain) | – | ✅ | – | – | ✅ |'* ]]
 }
 
 @test "an old adoption ignore without repository becomes a visible ignore-unused" {

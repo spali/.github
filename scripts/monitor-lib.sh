@@ -90,7 +90,7 @@ MONITOR_TODO='{
     "text": "An own pull request upstream is open for more than 90 days: ping, close or keep it."},
   "unmanaged": {"category": "decide", "areas": ["lists"], "title": "Manage repositories in the mirrors List?",
     "text": "A repository in the mirrors List is neither managed nor a mirror target: add it to `managed:`, or ignore it."},
-  "adoption": {"category": "decide", "areas": ["lists"], "title": "Adopt the release flow?",
+  "adoption": {"category": "decide", "areas": ["release"], "title": "Adopt the release flow?",
     "text": "An own repository does not use the central release flow: adopt it, or ignore the finding."},
   "check-failed": {"category": "cleanup", "areas": ["release", "settings", "health", "forks", "mirrors", "managed", "lists"], "title": "Fix checks that could not run",
     "text": "A check could not run (API error, missing access, bad response): read the detail and fix the cause; never ignore it."},
