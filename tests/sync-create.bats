@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 
 setup() {
+  # shellcheck source=scripts/managed-lib.sh
+  source "$BATS_TEST_DIRNAME/../scripts/managed-lib.sh"
   load helpers/gh-stub
   stub_gh
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/sync-create.sh"
@@ -8,14 +10,16 @@ setup() {
   entry fork default
 }
 
-# entry <kind> <refs> [private] sets ENTRY
+# entry <kind> <refs> [private] sets ENTRY through managed_entry, so it has
+# the real shape (upstream_repo is null for mirrors)
 entry() {
   local kind=$1 refs=$2 private=${3:-false} upstream=https://github.com/Up/Tool
   [[ $kind == fork ]] || upstream=https://gitlab.com/up/tool
-  ENTRY=$(jq -cn --arg kind "$kind" --arg refs "$refs" --arg up "$upstream" \
-    --argjson private "$private" \
-    '{repo: "spali/tool", upstream: $up, kind: $kind, upstream_repo: "Up/Tool",
-      refs: $refs, branches: [], settings: {}, private: $private}')
+  local cfg="$BATS_TEST_TMPDIR/config.json"
+  jq -n --arg up "$upstream" --arg refs "$refs" --argjson private "$private" \
+    '{version: 1, managed: [{repo: "spali/tool", upstream: $up, private: $private}
+      + (if $refs == "all" then {refs: "all"} else {} end)]}' >"$cfg"
+  ENTRY=$(managed_entry "$cfg" spali/tool)
   export ENTRY
 }
 
@@ -166,4 +170,9 @@ FORK_OK='{"fork": true, "parent": {"full_name": "up/tool"}}'
   run "$SCRIPT"
   ! gh_calls | grep -q secret-token
   grep -q secret-token "$GH_TOKENS"
+}
+
+@test "mirror entry has no upstream_repo" {
+  entry mirror all
+  [ "$(jq -r .upstream_repo <<<"$ENTRY")" = null ]
 }

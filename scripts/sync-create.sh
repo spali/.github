@@ -18,10 +18,12 @@ trap 'rm -rf "$TMP"' EXIT
 entry_get() { jq -r "$1" <<<"$ENTRY"; }
 REPO=$(entry_get .repo)
 KIND=$(entry_get .kind)
-UPSTREAM_REPO=$(entry_get .upstream_repo)
+UPSTREAM_REPO=$(entry_get '.upstream_repo // ""')
 [[ $REPO =~ ^spali/[A-Za-z0-9._-]+$ ]] || die "invalid repo: $REPO"
-[[ $UPSTREAM_REPO =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || die "invalid upstream_repo: $UPSTREAM_REPO"
 [[ $KIND == fork || $KIND == mirror ]] || die "invalid kind: $KIND"
+# mirrors have no upstream_repo (null)
+[[ $KIND == mirror || $UPSTREAM_REPO =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] ||
+  die "invalid upstream_repo: $UPSTREAM_REPO"
 
 # get_repo fetches repos/<repo> into $TMP/repo.json. Returns 0 when it
 # exists, 1 on 404, and dies on any other error.
