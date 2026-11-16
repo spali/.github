@@ -79,12 +79,16 @@ $cfg[0] as $cfg | . as $f
 | ($kept + $unused) as $rows
 | def level_rows($l): $rows | map(select(.level == $l));
   # The red and info rows in the order of their tables (check, then
-  # repository), each with a repository numbered per check and slug: .anchor.
-  ([level_rows("red"), level_rows("info") | sort_by(.check, (.repo // ""))[]]
-    | reduce .[] as $x ({n: {}, out: []};
+  # repository regardless of case), each with a repository with a unique
+  # .anchor: f-<check>-<slug>, then -2, -3 … until unused (o/a twice and
+  # o/a-2 give f-x-o-a, f-x-o-a-2 and f-x-o-a-2-2).
+  ([level_rows("red"), level_rows("info") | sort_by(.check, (.repo // "" | ascii_downcase))[]]
+    | reduce .[] as $x ({used: {}, out: []};
         if $x.repo == null then .out += [$x]
-        else "\($x.check)-\($x.repo | slug)" as $k | ((.n[$k] // 0) + 1) as $i
-          | .n[$k] = $i | .out += [$x + {anchor: "f-\($k)\(if $i > 1 then "-\($i)" else "" end)"}] end)
+        else "f-\($x.check)-\($x.repo | slug)" as $k
+          | . as $st
+          | (first(range(1; infinite) | (if . == 1 then $k else "\($k)-\(.)" end) | select($st.used[.] | not))) as $a
+          | .used[$a] = true | .out += [$x + {anchor: $a}] end)
     | .out | to_entries | map(.value + {pos: .key})) as $listed
   | def checks($l):
     $listed | map(select(.level == $l)) | map(.check) | unique[] as $c

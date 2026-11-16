@@ -50,9 +50,11 @@ ensure_label() {
 }
 
 # build_body writes the issue body to $WORK/body.md: the report; a report
-# that does not fit is cut at a line boundary and followed by NOTE.
+# that does not fit is cut at a line boundary, every <details> block left open
+# by the cut is closed (after an empty line, which also ends a table), and
+# NOTE follows.
 build_body() {
-  local size budget
+  local size budget open closing
   size=$(LC_ALL=C wc -c <"$REPORT")
   if ((size <= LIMIT)); then
     cat "$REPORT" >"$WORK/body.md"
@@ -60,13 +62,22 @@ build_body() {
   fi
   printf '\n%s\n' "$NOTE" >"$WORK/tail.md"
   budget=$((LIMIT - $(LC_ALL=C wc -c <"$WORK/tail.md")))
-  head -c "$budget" "$REPORT" >"$WORK/cut.md"
-  # the last line of the cut is partial unless the cut ends with a newline
-  if [[ -n $(tail -c1 "$WORK/cut.md") ]]; then
-    head -n -1 "$WORK/cut.md" >"$WORK/cut2.md"
-    mv "$WORK/cut2.md" "$WORK/cut.md"
-  fi
-  cat "$WORK/cut.md" "$WORK/tail.md" >"$WORK/body.md"
+  while :; do
+    head -c "$budget" "$REPORT" >"$WORK/cut.md"
+    # the last line of the cut is partial unless the cut ends with a newline
+    if [[ -n $(tail -c1 "$WORK/cut.md") ]]; then
+      head -n -1 "$WORK/cut.md" >"$WORK/cut2.md"
+      mv "$WORK/cut2.md" "$WORK/cut.md"
+    fi
+    open=$(($(grep -c '^<details' "$WORK/cut.md" || true) - $(grep -c '^</details>$' "$WORK/cut.md" || true)))
+    closing=
+    while ((open-- > 0)); do closing+=$'\n</details>\n'; done
+    printf '%s' "$closing" >"$WORK/close.md"
+    size=$(($(LC_ALL=C wc -c <"$WORK/cut.md") + $(LC_ALL=C wc -c <"$WORK/close.md") + $(LC_ALL=C wc -c <"$WORK/tail.md")))
+    ((size > LIMIT)) || break
+    budget=$((budget - (size - LIMIT)))
+  done
+  cat "$WORK/cut.md" "$WORK/close.md" "$WORK/tail.md" >"$WORK/body.md"
 }
 
 # find_issue prints the lowest number of the open issues with the label

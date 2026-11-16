@@ -654,3 +654,33 @@ J
        /^<\/details>$/ { if (prev != "") { print "no blank line before </details>"; bad = 1 } }
        { prev = $0 } END { exit bad }' <<<"$output"
 }
+
+@test "row anchors stay unique when a numbered slug equals another repository's slug" {
+  findings <<'J'
+{"level":"info","check":"list-none","repo":"o/a","message":"one"}
+{"level":"info","check":"list-none","repo":"o/a","message":"two"}
+{"level":"info","check":"list-none","repo":"o/a-2","message":"three"}
+J
+  echo '[{"name":"o/a"},{"name":"o/a-2"}]' >"$BATS_TEST_TMPDIR/inv.json"
+  export INVENTORY="$BATS_TEST_TMPDIR/inv.json"
+  run "$REPORT"
+  [ -z "$(grep -o '<a name="f-[^"]*"' <<<"$output" | sort | uniq -d)" ]
+  [ "$(grep -o '<a name="f-[^"]*"' <<<"$output" | wc -l)" -eq 3 ]
+  for l in $(section "📋 Overview" | grep -o '(#user-content-f-[^)]*)' | sed 's/^(#user-content-//; s/)$//'); do
+    [ "$(grep -cF "<a name=\"$l\"></a>" <<<"$output")" -eq 1 ] || { echo "not one anchor: $l"; return 1; }
+  done
+  # the overview links o/a-2 to its own row
+  a2=$(section "📋 Overview" | grep '^| \[o/a-2\]' | grep -o '#user-content-f-[^)]*' | sed 's/^#user-content-//')
+  [[ "$(section "🔵 Info")" == *"<a name=\"$a2\"></a>[o/a-2](https://github.com/o/a-2) | three |"* ]]
+}
+
+@test "Red, Info and TODO rows are sorted by repository regardless of case" {
+  findings <<'J'
+{"level":"info","check":"list-none","repo":"o/b","message":"m"}
+{"level":"info","check":"list-none","repo":"o/C","message":"m"}
+{"level":"info","check":"list-none","repo":"O/a","message":"m"}
+J
+  run "$REPORT"
+  [[ "$(section "🔵 Info")" == *"[O/a]"*"[o/b]"*"[o/C]"* ]]
+  [[ "$(section "📝 TODO")" == *"[O/a]"*"[o/b]"*"[o/C]"* ]]
+}
