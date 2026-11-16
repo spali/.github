@@ -22,6 +22,10 @@ def posint: type == "number" and . == floor and . > 0;
 def list_of($k): if has($k) then (.[$k] | if type == "array" then . else [] end) else [] end;
 def repo_err($path; $v):
   if ($v | repo_ok) then empty else "\($path): \($v | tostring) is not a spali repository" end;
+def on_github: type == "string" and test("^https://github\\.com(/|$)");
+def gh_repo_url: test("^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(\\.git)?/?$");
+def branch_ok: type == "string" and test("^[A-Za-z0-9._/-]+$") and (contains("..") | not)
+  and (startswith("-") | not) and (startswith("/") | not);
 def need($e; $k; $path; test_):
   if ($e | has($k)) | not then "\($path).\($k) is required"
   elif ($e[$k] | test_) then empty
@@ -29,7 +33,7 @@ def need($e; $k; $path; test_):
 
 if type != "object" then "top level must be a mapping" else
   (if .version != 1 then "version must be 1" else empty end),
-  (keys[] | select(IN("version", "monitor", "lists", "mirrors", "forks", "ignores") | not)
+  (keys[] | select(IN("version", "monitor", "lists", "mirrors", "forks", "managed", "ignores") | not)
     | "unknown key \(.)"),
   (if has("monitor") and (.monitor | type) != "object" then "monitor must be a mapping" else empty end),
   (if (.monitor | type) == "object" then
@@ -77,6 +81,52 @@ if type != "object" then "top level must be a mapping" else
          elif (.sync_interval_hours | posint) | not
          then "\($p).sync_interval_hours must be a positive integer" else empty end)
       end),
+  (if has("managed") and (.managed | type) != "array" then "managed must be a list" else empty end),
+  (list_of("managed") | to_entries[] | "managed[\(.key)]" as $p | .value
+    | if type != "object" then "\($p) must be a mapping" else
+        (keys[] | select(IN("repo", "upstream", "refs", "branches", "settings", "private") | not)
+          | "\($p): unknown key \(.)"),
+        (if has("repo") | not then "\($p).repo is required" else repo_err("\($p).repo"; .repo) end),
+        (if has("upstream") | not then "\($p).upstream is required"
+         elif (.upstream | type == "string" and startswith("https://")) | not
+         then "\($p).upstream must start with https://"
+         elif (.upstream | on_github) and ((.upstream | gh_repo_url) | not)
+         then "\($p).upstream is not a github.com repository URL" else empty end),
+        (if has("refs") then
+           (if (.refs | IN("default", "all")) | not then "\($p).refs must be default or all"
+            elif (.upstream | on_github) | not then "\($p): refs only applies to forks"
+            else empty end)
+         else empty end),
+        (if has("private") and (.private | type) != "boolean" then "\($p).private must be a boolean" else empty end),
+        (if has("branches") then
+           (if (.branches | type) != "object" then "\($p).branches must be a mapping"
+            else (.branches | to_entries[] | .key as $b | .value as $v
+              | (if ($b | branch_ok) | not then "\($p).branches: \"\($b)\" is not a valid branch name"
+                 else empty end),
+                (if ($v | type) != "object" then "\($p).branches.\($b) must be a mapping" else
+                   (if ($v | has("onto") and (.onto | type == "string" and length > 0)) | not
+                    then "\($p).branches.\($b).onto is required" else empty end),
+                   (if ($v | has("rebase") and (.rebase | IN("auto", "manual"))) | not
+                    then "\($p).branches.\($b).rebase must be auto or manual" else empty end)
+                 end)) end)
+         else empty end),
+        (if has("settings") then
+           (if (.settings | type) != "object" then "\($p).settings must be a mapping"
+            else (.settings | to_entries[]
+              | if (.key | IN("has_issues", "has_pull_requests", "has_wiki", "has_discussions",
+                              "has_projects", "actions")) | not
+                then "\($p).settings: unknown key \(.key)"
+                elif (.value | type) != "boolean" then "\($p).settings.\(.key) must be a boolean"
+                else empty end) end)
+         else empty end)
+      end),
+  ([list_of("managed")[] | select(type == "object" and (.repo | type) == "string") | .repo]
+    | group_by(.)[] | select(length > 1) | "duplicate managed \(.[0])"),
+  (([list_of("managed")[] | select(type == "object") | .repo] | map(select(type == "string"))) as $m
+    | (list_of("mirrors")[] | select(type == "object") | .target | select(. as $t | $m | any(. == $t))
+       | "\(.) is in managed and in mirrors"),
+      (list_of("forks")[] | select(type == "object") | .repo | select(. as $t | $m | any(. == $t))
+       | "\(.) is in managed and in forks")),
   (list_of("ignores") | to_entries[] | "ignores[\(.key)]" as $p | .value
     | if type != "object" then "\($p) must be a mapping" else
         (if has("repo") | not then "\($p).repo is required" else repo_err("\($p).repo"; .repo) end),
