@@ -24,7 +24,11 @@ $cfg[0] as $cfg | . as $f
   # Where to fix a finding: [label, url] or null.
   def fix:
     .repo as $r | .check as $c
-    | if $r == null then
+    # the sync workflow of the control repository, if its file URL is known
+    | ([$control | capture("^(?<repo>https://[^/]+/[^/]+/[^/]+)/blob/")? | .repo
+        | "\(.)/actions/workflows/sync.yml"] | first) as $sync
+    | if $c == "sync-failed" then (if $sync then ["Sync runs", $sync] else null end)
+      elif $r == null then
         (if ($c == "config-invalid" or $c == "ignore-unused") and $control != "" then ["Control file", $control] else null end)
       elif $c == "ignore-unused" then (if $control != "" then ["Control file", $control] else null end)
       elif $c == "devbuild-closed-pr" or $c == "several-drafts" or $c == "next-stale" then ["Releases", "\($r | gh)/releases"]
@@ -46,7 +50,7 @@ $cfg[0] as $cfg | . as $f
   def details:
     .repo as $r | .check as $c
     | (.message // "" | cell)
-    | gsub("(?<u>https://[^\\s|)\\]]+)"; "[\(if (.u | test("/actions/runs")) then "run" else "link" end)](\(.u))")
+    | gsub("(?<u>https://[^\\s|)\\]]+)"; "[\(if (.u | test("/actions/runs/[0-9]+/job/")) then "job" elif (.u | test("/actions/runs")) then "run" else "link" end)](\(.u))")
     | if $r != null then gsub("(?<![\\w/&\\[])#(?<n>[0-9]+)"; "[#\(.n)](\($r | gh)/issues/\(.n))") else . end
     | if $c == "adoption" then gsub("(?<![\\w/.\\[-])(?<o>[A-Za-z0-9-]+)/(?<n>[A-Za-z0-9._-]*[A-Za-z0-9_-])"; "[\(.o)/\(.n)](https://github.com/\(.o)/\(.n))") else . end;
   def row: "| \(if .repo then (.repo | repo_link) else "-" end) | \(details) | \(fix | if . then "[\(.[0])](\(.[1]))" else "" end) |";
