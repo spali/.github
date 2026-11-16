@@ -268,6 +268,9 @@ says otherwise. The detail lists each difference
   missing or differ (declared branches excepted), and the last push is older
   than 48 hours (`2 refs differ, last push …`).
 
+The head branch of an open upstream pull request from the fork is left out:
+the sync never writes it.
+
 **Fix:** look at the sync run (see `sync-failed`).
 
 ## branch-undeclared

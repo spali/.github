@@ -237,6 +237,54 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   run ! grep -F 'spali:f:fix-x' "$GH_LOG"
 }
 
+@test "contribution heads are not managed-behind" {
+  # the sync never writes the head of an open upstream PR from the fork
+  respond_jq "$PRS" '[{head: {repo: {full_name: "Spali/F"}, ref: "main"}},
+    {head: {repo: {full_name: "spali/f"}, ref: "feat"}}]'
+  respond_jq "$MAIN" "$(behind 3 2026-11-01T00:00:00Z)"
+  respond_jq "$FEAT" "$(behind 2 2026-11-01T00:00:00Z)"
+  run_script
+  [ "$(count managed-behind)" -eq 0 ]
+  [ ! -s "$FINDINGS" ]
+}
+
+@test "a PR head of another repository is still managed-behind" {
+  respond_jq "$PRS" '[{head: {repo: {full_name: "other/f"}, ref: "main"}}, {head: {repo: null, ref: "feat"}}]'
+  respond_jq "$MAIN" "$(behind 3 2026-11-01T00:00:00Z)"
+  respond_jq "$FEAT" "$(behind 2 2026-11-01T00:00:00Z)"
+  run_script
+  [ "$(count managed-behind)" -eq 2 ]
+}
+
+@test "contribution heads are excluded from the refs all comparison" {
+  jq '.managed[0].refs = "all"' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  refs refs/heads/dev:1 refs/heads/main:5 refs/heads/fix:6 |
+    git_respond '*ls-remote --heads --tags https://github.com/up/f.git' -
+  refs refs/heads/dev:1 refs/heads/main:9 refs/heads/fix:7 |
+    git_respond '*ls-remote --heads --tags https://github.com/spali/f.git' -
+  respond_jq "$PRS" '[{head: {repo: {full_name: "spali/f"}, ref: "main"}}]'
+  run_script
+  [ "$(count managed-behind)" -eq 1 ]
+  [ "$(message managed-behind)" = "1 refs differ, last push 2026-11-01T00:00:00Z" ]
+}
+
+@test "open pulls are fetched once per managed fork" {
+  jq '.managed[0].refs = "all"' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/up/f.git' -
+  refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/spali/f.git' -
+  run_script
+  [ "$(grep -c 'pulls?state=open' "$GH_LOG")" -eq 1 ]
+}
+
+@test "open pulls API error is check-failed and still checks behind" {
+  gh_fail "$PRS" 'gh: Server Error (HTTP 502)'
+  respond_jq "$MAIN" "$(behind 3 2026-11-01T00:00:00Z)"
+  run_script
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(count managed-behind)" -eq 1 ]
+  [ "$(count branch-undeclared)" -eq 0 ]
+}
+
 @test "API error is check-failed" {
   gh_fail "$MAIN" 'gh: Server Error (HTTP 502)'
   run_script
