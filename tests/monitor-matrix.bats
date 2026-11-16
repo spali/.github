@@ -15,7 +15,8 @@ setup() {
   : >"$MONITOR_WORK/findings.jsonl"
   unset MONITOR_REPO GITHUB_WORKFLOW_REF
   export GH_TOKEN=t
-  # central, pinned caller, plain repo, fork, fork without parent, mirror
+  # central, pinned caller, plain repo, fork, fork without parent, mirror,
+  # managed fork and managed mirror (o/gone is managed but does not exist)
   jq -n '[
     {name: "o/central", central: true, fork: false, private: false, default_branch: "main", pins: []},
     {name: "o/caller", central: false, fork: false, private: true, default_branch: "main",
@@ -25,9 +26,15 @@ setup() {
      parent: {name: "up/fork", default_branch: "dev"}, pins: []},
     {name: "o/orphan", central: false, fork: true, private: false, default_branch: "main", parent: null, pins: []},
     {name: "o/mirror", central: false, fork: false, private: false, default_branch: "main",
-     pushed_at: "2026-11-01T00:00:00Z", pins: []}]' >"$MONITOR_WORK/inventory.json"
+     pushed_at: "2026-11-01T00:00:00Z", pins: []},
+    {name: "o/MFork", central: false, fork: true, private: false, default_branch: "main",
+     parent: {name: "up/mfork", default_branch: "main"}, pins: []},
+    {name: "o/mplain", central: false, fork: false, private: false, default_branch: "main", pins: []}]' >"$MONITOR_WORK/inventory.json"
   jq -n '{version: 1, lists: {}, forks: [], ignores: [], monitor: {jobs: "per-repo"},
-    mirrors: [{target: "o/mirror", source: "https://src.example/m.git", interval_hours: 24}]}' \
+    mirrors: [{target: "o/mirror", source: "https://src.example/m.git", interval_hours: 24}],
+    managed: [{repo: "o/mplain", upstream: "https://src.example/p.git"},
+      {repo: "o/mfork", upstream: "https://github.com/up/mfork"},
+      {repo: "o/gone", upstream: "https://github.com/up/gone"}]}' \
     >"$MONITOR_WORK/config.json"
 }
 
@@ -35,7 +42,7 @@ setup() {
   run --separate-stderr "$MONITOR" matrix
   [ "$status" -eq 0 ]
   [ -z "$stderr" ]
-  [ "$(jq -c . <<<"$output")" = '{"release":["o/caller","o/central"],"settings":["o/central"],"health":["o/caller","o/central","o/plain"],"forks":["o/fork"],"mirrors":["o/mirror"],"runs-on":"ubuntu-latest"}' ]
+  [ "$(jq -c . <<<"$output")" = '{"release":["o/caller","o/central"],"settings":["o/central"],"health":["o/caller","o/central","o/plain"],"forks":["o/fork"],"mirrors":["o/mirror"],"managed":["o/gone","o/mfork","o/mplain"],"runs-on":"ubuntu-latest"}' ]
 }
 
 # checked_by GROUP runs the real check script of GROUP over the inventory and
@@ -51,7 +58,7 @@ checked_by() {
 @test "matrix selects the same repositories as the check scripts" {
   run --separate-stderr "$MONITOR" matrix
   matrix=$output
-  for g in release settings health forks mirrors; do
+  for g in release settings health forks mirrors managed; do
     want=$(checked_by "$g")
     got=$(jq -c --arg g "$g" '.[$g]' <<<"$matrix")
     [ "$got" = "$want" ] || { echo "$g: matrix $got, script $want"; return 1; }
@@ -71,7 +78,19 @@ checked_by() {
   [ "$(cat "$BATS_TEST_TMPDIR/seen")" = '["o/mirror"]' ]
   [ "$(cat "$BATS_TEST_TMPDIR/mirrors")" = '["o/mirror"]' ]
   # the shared files are not changed
-  [ "$(jq length "$MONITOR_WORK/inventory.json")" -eq 6 ]
+  [ "$(jq length "$MONITOR_WORK/inventory.json")" -eq 8 ]
+}
+
+@test "MONITOR_REPO limits managed to one repository, the first job checks the sync" {
+  export GITHUB_REPOSITORY=ctl/x
+  MONITOR_REPO=o/mfork run --separate-stderr "$MONITOR" managed
+  grep -q 'api repos/o/mfork$' "$GH_LOG"
+  run ! grep -E 'o/(gone|mplain)|sync.yml' "$GH_LOG"
+  : >"$GH_LOG"
+  MONITOR_REPO=O/Gone run --separate-stderr "$MONITOR" managed
+  grep -q 'api repos/o/gone$' "$GH_LOG"
+  grep -q 'ctl/x/actions/workflows/sync.yml' "$GH_LOG"
+  run ! grep -E 'o/(mfork|mplain)' "$GH_LOG"
 }
 
 @test "MONITOR_REPO with lists is a usage error" {
@@ -84,7 +103,7 @@ checked_by() {
   echo nope >"$MONITOR_WORK/inventory.json"
   run --separate-stderr "$MONITOR" matrix
   [ "$status" -eq 0 ]
-  [ "$(jq -c . <<<"$output")" = '{"release":[],"settings":[],"health":[],"forks":[],"mirrors":["o/mirror"],"runs-on":"ubuntu-latest"}' ]
+  [ "$(jq -c . <<<"$output")" = '{"release":[],"settings":[],"health":[],"forks":[],"mirrors":["o/mirror"],"managed":["o/gone","o/mfork","o/mplain"],"runs-on":"ubuntu-latest"}' ]
 }
 
 @test "matrix with an unreadable control file prints empty groups" {
@@ -92,14 +111,14 @@ checked_by() {
   echo nope >"$MONITOR_WORK/config.json"
   run --separate-stderr "$MONITOR" matrix
   [ "$status" -eq 0 ]
-  [ "$(jq -c . <<<"$output")" = '{"release":[],"settings":[],"health":[],"forks":[],"mirrors":[],"runs-on":"ubuntu-latest"}' ]
+  [ "$(jq -c . <<<"$output")" = '{"release":[],"settings":[],"health":[],"forks":[],"mirrors":[],"managed":[],"runs-on":"ubuntu-latest"}' ]
 }
 
 @test "per-group (the default) runs one job for all repositories of a group" {
   jq '.mirrors = [] | del(.monitor)' "$MONITOR_WORK/config.json" >"$BATS_TEST_TMPDIR/c" && mv "$BATS_TEST_TMPDIR/c" "$MONITOR_WORK/config.json"
   run --separate-stderr "$MONITOR" matrix
   [ "$status" -eq 0 ]
-  [ "$(jq -c . <<<"$output")" = '{"release":[""],"settings":[""],"health":[""],"forks":[""],"mirrors":[],"runs-on":"ubuntu-latest"}' ]
+  [ "$(jq -c . <<<"$output")" = '{"release":[""],"settings":[""],"health":[""],"forks":[""],"mirrors":[],"managed":[""],"runs-on":"ubuntu-latest"}' ]
 }
 
 @test "runs-on comes from the control file" {

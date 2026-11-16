@@ -387,13 +387,14 @@ provides the scripts and the reusable workflows `monitor.yml` and
 only thing it writes is the overview issue (and its label) in the control
 repository, with that repository's `GITHUB_TOKEN`.
 
-It checks four groups (archived repositories are never checked):
+It checks five groups (archived repositories are never checked):
 
 | Group | Repositories | Checks |
 |---|---|---|
 | Release flow and settings | central repositories (those that use this flow) | stale dev builds and `-next` pre-releases, orphan tags, several drafts, pin behind the latest release, merge/alert/PVR/Actions settings, rulesets |
-| Health | all non-fork, non-mirror repositories | red `main`, open Renovate pull requests, disabled workflows, Dependabot and code scanning alerts |
-| Forks and mirrors | forks, and mirror targets listed in `repos.yml` | upstream commits missing, sync workflow disabled, mirror refs behind the source |
+| Health | all non-fork, non-mirror, unmanaged repositories | red `main`, open Renovate pull requests, disabled workflows, Dependabot and code scanning alerts |
+| Forks and mirrors | unmanaged forks, and mirror targets listed in `repos.yml` | upstream commits missing, sync workflow disabled, mirror refs behind the source |
+| Managed | forks and mirrors listed under `managed` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, undeclared branches with own commits, manual rebases pending, last sync run failed |
 | Lists | all repositories | GitHub Lists that contradict the archive state, forks or mirrors; repositories without the release flow |
 
 The pin check also covers the control repository's own pin of `monitor.yml`.
@@ -407,7 +408,8 @@ issue update failed**; GitHub's failed-run mail is the notification.
 
 **Thresholds.** A Renovate pull request is stale after 7 days. A pin is behind
 when a newer release of `spali/.github` is older than 7 days. A synced fork or
-mirror is behind after its `interval_hours` plus 24 h.
+mirror is behind after its `interval_hours` plus 24 h. A managed repository is behind
+after 48 h.
 
 **Set up the control repository** (once):
 
@@ -505,7 +507,7 @@ If the app loses access to all repositories, the run ends red
 
 **The run.** The job **Inventory** reads the control file and the list of
 repositories. Then each check group runs as a matrix job: release flow,
-settings and rulesets, health, forks and mirrors, plus **Lists**. With
+settings and rulesets, health, forks, mirrors and managed, plus **Lists**. With
 `monitor.jobs: per-group` (default) that is one job per group; with `per-repo`
 one job per group and repository (`Forks · spali/x`), so every repository
 shows ✓ or ✗ in the run graph, at the cost of more jobs (each counts at

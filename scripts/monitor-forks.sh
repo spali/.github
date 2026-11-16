@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Fork checks: fork-sync-stale / fork-behind (missing upstream commits),
 # workflow-disabled / fork-workflows-active, fork-delete-candidate.
-# Scope: inventory forks with a parent that are not mirror targets.
+# Scope: inventory forks with a parent that are neither mirror targets nor
+# managed (monitor-managed.sh checks those).
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
@@ -83,8 +84,10 @@ main() {
   local forks repo branch parent pbranch sync
   if ! forks=$(jq -r --slurpfile c "$CONFIG" '
       ([$c[0].mirrors // [] | .[].target]) as $m |
+      ([$c[0].managed // [] | .[].repo | ascii_downcase]) as $mg |
       ([$c[0].forks // [] | .[] | {key: .repo, value: .sync_interval_hours}] | from_entries) as $f |
       .[] | select(.fork == true and .parent != null and ([.name] | inside($m) | not)) |
+      select(.name | ascii_downcase | IN($mg[]) | not) |
       [.name, .default_branch, .parent.name, .parent.default_branch, ($f[.name] // "" | tostring)] | @tsv' \
     "$INVENTORY" 2>/dev/null); then
     finding red check-failed - "fork checks: cannot parse inventory"

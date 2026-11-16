@@ -169,8 +169,8 @@ level() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) |
   refs refs/heads/main:1 | git_respond "$SRC" -
   refs refs/heads/main:1 | git_respond "$TGT" -
   run_script
-  grep -q "timeout 120" "$SCRIPT"
-  grep -q "GIT_TERMINAL_PROMPT=0" "$SCRIPT"
+  grep -q "timeout 120" "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
+  grep -q "GIT_TERMINAL_PROMPT=0" "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
 }
 
 @test "large ref lists are handled" {

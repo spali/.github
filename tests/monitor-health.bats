@@ -247,3 +247,13 @@ run_entry() {
   run_script
   [ "$(count main-red)" -eq 0 ]
 }
+
+@test "managed repositories are out of scope" {
+  jq -n '[
+    {name: "spali/a", fork: false, default_branch: "main"},
+    {name: "spali/Managed", fork: false, default_branch: "main"}]' >"$INVENTORY"
+  echo '{"mirrors":[],"managed":[{"repo":"spali/managed","upstream":"https://src.example/m.git"}]}' >"$CONFIG"
+  run_script
+  run ! grep -qi 'spali/managed' "$GH_LOG"
+  grep -q 'spali/a/' "$GH_LOG"
+}

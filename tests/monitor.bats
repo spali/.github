@@ -11,7 +11,7 @@ setup() {
   cp "$REAL"/lib.sh "$REAL"/monitor-lib.sh "$REAL"/monitor-config.sh \
     "$REAL"/monitor-report.sh "$MONITOR_SCRIPTS_DIR"/
   local s
-  for s in release settings health forks mirrors lists; do
+  for s in release settings health forks mirrors managed lists; do
     printf '#!/usr/bin/env bash\nexit 0\n' >"$MONITOR_SCRIPTS_DIR/monitor-$s.sh"
   done
   cp "$FIX/inventory.json" "$BATS_TEST_TMPDIR/inventory.json"
@@ -238,7 +238,7 @@ check_stub() {
 @test "an unknown phase is an error" {
   phase nope
   [ "$status" -eq 2 ]
-  [ "$stderr" = "error: unknown phase nope (config inventory matrix release settings health forks mirrors lists report issue)" ]
+  [ "$stderr" = "error: unknown phase nope (config inventory matrix release settings health forks mirrors managed lists report issue)" ]
 }
 
 @test "config phase reports a valid control file" {

@@ -7,7 +7,7 @@
 #        monitor.sh PHASE      one phase, prints its log (one workflow step
 #                              each); the phases share the dir $MONITOR_WORK
 # Phases, in order: config inventory release settings health forks mirrors
-# lists report issue. A check phase lists every repository it looked at
+# managed lists report issue. A check phase lists every repository it looked at
 # (clean ones with ✓, the others as a log group with their findings) and
 # annotates each red finding that is not ignored. MONITOR_REPO limits a check
 # phase (not lists) to one repository: one matrix job per repository. The
@@ -28,8 +28,8 @@ DIR=${MONITOR_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")}
 # shellcheck source=scripts/monitor-lib.sh
 source "$DIR/monitor-lib.sh"
 
-PHASES=(config inventory matrix release settings health forks mirrors lists report issue)
-CHECKS=(release settings health forks mirrors lists)
+PHASES=(config inventory matrix release settings health forks mirrors managed lists report issue)
+CHECKS=(release settings health forks mirrors managed lists)
 CONFIG_FILE=${MONITOR_CONFIG:-repos.yml}
 EMPTY_CONFIG='{"version":1,"lists":{},"mirrors":[],"forks":[],"ignores":[]}'
 
@@ -80,12 +80,17 @@ phase_inventory() {
 # The jobs of each check group: with monitor.jobs per-repo one per repository,
 # as the check scripts select them (tests/monitor-matrix.bats compares both);
 # with per-group (default) one job "" for all, none if the group is empty.
+# Managed repositories (names compared case-insensitively) are left out of
+# health and forks; the group managed takes the names of the control file.
 # Plus "runs-on" (monitor.runs-on, default ubuntu-latest). Input: the
 # inventory (anything else counts as empty); $cfg the slurped config.
 # shellcheck disable=SC2016 # jq program
 MATRIX_JQ='
   ($cfg[0] // {}) as $c |
   ([$c.mirrors // [] | .[].target]) as $m |
+  ([$c.managed // [] | .[].repo]) as $mg |
+  ([$mg[] | ascii_downcase]) as $mgl |
+  def unmanaged: (.name | ascii_downcase | IN($mgl[])) | not;
   (if type == "array" then . else [] end) as $inv |
   def names(f): [$inv[] | select(f) | .name] | sort;
   def jobs: if ($c.monitor.jobs // "per-group") == "per-repo" then .
@@ -93,22 +98,25 @@ MATRIX_JQ='
   {
     release: names(.central or ((.pins // []) | length > 0)) | jobs,
     settings: names(.central == true) | jobs,
-    health: names(.fork == false and ([.name] | inside($m) | not)) | jobs,
-    forks: names(.fork == true and .parent != null and ([.name] | inside($m) | not)) | jobs,
+    health: names(.fork == false and ([.name] | inside($m) | not) and unmanaged) | jobs,
+    forks: names(.fork == true and .parent != null and ([.name] | inside($m) | not) and unmanaged) | jobs,
     mirrors: ($m | sort) | jobs,
+    managed: ($mg | sort) | jobs,
     "runs-on": ($c.monitor["runs-on"] // "ubuntu-latest")
   }'
 
 phase_matrix() {
   jq -c --slurpfile cfg "$CONFIG" "$MATRIX_JQ" "$INVENTORY" 2>/dev/null ||
     jq -c --slurpfile cfg "$CONFIG" -n '[] | '"$MATRIX_JQ" 2>/dev/null ||
-    jq -cn '{release: [], settings: [], health: [], forks: [], mirrors: [], "runs-on": "ubuntu-latest"}'
+    jq -cn '{release: [], settings: [], health: [], forks: [], mirrors: [], managed: [], "runs-on": "ubuntu-latest"}'
 }
 
 # phase_check NAME runs monitor-NAME.sh and logs what it found. With
-# MONITOR_REPO the script sees only that repository (and that mirror).
+# MONITOR_REPO the script sees only that repository (and that mirror or
+# managed entry); sync-failed, which concerns no repository, is then checked
+# only in the job of the first managed repository.
 phase_check() {
-  local name=$1 script=monitor-$1.sh from checked_file rows inv=$INVENTORY cfg=$CONFIG
+  local name=$1 script=monitor-$1.sh from checked_file rows inv=$INVENTORY cfg=$CONFIG skip_sync='' first
   checked_file="$WORK/checked-$name"
   : >"$checked_file"
   from=$(wc -l <"$FINDINGS")
@@ -116,9 +124,13 @@ phase_check() {
     inv="$WORK/inventory-$name.json"
     cfg="$WORK/config-$name.json"
     jq --arg r "$MONITOR_REPO" '[.[] | select(.name == $r)]' "$INVENTORY" >"$inv" 2>/dev/null || echo '[]' >"$inv"
-    jq --arg r "$MONITOR_REPO" '.mirrors = [(.mirrors // [])[] | select(.target == $r)]' "$CONFIG" >"$cfg"
+    jq --arg r "$MONITOR_REPO" '.mirrors = [(.mirrors // [])[] | select(.target == $r)] |
+      .managed = [(.managed // [])[] | select((.repo | ascii_downcase) == ($r | ascii_downcase))]' \
+      "$CONFIG" >"$cfg"
+    first=$(jq -r '[.managed // [] | .[].repo] | sort | first // ""' "$CONFIG")
+    [[ ${first,,} == "${MONITOR_REPO,,}" ]] || skip_sync=1
   fi
-  if ! MONITOR_CHECKED=$checked_file LISTS_TOKEN=${LISTS_TOKEN:-${GH_TOKEN:-}} \
+  if ! MONITOR_CHECKED=$checked_file LISTS_TOKEN=${LISTS_TOKEN:-${GH_TOKEN:-}} MONITOR_SKIP_SYNC=$skip_sync \
     INVENTORY=$inv CONFIG=$cfg "$DIR/$script" >/dev/null 2>&1; then
     finding red check-failed - "$script crashed"
   fi
