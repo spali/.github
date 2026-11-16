@@ -16,7 +16,7 @@
 #
 # env: plan: ENTRY (the object of managed_entry), TARGET_URL, UPSTREAM_URL,
 #      WORK, optional SYNC_BRANCH (a branch name or *: also rebase manual
-#      branches), optional BACKUP_PREFIX (default refs/backup/), optional
+#      branches; a missing manual branch is always created from its onto), optional BACKUP_PREFIX (default refs/backup/), optional
 #      $WORK/contrib.txt (contribution branches, one per line),
 #      GIT_COMMITTER_NAME/EMAIL.
 #      push: TARGET_URL (without credentials), WORK, optional BACKUP_PREFIX.
@@ -217,7 +217,9 @@ plan() {
       skip "refs/heads/$name" "invalid ref name"
     elif [[ -n ${CONTRIB[$name]:-} ]]; then
       skip "refs/heads/$name" contribution
-    elif wants_rebase "$how" "$name"; then
+    elif wants_rebase "$how" "$name" || [[ -z ${TGR[heads/$name]:-} ]]; then
+      # a missing branch is created from onto, also a manual one (it loses
+      # nothing)
       rebase_branch "$name" "$onto"
     fi
   done < <(jq -r '.branches[] | [.name, .onto, .rebase]
