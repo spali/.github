@@ -21,7 +21,9 @@
 #                        The git steps still run after a settings failure;
 #                        they are skipped when the kind check, the
 #                        contribution lookup or the committer lookup failed.
-#                        A failed plan skips the push.
+#                        A failed plan skips the push. Refs the plan kept
+#                        with own commits (skipped as undeclared or unique
+#                        commits) fail the run after the push.
 #
 # REPO is looked up exactly as spelled in the control file and must be listed
 # under `managed:`. Every write goes to that repository only: its URL is built
@@ -243,6 +245,24 @@ list_out() {
   done <"$TMP/out"
 }
 
+# kept fails (after an error line on stderr and in the summary) when the plan
+# kept refs with own commits ($WORK/skipped.txt reasons undeclared or unique
+# commits): the sync never overwrites them, someone must declare, delete or
+# reset them.
+kept() {
+  local ref why msg
+  local -a refs=()
+  [[ -s $WORK/skipped.txt ]] || return 0
+  while IFS=$'\t' read -r ref why; do
+    [[ $why != undeclared && $why != "unique commits" ]] || refs+=("$ref")
+  done <"$WORK/skipped.txt"
+  ((${#refs[@]})) || return 0
+  msg="error: ${#refs[@]} refs kept with own commits: ${refs[*]}"
+  printf '%s\n' "$msg" >&2
+  note "- ✗ $(md "$msg")"
+  return 1
+}
+
 cmd_repo() {
   local status=0 git=1 ref why
   check_branch
@@ -304,6 +324,7 @@ cmd_repo() {
     fail_note push
     status=1
   fi
+  kept || status=1
   finish "$status"
 }
 
