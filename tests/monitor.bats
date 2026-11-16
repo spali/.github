@@ -46,12 +46,12 @@ EOS
 }
 
 @test "a crashing check script is red" {
-  printf '#!/usr/bin/env bash\necho secret >&2\nexit 3\n' >"$MONITOR_SCRIPTS_DIR/monitor-health.sh"
+  printf '#!/usr/bin/env bash\necho leaked-stderr >&2\nexit 3\n' >"$MONITOR_SCRIPTS_DIR/monitor-health.sh"
   run --separate-stderr "$MONITOR"
   [ "$status" -eq 1 ]
   [[ $output == *"check-failed"* ]]
   [[ $output == *"monitor-health.sh crashed"* ]]
-  [[ $output != *secret* ]]
+  [[ $output != *leaked-stderr* ]]
   [ -z "$stderr" ]
 }
 
@@ -321,13 +321,13 @@ finding info pin-behind spali/a "pinned to v1"'
 }
 
 @test "a crashing check phase is red and hides the script output" {
-  printf '#!/usr/bin/env bash\necho secret\necho secret >&2\nexit 3\n' >"$MONITOR_SCRIPTS_DIR/monitor-forks.sh"
+  printf '#!/usr/bin/env bash\necho secret\necho leaked-stderr >&2\nexit 3\n' >"$MONITOR_SCRIPTS_DIR/monitor-forks.sh"
   phase config
   phase inventory
   phase forks
   [ "$status" -eq 1 ]
   [[ $output == *"::error title=check-failed::monitor-forks.sh crashed"* ]]
-  [[ $output != *secret* ]]
+  [[ $output != *leaked-stderr* ]]
   [[ $stderr != *secret* ]]
 }
 
@@ -359,8 +359,8 @@ next line"'
   phase lists
   phase report
   [ "$status" -eq 0 ]
-  grep -qF '**1 red**' "$GITHUB_STEP_SUMMARY"
-  [ "$output" = "✓ report: 1 red · 0 info · 0 skipped" ]
+  grep -qF '**[1 red](#-red)**' "$GITHUB_STEP_SUMMARY"
+  [ "$output" = "✓ report: 1 red · 0 info · 3 clean · 0 not checked" ]
 }
 
 @test "report phase fails when the report script crashes" {

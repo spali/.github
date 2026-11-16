@@ -5,7 +5,9 @@ looks at, why a finding matters and how to fix it. The overview issue links
 each check title here.
 
 **Levels:** 🔴 red is something to fix (the run fails while one is open),
-🔵 info is a hint, ⚪ skipped means "not applicable" and is only counted.
+🔵 info is a hint, ⚪ not checked means the check could not run in that
+repository because the feature is off there (the repository was checked
+otherwise); it is only listed.
 To accept a finding, add `{repo, check, reason}` to `ignores` in the control
 file `repos.yml`. Settings and rulesets change only with the owner's approval.
 
@@ -79,7 +81,7 @@ request title.
 ## settings-pvr
 
 🔴 Private vulnerability reporting is off (public repositories only;
-⚪ skipped for private ones).
+⚪ not checked for private ones).
 
 **Fix:** Settings → Advanced Security → Private vulnerability reporting.
 
@@ -96,7 +98,7 @@ requests.
 🔴 The ruleset `main` is missing or differs: it must be active without bypass,
 target the default branch, block deletion and force pushes, require a pull
 request with rebase or squash, and require the check `pr / check`.
-⚪ Skipped on private repositories of a Free account (no rulesets there).
+⚪ Not checked on private repositories of a Free account (no rulesets there).
 
 **Fix:** Settings → Rules → Rulesets, restore it as in the README.
 
@@ -104,7 +106,7 @@ request with rebase or squash, and require the check `pr / check`.
 
 🔴 The ruleset `release tags` is missing or differs: it must be active
 without bypass, cover `refs/tags/v*` except `-next` and `-pr.*` tags, and only
-block moving a tag. ⚪ Skipped like `ruleset-main`.
+block moving a tag. ⚪ Not checked like `ruleset-main`.
 
 **Fix:** Settings → Rules → Rulesets, restore it as in the README.
 
@@ -137,14 +139,14 @@ should keep running.
 ## dependabot-alert
 
 🔴 for critical or high, 🔵 for medium or low: open Dependabot alerts.
-⚪ Skipped when alerts are off for the repository.
+⚪ Not checked when alerts are off for the repository.
 
 **Fix:** update the dependency, or dismiss the alert with a reason.
 
 ## code-scanning-alert
 
 🔴 for critical or high, 🔵 for medium or low: open code scanning alerts.
-⚪ Skipped when code scanning is not set up.
+⚪ Not checked when code scanning is not set up.
 
 **Fix:** fix the code, or dismiss the alert with a reason.
 
@@ -353,7 +355,7 @@ entries; reads the 20 newest completed runs and stops once every managed
 repository and the plan job have a result. A repository without a job in
 these runs (new entry) and no run yet are no finding. 🔴 A run with more jobs
 than one page (100) is `check-failed` (`sync-failed: more jobs than one page
-…`). ⚪ Skipped in a local run, where there is no control repository. The
+…`). ⚪ Not checked in a local run, where there is no control repository. The
 report links the sync runs of the control repository (Fix at) when it knows
 the control file URL.
 

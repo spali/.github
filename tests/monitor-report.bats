@@ -8,7 +8,7 @@ setup() {
   export FINDINGS="$FIX/findings.jsonl"
   export CONFIG="$FIX/config.json"
   export MONITOR_DOCS_URL=https://docs.example/checks.md
-  unset MONITOR_CONFIG_URL
+  unset MONITOR_CONFIG_URL INVENTORY
 }
 
 # section NAME prints the part of $output from the section heading NAME up
@@ -33,7 +33,7 @@ config() {
   run "$REPORT"
   [ "$status" -eq 1 ]
   [[ $output == "## Maintenance monitor"* ]]
-  [[ $output == *"**2 red** · 1 info · 1 skipped"* ]]
+  [[ $output == *"**[2 red](#-red)** · [1 info](#-info) · [1 not checked](#-not-checked)"* ]]
   [[ $output == *"| [spali/pub](https://github.com/spali/pub) | merge commits allowed | [Settings](https://github.com/spali/pub/settings) |"* ]]
 }
 
@@ -44,7 +44,7 @@ config() {
 J
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"**0 red** · 1 info · 1 skipped"* ]]
+  [[ $output == *"**[0 red](#-red)** · [1 info](#-info) · [1 not checked](#-not-checked)"* ]]
   [[ $output == *"> [!TIP]"* ]]
   [[ $output != *"[!CAUTION]"* ]]
   [[ "$(section "🔴 Red")" == *"Nothing to fix."* ]]
@@ -73,7 +73,7 @@ J
 J
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"**0 red** · 1 info · 0 skipped"* ]]
+  [[ $output == *"**[0 red](#-red)** · [1 info](#-info) · [0 not checked](#-not-checked)"* ]]
   [[ $output == *"### \`ignore-unused\` [ℹ️](https://docs.example/checks.md#ignore-unused)"* ]]
   [[ $output == *"| [spali/gone](https://github.com/spali/gone) | unused ignore: hush |"* ]]
 }
@@ -94,7 +94,7 @@ J
   export FINDINGS="$BATS_TEST_TMPDIR/big.jsonl"
   run --separate-stderr "$REPORT"
   [ "$status" -eq 1 ]
-  [[ $output == *"**30 red** · 0 info · 0 skipped"* ]]
+  [[ $output == *"**[30 red](#-red)** · [0 info](#-info) · [0 not checked](#-not-checked)"* ]]
   [[ $output == *"| [spali/r29](https://github.com/spali/r29) |"* ]]
   [ -z "$stderr" ]
 }
@@ -103,7 +103,7 @@ J
   findings </dev/null
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"**0 red** · 0 info · 0 skipped"* ]]
+  [[ $output == *"**[0 red](#-red)** · [0 info](#-info) · [0 not checked](#-not-checked)"* ]]
 }
 
 @test "ignore removes a red finding and exits 0" {
@@ -115,7 +115,7 @@ J
 J
   run "$REPORT"
   [ "$status" -eq 0 ]
-  [[ $output == *"**0 red** · 0 info · 0 skipped"* ]]
+  [[ $output == *"**[0 red](#-red)** · [0 info](#-info) · [0 not checked](#-not-checked)"* ]]
   [[ $output != *"merge commits"* ]]
 }
 
@@ -125,7 +125,7 @@ J
 J
   run "$REPORT"
   [ "$status" -eq 1 ]
-  [[ $output == *"**2 red** · 2 info · 1 skipped"* ]]
+  [[ $output == *"**[2 red](#-red)** · [2 info](#-info) · [1 not checked](#-not-checked)"* ]]
   [[ $output == *"| [spali/pub](https://github.com/spali/pub) | unused ignore: typo? |"* ]]
 }
 
@@ -138,7 +138,7 @@ J
 J
   run "$REPORT"
   [[ $output == *'| a \| b |'* ]]
-  [[ $output == *"## 🔴 Red (3)"*"## 🔵 Info (1)"*"## ⚪ Skipped (0)"* ]]
+  [[ $output == *"## 🔴 Red"$'\n'*"## 🔵 Info"$'\n'*"## ⚪ Not checked"$'\n'* ]]
   red=$(section "🔴 Red")
   # main-red (other, pub) before settings-pvr
   [[ $red == *"main-red"*"spali/other"*"spali/pub"*"settings-pvr"* ]]
@@ -146,7 +146,7 @@ J
 
 @test "the summary is a caution alert while red findings are open" {
   run "$REPORT"
-  [[ $output == *$'> [!CAUTION]\n> **2 red** · 1 info · 1 skipped'* ]]
+  [[ $output == *$'> [!CAUTION]\n> **[2 red](#-red)** · [1 info](#-info) · [1 not checked](#-not-checked)'* ]]
 }
 
 @test "each check title links its explanation" {
@@ -160,10 +160,89 @@ J
   [[ $output == *"[ℹ️](https://github.com/spali/.github/blob/main/docs/monitor-checks.md#main-red)"* ]]
 }
 
-@test "skipped findings are listed in a collapsed section" {
+@test "not checked findings are listed in a collapsed section, one line per reason" {
   run "$REPORT"
-  skipped=$(section "⚪ Skipped")
-  [[ $skipped == *"<details>"*"code-scanning-alert"*"| [spali/pub](https://github.com/spali/pub) | no analysis found |"*"</details>"* ]]
+  nc=$(section "⚪ Not checked")
+  [[ $nc == *"could not run in these repositories because the feature is off there; the repositories were checked otherwise."*"<details>"*"### \`code-scanning-alert\` [ℹ️](https://docs.example/checks.md#code-scanning-alert)"*"- no analysis found: [spali/pub](https://github.com/spali/pub)"*"</details>"* ]]
+  [[ $nc != *"| Repository |"* ]]
+  [[ $output != *"Skipped"* && $output != *"skipped"* ]]
+}
+
+@test "not checked: equal reasons are merged, prefixes dropped, repos sorted" {
+  findings <<'J'
+{"level":"skip","check":"code-scanning-alert","repo":"o/b","message":"code-scanning-alert: gh: Code scanning is not enabled for this repository. (HTTP 403)"}
+{"level":"skip","check":"code-scanning-alert","repo":"o/a","message":"code-scanning-alert: gh: Code scanning is not enabled for this repository. (HTTP 403)"}
+{"level":"skip","check":"code-scanning-alert","repo":"o/c","message":"code-scanning-alert: gh: no analysis found (HTTP 404)"}
+{"level":"skip","check":"settings-pvr","repo":"o/a","message":"private repository"}
+J
+  run "$REPORT"
+  [ "$status" -eq 0 ]
+  [[ $output == *"[4 not checked](#-not-checked)"* ]]
+  nc=$(section "⚪ Not checked")
+  [[ $nc == *"### \`code-scanning-alert\`"*"### \`settings-pvr\`"* ]]
+  [ "$(grep -c '^- ' <<<"$nc")" -eq 3 ]
+  [[ $nc == *$'\n- Code scanning is not enabled for this repository. (HTTP 403): [o/a](https://github.com/o/a), [o/b](https://github.com/o/b)\n'* ]]
+  [[ $nc == *$'\n- no analysis found (HTTP 404): [o/c](https://github.com/o/c)\n'* ]]
+  [[ $nc == *$'\n- private repository: [o/a](https://github.com/o/a)\n'* ]]
+  [[ $nc != *"Fix at"* && $nc != *"[Code scanning]("* ]]
+}
+
+@test "without an inventory there is no clean section" {
+  run "$REPORT"
+  [[ $output != *"Clean"* && $output != *"clean"* ]]
+}
+
+@test "a broken inventory counts as none" {
+  printf 'not json' >"$BATS_TEST_TMPDIR/inv.json"
+  export INVENTORY="$BATS_TEST_TMPDIR/inv.json"
+  run --separate-stderr "$REPORT"
+  [ "$status" -eq 1 ]
+  [[ $output != *"Clean"* ]]
+  [ -z "$stderr" ]
+}
+
+@test "without not checked findings the section says every check ran" {
+  findings </dev/null
+  run "$REPORT"
+  [[ "$(section "⚪ Not checked")" == $'## ⚪ Not checked\n\nEvery check ran.' ]]
+}
+
+@test "with an inventory the summary links all four sections in order" {
+  export INVENTORY="$FIX/inventory.json"
+  run "$REPORT"
+  [ "$status" -eq 1 ]
+  [[ $output == *$'> [!CAUTION]\n> **[2 red](#-red)** · [1 info](#-info) · [0 clean](#-clean) · [1 not checked](#-not-checked)\n'* ]]
+  [[ $output == *$'\n## 🔴 Red\n'*$'\n## 🔵 Info\n'*$'\n## ✅ Clean\n'*$'\n## ⚪ Not checked\n'* ]]
+  [[ "$(section "✅ Clean")" == *"No repository without findings."* ]]
+}
+
+@test "clean lists inventory repos without red or info, sorted; skip and ignored count as clean" {
+  jq -n '[{name:"o/e"},{name:"o/d"},{name:"o/c"},{name:"o/b"},{name:"o/a"},{name:"o/f"}]' >"$BATS_TEST_TMPDIR/inv.json"
+  export INVENTORY="$BATS_TEST_TMPDIR/inv.json"
+  findings <<'J'
+{"level":"red","check":"main-red","repo":"o/a","message":"x"}
+{"level":"info","check":"list-none","repo":"o/b","message":"x"}
+{"level":"skip","check":"settings-pvr","repo":"o/c","message":"private repository"}
+{"level":"red","check":"settings-merge","repo":"o/d","message":"x"}
+{"level":"info","check":"adoption","repo":null,"message":"1 own repositories without the shared release flow: o/f"}
+J
+  config <<'J'
+{"ignores":[{"repo":"o/d","check":"settings-merge","reason":"ok"},{"repo":"o/e","check":"adoption","reason":"stale"}]}
+J
+  run "$REPORT"
+  [ "$status" -eq 1 ]
+  # o/e only has an unused ignore, o/f is only named in a finding without repo
+  [[ $output == *"**[1 red](#-red)** · [3 info](#-info) · [4 clean](#-clean) · [1 not checked](#-not-checked)"* ]]
+  clean=$(section "✅ Clean")
+  [[ $clean == *"<details>"*"4 repositories"*$'\n[o/c](https://github.com/o/c), [o/d](https://github.com/o/d), [o/e](https://github.com/o/e), [o/f](https://github.com/o/f)\n'*"</details>"* ]]
+}
+
+@test "the section anchors stay the same whatever the counts" {
+  export INVENTORY="$FIX/inventory.json"
+  run "$REPORT"
+  for h in "🔴 Red" "🔵 Info" "✅ Clean" "⚪ Not checked"; do
+    grep -qxF "## $h" <<<"$output"
+  done
 }
 
 @test "each check links where to fix it" {
@@ -240,7 +319,7 @@ J
     findings < <(cat $files)
     run "$REPORT"
     [ "$status" -eq 1 ]
-    [[ $output == *"**3 red**"* ]]
+    [[ $output == *"**[3 red](#-red)**"* ]]
     [ "$(grep -c '^| \[spali/knx.js\](https://github.com/spali/knx.js) | last sync of this repository failed: \[job\](https://github.com/ctl/x/actions/runs/9/job/7) |  |' <<<"$output")" -eq 1 ]
     [ "$(grep -c '^| - | sync run failed before the repositories: \[run\](https://github.com/ctl/x/actions/runs/9) |  |' <<<"$output")" -eq 1 ]
   done
