@@ -809,6 +809,55 @@ rewrite_setup() {
   done
 }
 
+@test "accept alone acts on a stopped manual branch" {
+  O=$(commit "$B" o own)
+  C=$(commit "$A" c x)
+  set_ref "$UP" refs/heads/main "$C"
+  set_ref "$TG" refs/heads/main "$O"
+  set_ref "$TG" "$REC/main" "$B"
+  entry fork '[{"name": "main", "onto": "main", "rebase": "manual"}]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ ! -s "$WORK/skipped.txt" ]
+  for a in main '*'; do
+    fresh_work
+    SYNC_ACCEPT=$a run "$SCRIPT" plan
+    [ "$status" -eq 0 ]
+    [ ! -s "$WORK/skipped.txt" ]
+    N=$(git -C "$WORK/repo" rev-parse refs/heads/main)
+    [ "$(git -C "$WORK/repo" rev-parse "$N~1")" = "$C" ]
+    [ "$(git -C "$WORK/repo" log -1 --format=%s "$N")" = "o: own" ]
+    [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\trebase\nrefs/backup/main\t%s\t%s\tbackup\n%s/main\t%s\t%s\trecord' \
+      "$O" "$N" "$ZERO" "$O" "$REC" "$B" "$C")" ]
+  done
+}
+
+@test "accept on a manual branch without a stop does not rebase it" {
+  O=$(commit "$A" o own)
+  X=$(commit "$A" x old)
+  C=$(commit "$A" c x)
+  set_ref "$TG" refs/heads/main "$O"
+  entry fork '[{"name": "main", "onto": "main", "rebase": "manual"}]'
+  # record in onto (behind upstream), record outside the branch, no record
+  for rec in "$A" "$X" -; do
+    fresh_work
+    if [[ $rec == - ]]; then
+      del_ref "$TG" "$REC/main"
+    else
+      set_ref "$TG" "$REC/main" "$rec"
+    fi
+    [[ $rec != "$X" ]] || set_ref "$UP" refs/heads/main "$C"
+    for a in main '*'; do
+      fresh_work
+      SYNC_ACCEPT=$a run "$SCRIPT" plan
+      [ "$status" -eq 0 ]
+      [ ! -s "$WORK/plan.tsv" ]
+      [ ! -s "$WORK/skipped.txt" ]
+    done
+  done
+}
+
 @test "accepted moved tag with backup" {
   T1=$(atag v2 "$A")
   T2=$(atag v2 "$B")
@@ -1313,6 +1362,31 @@ full_plan() {
   [ "$(ref "$TG" refs/heads/main)" = "$B" ]
   [ "$(ref "$TG" "$REC/main")" = "$B" ]
   [[ $output == *"$REC/main 0000000..${B:0:7} (record)"* ]]
+}
+
+@test "record moved between plan and push rejects the push" {
+  set_ref "$TG" refs/heads/main "$A"
+  set_ref "$TG" "$REC/main" "$A"
+  entry fork
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(plan_line "$REC/main")" = "$(printf '%s\t%s\trecord' "$A" "$B")" ]
+  # someone else moves (or deletes) the record: the lease on it rejects the
+  # whole push
+  X=$(commit "$A" x other)
+  for moved in "$X" -; do
+    if [[ $moved == - ]]; then
+      del_ref "$TG" "$REC/main"
+    else
+      set_ref "$TG" "$REC/main" "$moved"
+    fi
+    before=$(snap)
+    run --separate-stderr "$SCRIPT" push
+    [ "$status" -eq 1 ]
+    [ "${stderr_lines[-1]}" = "error: push rejected, target unchanged" ]
+    [ "$(snap)" = "$before" ]
+    [ "$(ref "$TG" refs/heads/main)" = "$A" ]
+  done
 }
 
 @test "failed restore is reported loudly" {
