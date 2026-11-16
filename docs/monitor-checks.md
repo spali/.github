@@ -340,11 +340,14 @@ branch `main` of the control repository that succeeded or failed counts
 (cancelled and skipped jobs are passed over, the older job counts); the
 detail links the job (`last sync of this repository failed: <url>`). A sync
 of one repository (`-f repo=…`) thus never hides a failure of another one.
-🔴 Without a repository: a job of the newest run that is not a repository
-job (`Managed repositories`) did not succeed (`sync run failed before the
-repositories: <url>`). Checked once per monitor run (in the Lists job), only
-when `managed:` has entries; reads the 20 newest completed runs and stops
-once every managed repository has a result. A repository without a job in
+🔴 Without a repository: in the newest run whose non-repository job
+(`Managed repositories`) has a result, that job did not succeed (`sync run
+failed before the repositories: <url>`); a cancelled or skipped job (e.g. a
+run GitHub cancelled in the sync concurrency group) is passed over, the older
+run counts. Only runs on `main` are read; runs on other branches (tests) never
+count. Checked once per monitor run (in the Lists job), only when `managed:`
+has entries; reads the 20 newest completed runs and stops once every managed
+repository and the plan job have a result. A repository without a job in
 these runs (new entry) and no run yet are no finding. ⚪ Skipped in a local
 run, where there is no control repository.
 

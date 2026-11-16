@@ -40,12 +40,14 @@ SYNC_REPO_JOB_RE='^(?:.* / )?Sync · (?<r>.+)$'
 # repository ($GITHUB_REPOSITORY; unset: skip finding), newest first. Per
 # managed repository the newest job "Sync · <repo>" that succeeded or failed
 # counts (cancelled or skipped jobs are passed over); a failed one is a red
-# finding of that repository. A job of the newest run that is not a repository
-# job (the plan job) and did not succeed is a red finding without repository.
-# Stops reading runs once every managed repository has a result; a repository
+# finding of that repository. The non-repository jobs (the plan job) of the
+# newest run where one of them has a result (cancelled or skipped jobs passed
+# over, like a run GitHub cancelled in the concurrency group) must have
+# succeeded, else a red finding without repository. Stops reading runs once
+# every managed repository and the plan job have a result; a repository
 # without a job (or no run at all) is no finding. Runs once per monitor run.
 check_sync_failed() {
-  local open body runs id run_url step failed first=1 repo url
+  local open body runs id run_url step failed plan=1 repo url
   json_out sync-failed - open -c '[(.managed // [])[].repo]' "$1" || return 0
   [[ $open != '[]' ]] || return 0
   if [[ -z ${GITHUB_REPOSITORY:-} ]]; then
@@ -58,12 +60,15 @@ check_sync_failed() {
   while IFS=$'\t' read -r id run_url; do
     [[ -n $id ]] || continue
     body=$(fetch sync-failed - "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?per_page=100") || return 0
-    if [[ -n $first ]]; then
-      first=
+    if [[ -n $plan ]]; then
+      # the non-repository jobs with a result: none, ok or failed
       # shellcheck disable=SC2016 # jq program
       json_out sync-failed - failed -r --arg re "$SYNC_REPO_JOB_RE" '
-        any(.jobs // [] | .[]; (.name | test($re) | not) and .conclusion != "success")' <<<"$body" || return 0
-      [[ $failed != true ]] ||
+        [.jobs // [] | .[] | select((.name | test($re) | not)
+          and (.conclusion | IN("cancelled", "skipped", null) | not))]
+        | if length == 0 then "none" elif all(.conclusion == "success") then "ok" else "failed" end' <<<"$body" || return 0
+      [[ $failed == none ]] || plan=
+      [[ $failed != failed ]] ||
         finding red sync-failed - "sync run failed before the repositories: $run_url"
     fi
     # {done: repos with a result in this run, failed: [[repo, job url]]}
@@ -80,7 +85,7 @@ check_sync_failed() {
     done <<<"$failed"
     # shellcheck disable=SC2016 # jq program
     json_out sync-failed - open -c --argjson open "$open" '$open - .done' <<<"$step" || return 0
-    [[ $open != '[]' ]] || return 0
+    [[ $open != '[]' || -n $plan ]] || return 0
   done <<<"$runs"
 }
 
