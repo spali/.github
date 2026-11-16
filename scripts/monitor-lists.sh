@@ -79,16 +79,17 @@ list_findings() {
 }
 
 check_adoption() {
-  local out
+  local out repo
   if ! out=$(jq -r --slurpfile cfg "$CONFIG" '
       ([$cfg[0].mirrors // [] | .[].target]) as $m |
-      [.[] | select(.name != "spali/.github" and .fork == false and .central == false and ((.pins // []) | length == 0) and ([.name] | inside($m) | not))] |
-      select(length > 0) |
-      "\(length) own repositories without the shared release flow: \(map(.name) | sort | join(", "))"' "$INVENTORY" 2>/dev/null); then
+      [.[] | select(.name != "spali/.github" and .fork == false and .central == false and ((.pins // []) | length == 0) and ([.name] | inside($m) | not)) | .name] |
+      sort[]' "$INVENTORY" 2>/dev/null); then
     finding red check-failed - "adoption: cannot parse inventory"
     return 0
   fi
-  [[ -z $out ]] || finding info adoption - "$out"
+  while IFS= read -r repo; do
+    [[ -z $repo ]] || finding info adoption "$repo" "no central release flow"
+  done <<<"$out"
 }
 
 main() {

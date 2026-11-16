@@ -452,7 +452,7 @@ and the log of the failed step. Explanations for humans:
 | `sync-failed` | per managed repository, its newest job `Sync · <repo>` with a result (cancelled, skipped or no conclusion passed over) of `sync.yml` on `main` of the control repository did not succeed (`failure`, `timed_out`, …); without repository: a non-repository job did not succeed in the newest run where it has a result (same rule); more jobs than one page is check-failed (checked in Lists when `managed:` has entries; not checked in a local run), also when it stopped a ref on an upstream rewrite (`upstream rewritten`, `upstream moved tag`) | read the sync log; a stopped ref: check upstream, then accept it (4.11) |
 | `contribution-stale` (info) | an open upstream pull request from a fork is older than 90 days (unmanaged forks) | follow up or close it |
 | `unmanaged` (info) | a repository in the mirrors list is neither under `managed:` nor a `mirrors:` target | add it to `managed:` or ignore |
-| `adoption` (info) | a repository does not use the release flow | adopt it (4.6) or ignore |
+| `adoption` (info) | a repository does not use the release flow (one finding per repository) | adopt it (4.6) or ignore |
 | `check-failed` | a check could not run (API error, rate limit, bad response, empty inventory) | read the detail, fix access or the script; never ignore |
 | `config-invalid` | the control file is missing or invalid, or names an unknown list/check | fix the file |
 | `ignore-unused` (info) | an ignore matched no finding | remove it, or fix the typo |
