@@ -385,3 +385,217 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   [ ! -s "$WORK/plan.tsv" ]
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/\tinvalid ref name\nrefs/heads/feat\tinvalid ref name')" ]
 }
+
+# --- push ---
+
+# snap prints all refs of the target (name sha).
+snap() {
+  git -C "$TG" for-each-ref --format='%(refname) %(objectname)'
+}
+
+# hook NAME BODY installs a hook script in the target repository.
+hook() {
+  printf '#!/bin/sh\n%s\n' "$2" >"$TG/hooks/$1"
+  chmod +x "$TG/hooks/$1"
+}
+
+# full_plan sets up a fork (refs all) whose plan has every reason:
+# rebase + backup (feat), mirror create (dev), mirror update (main, tag v1),
+# delete (old).
+full_plan() {
+  C=$(commit "$A" d dev)
+  OF=$(commit "$A" g feat)
+  set_ref "$UP" refs/heads/dev "$C"
+  set_ref "$UP" refs/tags/v1 "$B"
+  set_ref "$TG" refs/heads/main "$A"
+  set_ref "$TG" refs/heads/feat "$OF"
+  set_ref "$TG" refs/heads/old "$A"
+  set_ref "$TG" refs/tags/v1 "$A"
+  entry fork all '[{"name": "feat", "onto": "main", "rebase": "auto"}]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cut -f4 "$WORK/plan.tsv" | sort | tr '\n' ' ')" = "backup delete mirror mirror mirror rebase " ]
+}
+
+@test "push updates all planned refs" {
+  full_plan
+  run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 6 ]
+  out=$output
+  while IFS=$'\t' read -r r old new why; do
+    if [[ $new == "$ZERO" ]]; then
+      run git -C "$TG" rev-parse --verify --quiet "$r"
+      [ "$status" -ne 0 ]
+    else
+      [ "$(ref "$TG" "$r")" = "$new" ]
+    fi
+    [[ $'\n'$out$'\n' == *$'\n'"$r ${old:0:7}..${new:0:7} ($why)"$'\n'* ]]
+  done <"$WORK/plan.tsv"
+  [[ $out == *"refs/heads/old ${A:0:7}..0000000 (delete)"* ]]
+  [[ $out == *"refs/heads/dev 0000000..${C:0:7} (mirror)"* ]]
+  [ "$(ref "$TG" refs/backup/feat)" = "$OF" ]
+  # a second sync has nothing left to do
+  fresh_work
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  run "$SCRIPT" push
+  [ "$status" -eq 0 ]
+  [ "$output" = "nothing to do" ]
+}
+
+@test "push with stale lease keeps the user's commit" {
+  C=$(commit "$A" d dev)
+  set_ref "$UP" refs/heads/dev "$C"
+  set_ref "$TG" refs/heads/main "$A"
+  entry fork all
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$WORK/plan.tsv")" -eq 2 ]
+  U=$(commit "$A" u user)
+  set_ref "$TG" refs/heads/main "$U"
+  before=$(snap)
+  run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 1 ]
+  [ "${stderr_lines[-1]}" = "error: push rejected, target unchanged" ]
+  [ -z "$output" ]
+  [ "$(ref "$TG" refs/heads/main)" = "$U" ]
+  [ "$(snap)" = "$before" ]
+  # a ref that must not exist yet but does
+  fresh_work
+  del_ref "$TG" refs/heads/main
+  set_ref "$TG" refs/heads/main "$A"
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  set_ref "$TG" refs/heads/dev "$U"
+  before=$(snap)
+  run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 1 ]
+  [ "${stderr_lines[-1]}" = "error: push rejected, target unchanged" ]
+  [ "$(snap)" = "$before" ]
+}
+
+@test "rejected push leaves all refs unchanged" {
+  full_plan
+  hook pre-receive 'if grep -q " refs/heads/dev$"; then echo "denied dev" >&2; exit 1; fi'
+  before=$(snap)
+  run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 1 ]
+  [ "${stderr_lines[-1]}" = "error: push rejected, target unchanged" ]
+  [[ $stderr == *"denied dev"* ]]
+  [ -z "$output" ]
+  [ "$(snap)" = "$before" ]
+}
+
+@test "verify mismatch restores old state" {
+  full_plan
+  before=$(snap)
+  SYNC_TEST_VERIFY_FAIL=1 run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 1 ]
+  [ "${stderr_lines[-1]}" = "error: verify failed, restored 6 refs" ]
+  [ -z "$output" ]
+  [ "$(snap)" = "$before" ]
+  # the switch is ignored outside of bats
+  SYNC_TEST_VERIFY_FAIL=1 run --separate-stderr env -u BATS_TEST_TMPDIR "$SCRIPT" push
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 6 ]
+}
+
+@test "failed restore is reported loudly" {
+  OM=$(commit "$A" o own)
+  C=$(commit "$A" d dev)
+  set_ref "$UP" refs/heads/dev "$C"
+  set_ref "$TG" refs/heads/main "$OM"
+  entry fork all "$AUTO"
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cut -f1,4 "$WORK/plan.tsv" | sort | tr '\t\n' ' ,')" = "refs/backup/main backup,refs/heads/dev mirror,refs/heads/main rebase," ]
+  # someone moves main right after the push: it is never overwritten, the
+  # backup of the old tip stays, the other refs are restored
+  hook post-receive "git update-ref refs/heads/main $A; rm -f \"\$0\""
+  run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 1 ]
+  [ "${stderr_lines[-1]}" = "error: RESTORE FAILED for refs/heads/main, backups at refs/backup/" ]
+  [ -z "$output" ]
+  [ "$(ref "$TG" refs/heads/main)" = "$A" ]
+  [ "$(ref "$TG" refs/backup/main)" = "$OM" ]
+  run git -C "$TG" rev-parse --verify --quiet refs/heads/dev
+  [ "$status" -ne 0 ]
+  # the restore push itself is rejected: nothing is restored
+  rm -rf "$TG"
+  git init -q --bare -b main "$TG"
+  set_ref "$TG" refs/heads/main "$OM"
+  hook post-receive 'printf "#!/bin/sh\nexit 1\n" >hooks/pre-receive; chmod +x hooks/pre-receive; rm -f "$0"'
+  SYNC_TEST_VERIFY_FAIL=1 run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 1 ]
+  [ "${stderr_lines[-1]}" = "error: RESTORE FAILED for refs/heads/main refs/backup/main refs/heads/dev, backups at refs/backup/" ]
+  [ "$(ref "$TG" refs/backup/main)" = "$OM" ]
+  [ "$(ref "$TG" refs/heads/dev)" = "$C" ]
+}
+
+@test "token is never in the process args or output" {
+  full_plan
+  real=$(command -v git)
+  mkdir "$BATS_TEST_TMPDIR/bin"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s"\nexec "%s" "$@"\n' "$BATS_TEST_TMPDIR/args.log" "$real" >"$BATS_TEST_TMPDIR/bin/git"
+  chmod +x "$BATS_TEST_TMPDIR/bin/git"
+  tok=ghs_dummyTOKEN0123456789
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+  export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $tok" GIT_TRACE=0
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" run "$SCRIPT" push
+  [ "$status" -eq 0 ]
+  [[ $output != *"$tok"* ]]
+  grep -q push "$BATS_TEST_TMPDIR/args.log"
+  ! grep -q "$tok" "$BATS_TEST_TMPDIR/args.log"
+  # a URL with credentials is refused before any git call
+  for url in "https://x-access-token:$tok@github.com/spali/t.git" "https://$tok@github.com/spali/t.git" \
+    "git@github.com:spali/t.git" "ssh://git@github.com/spali/t.git"; do
+    rm -f "$BATS_TEST_TMPDIR/args.log"
+    TARGET_URL=$url PATH="$BATS_TEST_TMPDIR/bin:$PATH" run "$SCRIPT" push
+    [ "$status" -eq 1 ]
+    [ "$output" = "error: TARGET_URL must not contain credentials" ]
+    [ ! -e "$BATS_TEST_TMPDIR/args.log" ]
+  done
+}
+
+@test "empty plan does nothing" {
+  set_ref "$TG" refs/heads/main "$B"
+  : >"$WORK/plan.tsv"
+  before=$(snap)
+  run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 0 ]
+  [ "$output" = "nothing to do" ]
+  [ "$(snap)" = "$before" ]
+  # no plan at all is an error
+  rm "$WORK/plan.tsv"
+  run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: no plan in $WORK" ]
+}
+
+@test "invalid plan line is refused" {
+  full_plan
+  before=$(snap)
+  cp "$WORK/plan.tsv" "$BATS_TEST_TMPDIR/good.tsv"
+  bad=(
+    "$(printf 'refs/remotes/x\t%s\t%s\tmirror' "$ZERO" "$A")"
+    "$(printf 'refs/heads/-x\t%s\t%s\tmirror' "$ZERO" "$A")"
+    "$(printf 'refs/heads/a..b\t%s\t%s\tmirror' "$ZERO" "$A")"
+    "$(printf 'refs/heads/x\t%s\t%s\tmirror' "$ZERO" "${A:0:39}")"
+    "$(printf 'refs/heads/x\t%s\t%s\tmirror' "-$ZERO" "$A")"
+    "$(printf 'refs/heads/x\t%s\t%s' "$ZERO" "$A")"
+    "$(printf 'refs/heads/x\t%s\t%s\tmirror\textra' "$ZERO" "$A")"
+    "$(printf 'refs/heads/x\t%s\t%s\tbogus' "$ZERO" "$A")"
+    "$(printf 'refs/heads/x\t%s\t%s\tmirror' "$A" "$A")"
+    "$(head -n1 "$BATS_TEST_TMPDIR/good.tsv")"
+    "$(printf 'refs/backupx/x\t%s\t%s\tbackup' "$ZERO" "$A")"
+  )
+  for line in "${bad[@]}"; do
+    { cat "$BATS_TEST_TMPDIR/good.tsv"; printf '%s\n' "$line"; } >"$WORK/plan.tsv"
+    run --separate-stderr "$SCRIPT" push
+    [ "$status" -eq 1 ]
+    [ "$stderr" = "error: invalid plan line 7" ]
+    [ "$(snap)" = "$before" ]
+  done
+}

@@ -7,12 +7,20 @@
 #                     reasons ff, rebase, mirror, delete, backup) and
 #                     $WORK/skipped.txt (<ref> <why>). Fails without a plan on
 #                     a conflict, a missing onto or an empty source.
-#   sync-git.sh push  (not implemented yet)
+#   sync-git.sh push  pushes $WORK/plan.tsv to TARGET_URL in one atomic push
+#                     with a lease on the old sha of every ref, then checks the
+#                     target with ls-remote. On a mismatch it restores the old
+#                     shas (leases on the new ones) and fails. Prints
+#                     "<ref> <old>..<new> (<reason>)" per updated ref.
 #
-# env: ENTRY (the object of managed_entry), TARGET_URL, UPSTREAM_URL, WORK,
-#      optional SYNC_BRANCH (a branch name or *: also rebase manual branches),
-#      optional BACKUP_PREFIX (default refs/backup/), optional $WORK/contrib.txt
-#      (contribution branches, one per line), GIT_COMMITTER_NAME/EMAIL.
+# env: plan: ENTRY (the object of managed_entry), TARGET_URL, UPSTREAM_URL,
+#      WORK, optional SYNC_BRANCH (a branch name or *: also rebase manual
+#      branches), optional BACKUP_PREFIX (default refs/backup/), optional
+#      $WORK/contrib.txt (contribution branches, one per line),
+#      GIT_COMMITTER_NAME/EMAIL.
+#      push: TARGET_URL (without credentials), WORK, optional BACKUP_PREFIX.
+#      SYNC_TEST_VERIFY_FAIL=1 makes the verification fail; it is honoured
+#      only in bats (BATS_TEST_TMPDIR set, TARGET_URL a file:// URL below it).
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 source "$(dirname "$0")/lib.sh"
@@ -23,6 +31,8 @@ BACKUP_PREFIX=${BACKUP_PREFIX:-refs/backup/}
 # Keep system config and prompts out; pin the settings that change what a
 # rebase does. GIT_CONFIG_COUNT/KEY/VALUE (credentials) stay untouched.
 export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1
+# no tracing that could print request headers
+unset GIT_TRACE GIT_TRACE_CURL GIT_TRACE_PACKET GIT_TRACE_PACKFILE GIT_CURL_VERBOSE
 GITC=(
   -c core.hooksPath=/dev/null
   -c core.autocrlf=false
@@ -134,6 +144,14 @@ contained() {
   [[ -n $(g for-each-ref --contains "$c" --format='%(refname)' refs/up/) ]]
 }
 
+# backups must not land in a namespace that is synced (refs/heads/, refs/tags/)
+check_backup_prefix() {
+  if [[ $BACKUP_PREFIX != refs/?*/ || $BACKUP_PREFIX == refs/heads/* ||
+    $BACKUP_PREFIX == refs/tags/ ]] || ! git check-ref-format "${BACKUP_PREFIX}x"; then
+    die "invalid BACKUP_PREFIX $BACKUP_PREFIX"
+  fi
+}
+
 sorted_keys() {
   local -n a=$1
   ((${#a[@]})) || return 0
@@ -146,11 +164,7 @@ plan() {
   need_env ENTRY TARGET_URL UPSTREAM_URL WORK GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
   [[ -d $WORK ]] || die "WORK $WORK is not a directory"
   [[ $UPSTREAM_URL != -* && $TARGET_URL != -* ]] || die "invalid URL"
-  # backups must not land in a namespace that is synced (refs/heads/, refs/tags/)
-  if [[ $BACKUP_PREFIX != refs/?*/ || $BACKUP_PREFIX == refs/heads/* ||
-    $BACKUP_PREFIX == refs/tags/ ]] || ! git check-ref-format "${BACKUP_PREFIX}x"; then
-    die "invalid BACKUP_PREFIX $BACKUP_PREFIX"
-  fi
+  check_backup_prefix
   # shellcheck disable=SC2153 # ENTRY comes from the environment
   kind=$(jq -r .kind <<<"$ENTRY")
   mode=$(jq -r .refs <<<"$ENTRY")
@@ -275,12 +289,164 @@ plan() {
   mv "$PLAN_TMP" "$WORK/plan.tsv"
 }
 
+# has_credentials URL succeeds when URL carries a user part (user@ or
+# user:pass@ before the host, also in the scp form user@host:path).
+has_credentials() {
+  local auth
+  if [[ $1 == *://* ]]; then
+    auth=${1#*://}
+    auth=${auth%%/*}
+  else
+    auth=${1%%:*}
+  fi
+  [[ $auth == *@* ]]
+}
+
+# read_plan fills P_REF, P_OLD, P_NEW, P_WHY from $WORK/plan.tsv and fails
+# on the first line that plan would never write.
+read_plan() {
+  local line n=0 r o nw why t=$'\t'
+  local -A seen=()
+  local re="^([^$t]+)$t([0-9a-f]{40})$t([0-9a-f]{40})$t(ff|rebase|mirror|delete|backup)\$"
+  P_REF=() P_OLD=() P_NEW=() P_WHY=()
+  while IFS= read -r line || [[ -n $line ]]; do
+    n=$((n + 1))
+    [[ $line =~ $re ]] || die "invalid plan line $n"
+    r=${BASH_REMATCH[1]} o=${BASH_REMATCH[2]} nw=${BASH_REMATCH[3]} why=${BASH_REMATCH[4]}
+    if [[ $o == "$nw" || -n ${seen[$r]:-} ]] || ! valid_ref "$r" ||
+      { [[ $why == backup ]] && [[ $r != "$BACKUP_PREFIX"* ]]; } ||
+      { [[ $why != backup ]] && [[ $r == "$BACKUP_PREFIX"* || ! $r =~ ^refs/(heads|tags)/ ]]; } ||
+      [[ $why == delete && $nw != "$ZERO" || $why != delete && $nw == "$ZERO" ]]; then
+      die "invalid plan line $n"
+    fi
+    seen[$r]=1
+    P_REF+=("$r") P_OLD+=("$o") P_NEW+=("$nw") P_WHY+=("$why")
+  done <"$WORK/plan.tsv"
+}
+
+# push_refs EXPECT_ARRAY TO_ARRAY INDEX... pushes the planned refs at INDEX
+# atomically to TO, each with a lease on EXPECT (zero: the ref must not
+# exist; zero TO: delete). git's output goes to $WORK/push.out.
+push_refs() {
+  local -n exp=$1 to=$2
+  local i r
+  local -a args=() specs=()
+  shift 2
+  for i in "$@"; do
+    r=${P_REF[i]}
+    if [[ ${exp[i]} == "$ZERO" ]]; then
+      args+=("--force-with-lease=$r:")
+    else
+      args+=("--force-with-lease=$r:${exp[i]}")
+    fi
+    if [[ ${to[i]} == "$ZERO" ]]; then
+      specs+=(":$r")
+    else
+      specs+=("${to[i]}:$r")
+    fi
+  done
+  g push --atomic --porcelain --no-verify "${args[@]}" -- "$TARGET_URL" "${specs[@]}" \
+    >"$WORK/push.out" 2>&1
+}
+
+# observe fills OBS (ref -> sha) from ls-remote of the target.
+observe() {
+  local sha name out
+  OBS=()
+  out=$(g ls-remote --refs -- "$TARGET_URL") || return 1
+  while IFS=$'\t' read -r sha name; do
+    [[ -z $name ]] || OBS[$name]=$sha
+  done <<<"$out"
+}
+
+# state I prints the observed sha of planned ref I (zero if absent).
+state() {
+  printf '%s\n' "${OBS[${P_REF[$1]}]:-$ZERO}"
+}
+
+# test_verify_fail succeeds only for SYNC_TEST_VERIFY_FAIL=1 inside a bats
+# test that pushes to a repository below its own temporary directory.
+test_verify_fail() {
+  [[ ${SYNC_TEST_VERIFY_FAIL:-} == 1 && -n ${BATS_TEST_TMPDIR:-} &&
+    $TARGET_URL == "file://$BATS_TEST_TMPDIR/"* ]]
+}
+
+# rollback WHAT restores the refs that the target shows at their new sha to
+# the old sha (leases on the new sha) in one atomic push and fails. A ref
+# that somebody else moved is never touched; then the backups stay too.
+rollback() {
+  local what=$1 i s
+  local -a restore=() failed=()
+  local -A bad=() foreign=()
+  for i in "${!P_REF[@]}"; do
+    s=$(state "$i")
+    [[ $s == "${P_NEW[i]}" || $s == "${P_OLD[i]}" ]] || foreign[$i]=1
+  done
+  for i in "${!P_REF[@]}"; do
+    [[ $(state "$i") == "${P_NEW[i]}" ]] || continue
+    ((${#foreign[@]} == 0)) || [[ ${P_REF[i]} != "$BACKUP_PREFIX"* ]] || continue
+    restore+=("$i")
+  done
+  if ((${#restore[@]})) && ! push_refs P_NEW P_OLD "${restore[@]}"; then
+    cat "$WORK/push.out" >&2
+    for i in "${restore[@]}"; do bad[$i]=1; done
+  fi
+  for i in "${!P_REF[@]}"; do
+    [[ -z ${bad[$i]:-}${foreign[$i]:-} ]] || failed+=("${P_REF[i]}")
+  done
+  ((${#failed[@]} == 0)) || die "RESTORE FAILED for ${failed[*]}, backups at $BACKUP_PREFIX"
+  die "$what, restored ${#restore[@]} refs"
+}
+
+push() {
+  local i
+  local -a all
+  need_env TARGET_URL WORK
+  [[ $TARGET_URL != -* ]] || die "invalid URL"
+  ! has_credentials "$TARGET_URL" || die "TARGET_URL must not contain credentials"
+  check_backup_prefix
+  [[ -f $WORK/plan.tsv ]] || die "no plan in $WORK"
+  read_plan
+  if ((${#P_REF[@]} == 0)); then
+    printf 'nothing to do\n'
+    return 0
+  fi
+  REPO=$WORK/repo
+  [[ -d $REPO ]] || die "no repository in $WORK"
+  declare -gA OBS=()
+  all=("${!P_REF[@]}")
+
+  if ! push_refs P_OLD P_NEW "${all[@]}"; then
+    cat "$WORK/push.out" >&2
+    observe || die "push failed, target state unknown"
+    # the push is atomic; an absent ref may be somebody else's delete, so
+    # only an update or create shows that it landed anyway
+    for i in "${all[@]}"; do
+      [[ ${P_NEW[i]} == "$ZERO" || $(state "$i") != "${P_NEW[i]}" ]] || rollback "push failed"
+    done
+    die "push rejected, target unchanged"
+  fi
+
+  if ! observe; then
+    # unknown state: assume the push landed, the leases keep the restore safe
+    for i in "${all[@]}"; do
+      [[ ${P_NEW[i]} == "$ZERO" ]] || OBS[${P_REF[i]}]=${P_NEW[i]}
+    done
+    rollback "verify failed (cannot read the target)"
+  fi
+  for i in "${all[@]}"; do
+    [[ $(state "$i") == "${P_NEW[i]}" ]] || rollback "verify failed"
+  done
+  ! test_verify_fail || rollback "verify failed"
+
+  for i in "${all[@]}"; do
+    printf '%s %s..%s (%s)\n' "${P_REF[i]}" "${P_OLD[i]:0:7}" "${P_NEW[i]:0:7}" "${P_WHY[i]}"
+  done
+}
+
 case ${1:-} in
   plan) plan ;;
-  push)
-    printf 'error: not implemented\n' >&2
-    exit 2
-    ;;
+  push) push ;;
   *)
     printf 'usage: %s plan|push\n' "$0" >&2
     exit 2
