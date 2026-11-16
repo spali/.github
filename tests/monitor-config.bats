@@ -195,3 +195,115 @@ YAML
   [ "$status" -eq 1 ]
   [ "$stderr" = "error: $f: monitor must be a mapping" ]
 }
+
+# managed_bad ENTRY_YAML_LINES EXPECTED: validation of a one-entry managed list.
+managed_bad() {
+  f=$(printf 'version: 1\nmanaged:\n%s\n' "$1" | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"error: $f: $2"* ]]
+}
+
+@test "managed: exact keba example passes" {
+  f=$(
+    mk ok.yml <<'YAML'
+version: 1
+managed:
+  - repo: spali/homeassistant-keba
+    upstream: https://github.com/dannerph/homeassistant-keba
+    branches:
+      main: { onto: main, rebase: auto }
+    settings: {}
+  - repo: spali/knx.js
+    upstream: https://bitbucket.org/ekarak/knx.js
+YAML
+  )
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+}
+
+@test "managed: valid full entry passes" {
+  f=$(
+    mk ok.yml <<'YAML'
+version: 1
+managed:
+  - repo: spali/a
+    upstream: https://github.com/o/a.git/
+    refs: all
+    private: true
+    branches:
+      release/1.x: { onto: main, rebase: manual }
+    settings: { has_issues: true, has_wiki: false, actions: true }
+YAML
+  )
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+}
+
+@test "managed: repo is required" {
+  managed_bad '  - {upstream: "https://github.com/o/a"}' "managed[0].repo is required"
+}
+
+@test "managed: upstream must start with https" {
+  managed_bad '  - {repo: spali/a, upstream: "http://github.com/o/a"}' "managed[0].upstream must start with https://"
+}
+
+@test "managed: github.com upstream must be owner/name" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a/tree/x"}' "managed[0].upstream is not a github.com repository URL"
+}
+
+@test "managed: refs must be default or all" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", refs: some}' "managed[0].refs must be default or all"
+}
+
+@test "managed: refs only applies to forks" {
+  managed_bad '  - {repo: spali/a, upstream: "https://example.org/a", refs: all}' "managed[0]: refs only applies to forks"
+}
+
+@test "managed: branch onto is required" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {rebase: auto}}}' "managed[0].branches.main.onto is required"
+}
+
+@test "managed: branch rebase must be auto or manual" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: main, rebase: x}}}' "managed[0].branches.main.rebase must be auto or manual"
+}
+
+@test "managed: invalid branch name fails" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {"a b": {onto: main, rebase: auto}}}' 'managed[0].branches: "a b" is not a valid branch name'
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {"a..b": {onto: main, rebase: auto}}}' 'managed[0].branches: "a..b" is not a valid branch name'
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {"-a": {onto: main, rebase: auto}}}' 'managed[0].branches: "-a" is not a valid branch name'
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {"/a": {onto: main, rebase: auto}}}' 'managed[0].branches: "/a" is not a valid branch name'
+}
+
+@test "managed: unknown settings key fails" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", settings: {foo: true}}' "managed[0].settings: unknown key foo"
+}
+
+@test "managed: settings values must be booleans" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", settings: {has_issues: 1}}' "managed[0].settings.has_issues must be a boolean"
+}
+
+@test "managed: private must be a boolean" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", private: "yes"}' "managed[0].private must be a boolean"
+}
+
+@test "managed: duplicate repo fails" {
+  managed_bad '  - {repo: spali/x, upstream: "https://github.com/o/a"}
+  - {repo: spali/x, upstream: "https://github.com/o/b"}' "duplicate managed spali/x"
+}
+
+@test "managed: repo in mirrors fails" {
+  f=$(printf 'version: 1\nmanaged:\n  - {repo: spali/x, upstream: "https://github.com/o/a"}\nmirrors:\n  - {target: spali/x, source: "https://example.org/a", interval_hours: 24}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"spali/x is in managed and in mirrors"* ]]
+}
+
+@test "managed: repo in forks fails" {
+  f=$(printf 'version: 1\nmanaged:\n  - {repo: spali/x, upstream: "https://github.com/o/a"}\nforks:\n  - {repo: spali/x, sync_interval_hours: 24}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"spali/x is in managed and in forks"* ]]
+}

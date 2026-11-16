@@ -225,6 +225,58 @@ release flow.
 **Fix:** adopt the flow (README "Set up a new repository"), or ignore the
 finding with a reason.
 
+# Managed repositories
+
+Forks and mirrors listed under `managed:` in `repos.yml`.
+
+## managed-missing
+
+🔴 A repository under `managed:` does not exist or is not reachable.
+
+**Fix:** create it or fix the entry.
+
+## managed-settings
+
+🔴 A managed repository deviates from its declared settings (issues, pull requests, wiki, discussions, projects, Actions).
+
+**Fix:** correct the repository or the `settings:` of its entry.
+
+## managed-behind
+
+🔴 A managed repository lacks upstream commits older than 48 hours.
+
+**Fix:** look at the sync job.
+
+## branch-undeclared
+
+🔴 A branch of a managed repository with own commits is not declared in `branches:` (🔵 for an unmanaged fork).
+
+**Fix:** declare the branch or remove it.
+
+## rebase-pending
+
+🔵 A declared branch with `rebase: manual` awaits a rebase onto upstream.
+
+**Fix:** rebase it.
+
+## sync-failed
+
+🔴 The last sync of a managed repository failed.
+
+**Fix:** read the sync log.
+
+## contribution-stale
+
+🔵 An open upstream pull request from a managed fork is older than 90 days.
+
+**Fix:** follow up or close it.
+
+## unmanaged
+
+🔵 A fork or mirror is not listed under `managed:`.
+
+**Fix:** add it to `managed:`, or ignore the finding with a reason.
+
 # Monitor
 
 ## check-failed

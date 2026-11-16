@@ -10,6 +10,8 @@ MONITOR_CHECKS=(
   dependabot-alert code-scanning-alert
   fork-behind fork-sync-stale fork-workflows-active fork-delete-candidate
   mirror-behind list-none list-contradiction list-mirror-missing list-archived
+  managed-missing managed-settings managed-behind branch-undeclared
+  rebase-pending sync-failed contribution-stale unmanaged
   adoption check-failed config-invalid ignore-unused
 )
 
