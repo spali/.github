@@ -18,6 +18,11 @@ synced() {
   grep -v $'\trecord$' "$WORK/plan.tsv" || true
 }
 
+# no_record BRANCH succeeds when the plan writes no record of BRANCH.
+no_record() {
+  [ -z "$(plan_line "$REC/$1")" ]
+}
+
 # fresh_work empties $WORK for a second run in the same test.
 fresh_work() {
   rm -rf "$WORK"
@@ -25,6 +30,7 @@ fresh_work() {
 }
 
 AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
+REC=refs/sync/upstream
 
 @test "pure fork fast-forwards default branch" {
   set_ref "$TG" refs/heads/main "$A"
@@ -42,6 +48,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
+  no_record main
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/main\tundeclared')" ]
 }
 
@@ -157,7 +164,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   [ "$(synced | wc -l)" -eq 4 ]
 }
 
-@test "moved upstream tag is updated" {
+@test "moved upstream tag stops" {
   set_ref "$TG" refs/heads/main "$B"
   set_ref "$TG" refs/tags/v1 "$A"
   set_ref "$UP" refs/tags/v1 "$B"
@@ -168,9 +175,9 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   entry mirror '[]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ "$(plan_line refs/tags/v1)" = "$(printf '%s\t%s\tmirror' "$A" "$B")" ]
-  [ "$(plan_line refs/tags/v2)" = "$(printf '%s\t%s\tmirror' "$T1" "$T2")" ]
-  [ "$(synced | wc -l)" -eq 2 ]
+  [ -z "$(synced)" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/tags/v1\tupstream moved tag (target %s, upstream %s)\nrefs/tags/v2\tupstream moved tag (target %s, upstream %s)' \
+    "${A:0:7}" "${B:0:7}" "${T1:0:7}" "${T2:0:7}")" ]
 }
 
 @test "deleted upstream branch is deleted when contained" {
@@ -195,6 +202,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ -z "$(synced)" ]
+  no_record old
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/old\tunique commits')" ]
 }
 
@@ -208,6 +216,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(synced)" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$A" "$B")" ]
+  no_record dev
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/dev\tundeclared')" ]
 }
 
@@ -222,6 +231,8 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ -z "$(synced)" ]
+  no_record feat
+  no_record fix
   [ "$(sort "$WORK/skipped.txt")" = "$(printf 'refs/heads/feat\tcontribution\nrefs/heads/fix\tcontribution')" ]
 }
 
@@ -341,6 +352,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ -z "$(synced)" ]
+  no_record master
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/master\tundeclared')" ]
 }
 
@@ -357,6 +369,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ -z "$(synced)" ]
+  no_record master
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/master\tundeclared')" ]
 }
 
@@ -369,6 +382,8 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
+  no_record feat
+  no_record main
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/feat\tcontribution\nrefs/heads/main\tcontribution')" ]
 }
 
@@ -409,8 +424,6 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   [ -z "$(synced)" ]
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/\tinvalid ref name\nrefs/heads/feat\tinvalid ref name')" ]
 }
-
-REC=refs/sync/upstream
 
 @test "fast-forward writes the upstream record" {
   set_ref "$TG" refs/heads/main "$A"
@@ -560,6 +573,104 @@ REC=refs/sync/upstream
   [ "$(plan_line refs/tags/sync/main)" = "$(printf '%s\t%s\trecord' "$ZERO" "$B")" ]
 }
 
+REWRITE='upstream rewritten (synced %s, upstream now %s, %s synced commits gone upstream; target has %s)'
+
+# rewrite_skip REF REC UP GONE OWN prints the skipped.txt line of a rewrite.
+rewrite_skip() {
+  # shellcheck disable=SC2059 # the format is REWRITE
+  printf "%s\t$REWRITE" "$1" "${2:0:7}" "${3:0:7}" "$4" "$5"
+}
+
+@test "force-pushed default branch stops" {
+  C=$(commit "$A" c x)
+  set_ref "$UP" refs/heads/main "$C"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" "$REC/main" "$B"
+  entry fork
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(rewrite_skip refs/heads/main "$B" "$C" 1 'no own commits')" ]
+}
+
+@test "force-pushed default branch with own commits stops" {
+  C=$(commit "$A" c x)
+  O=$(commit "$B" o own)
+  set_ref "$UP" refs/heads/main "$C"
+  set_ref "$TG" refs/heads/main "$O"
+  set_ref "$TG" "$REC/main" "$B"
+  entry fork
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(rewrite_skip refs/heads/main "$B" "$C" 1 '1 own commits')" ]
+}
+
+@test "force-pushed followed branch stops, others sync" {
+  R1=$(commit "$A" r one)
+  R2=$(commit "$R1" r two)
+  R3=$(commit "$A" r three)
+  set_ref "$UP" refs/heads/rel "$R3"
+  set_ref "$TG" refs/heads/main "$A"
+  set_ref "$TG" refs/heads/rel "$R2"
+  set_ref "$TG" "$REC/rel" "$R2"
+  entry mirror '[]' '["rel"]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(synced)" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$A" "$B")" ]
+  no_record rel
+  [ "$(cat "$WORK/skipped.txt")" = "$(rewrite_skip refs/heads/rel "$R2" "$R3" 2 'no own commits')" ]
+}
+
+@test "rewritten onto stops the declared branch" {
+  C=$(commit "$A" c x)
+  O=$(commit "$B" o own)
+  set_ref "$UP" refs/heads/main "$C"
+  set_ref "$TG" refs/heads/main "$O"
+  set_ref "$TG" "$REC/main" "$B"
+  entry fork "$AUTO"
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(rewrite_skip refs/heads/main "$B" "$C" 1 '1 own commits')" ]
+  # a manual branch rebased on request stops the same way
+  fresh_work
+  entry fork '[{"name": "main", "onto": "main", "rebase": "manual"}]'
+  SYNC_BRANCH=main run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(rewrite_skip refs/heads/main "$B" "$C" 1 '1 own commits')" ]
+}
+
+@test "declared branch with a record outside the branch rebases" {
+  X=$(commit "$A" x old)
+  O=$(commit "$A" o own)
+  set_ref "$TG" refs/heads/main "$O"
+  set_ref "$TG" "$REC/main" "$X"
+  entry fork "$AUTO"
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  N=$(git -C "$WORK/repo" rev-parse refs/heads/main)
+  [ "$(plan_line refs/heads/main)" = "$(printf '%s\t%s\trebase' "$O" "$N")" ]
+  [ "$(plan_line "$REC/main")" = "$(printf '%s\t%s\trecord' "$X" "$B")" ]
+  [ ! -s "$WORK/skipped.txt" ]
+}
+
+@test "without a record a diverged branch stays undeclared" {
+  C=$(commit "$A" c x)
+  R1=$(commit "$A" r one)
+  R2=$(commit "$A" r two)
+  set_ref "$UP" refs/heads/main "$C"
+  set_ref "$UP" refs/heads/rel "$R2"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/heads/rel "$R1"
+  entry mirror '[]' '["rel"]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$WORK/plan.tsv" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/main\tundeclared\nrefs/heads/rel\tundeclared')" ]
+}
+
 # up_refs prints the upstream refs fetched into the work repository.
 up_refs() {
   git -C "$WORK/repo" for-each-ref --format='%(refname)' refs/up/
@@ -622,7 +733,7 @@ up_refs() {
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ -z "$(synced)" ]
-  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/tags/v1\tunique commits')" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/tags/v1\tupstream moved tag (target %s, upstream %s)' "${O:0:7}" "${B:0:7}")" ]
 }
 
 @test "tag commit on an unfetched upstream branch is no unique commit" {
@@ -639,8 +750,9 @@ up_refs() {
   entry fork
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ "$(synced)" = "$(printf 'refs/tags/v1\t%s\t%s\tmirror\nrefs/tags/v0\t%s\t%s\tdelete' "$S" "$B" "$R" "$ZERO")" ]
-  [ ! -s "$WORK/skipped.txt" ]
+  [ "$(synced)" = "$(printf 'refs/tags/v0\t%s\t%s\tdelete' "$R" "$ZERO")" ]
+  # a moved tag stops even when its old commit is upstream
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/tags/v1\tupstream moved tag (target %s, upstream %s)' "${S:0:7}" "${B:0:7}")" ]
   # the extra heads are not synced
   [ "$(git -C "$WORK/repo" for-each-ref --format='%(refname)' refs/up/heads/)" = refs/up/heads/main ]
 }
@@ -702,6 +814,7 @@ up_refs() {
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(synced)" = "$(printf 'refs/heads/release/v2\t%s\t%s\tmirror' "$A" "$C")" ]
+  no_record release/v1
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/release/v1\tundeclared')" ]
 }
 
@@ -718,6 +831,7 @@ up_refs() {
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ -z "$(synced)" ]
+  no_record release/v1
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/release/v1\tcontribution')" ]
 }
 
@@ -739,6 +853,7 @@ up_refs() {
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ -z "$(synced)" ]
+  no_record release/old
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/release/old\tunique commits')" ]
 }
 
@@ -827,8 +942,8 @@ hook() {
 }
 
 # full_plan sets up a fork (follow .*) whose plan has every reason:
-# rebase + backup (feat), ff (main), mirror create (dev), mirror update (tag
-# v1), delete (old).
+# rebase + backup (feat), ff (main), mirror create (dev, tag v1), delete
+# (old).
 full_plan() {
   C=$(commit "$A" d dev)
   OF=$(commit "$A" g feat)
@@ -837,7 +952,6 @@ full_plan() {
   set_ref "$TG" refs/heads/main "$A"
   set_ref "$TG" refs/heads/feat "$OF"
   set_ref "$TG" refs/heads/old "$A"
-  set_ref "$TG" refs/tags/v1 "$A"
   entry fork '[{"name": "feat", "onto": "main", "rebase": "auto"}]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
