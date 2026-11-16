@@ -523,3 +523,54 @@ sync_findings() {
   [ "$(count check-failed)" -eq 1 ]
   [ "$(message check-failed)" = "sync-failed: HTTP 502: bad (HTTP 502)" ]
 }
+
+@test "cancelled newest run is no general finding" {
+  managed spali/f
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 11 10
+  sync_jobs 11 "$PLAN=cancelled" 'sync / Sync · spali/f=skipped'
+  sync_jobs 10 "$PLAN=success" 'sync / Sync · spali/f=success'
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 0 ]
+  grep -qF 'runs/10/jobs' "$GH_LOG"
+}
+
+@test "the general finding comes from the newest run whose plan job has a result" {
+  managed spali/f
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 12 11 10 9
+  sync_jobs 12 "$PLAN=success" 'sync / Sync · spali/f=success'
+  sync_jobs 11 "$PLAN=cancelled"
+  sync_jobs 10 "$PLAN=failure" 'sync / Sync · spali/f=skipped'
+  sync_jobs 9 "$PLAN=success"
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 0 ]
+  run ! grep -F 'runs/11/jobs' "$GH_LOG"
+}
+
+@test "a cancelled newest run does not hide an older failed plan job" {
+  managed spali/f
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 12 11 10
+  sync_jobs 12 "$PLAN=cancelled" 'sync / Sync · spali/f=skipped'
+  sync_jobs 11 "$PLAN=failure" 'sync / Sync · spali/f=skipped'
+  sync_jobs 10 "$PLAN=success" 'sync / Sync · spali/f=success'
+  all_lists '.'
+  run_script
+  [ "$(sync_findings)" = "red - sync run failed before the repositories: https://github.com/ctl/x/actions/runs/11" ]
+}
+
+@test "the plan job keeps runs read until it has a result" {
+  managed spali/f
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 11 10
+  sync_jobs 11 "$PLAN=skipped" 'sync / Sync · spali/f=failure'
+  sync_jobs 10 "$PLAN=timed_out"
+  all_lists '.'
+  run_script
+  [ "$(sync_findings | sort)" = "$(printf '%s\n' \
+    "red - sync run failed before the repositories: https://github.com/ctl/x/actions/runs/10" \
+    "red spali/f last sync of this repository failed: https://github.com/ctl/x/actions/runs/11/job/112")" ]
+}
