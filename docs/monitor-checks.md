@@ -11,7 +11,7 @@ file `repos.yml`. Settings and rulesets change only with the owner's approval.
 
 Groups: [Release flow](#release-flow) · [Settings](#settings) ·
 [Health](#health) · [Forks](#forks) · [Mirrors](#mirrors) · [Lists](#lists) ·
-[Monitor](#monitor)
+[Managed repositories](#managed-repositories) · [Monitor](#monitor)
 
 # Release flow
 
@@ -110,7 +110,7 @@ block moving a tag. ⚪ Skipped like `ruleset-main`.
 
 # Health
 
-Own repositories that are neither forks nor mirrors.
+Own repositories that are neither forks nor mirrors nor managed.
 
 ## main-red
 
@@ -149,6 +149,8 @@ should keep running.
 **Fix:** fix the code, or dismiss the alert with a reason.
 
 # Forks
+
+Forks with an upstream that are not managed.
 
 ## fork-behind
 
@@ -227,43 +229,66 @@ finding with a reason.
 
 # Managed repositories
 
-Forks and mirrors listed under `managed:` in `repos.yml`.
+Forks and mirrors listed under `managed:` in `repos.yml`. The sync workflow
+of the control repository keeps them up to date; the monitor only reports.
+A fork has a `github.com` upstream, everything else is a mirror.
 
 ## managed-missing
 
-🔴 A repository under `managed:` does not exist or is not reachable.
+🔴 A repository under `managed:` does not exist ("managed repository does
+not exist (the sync creates it)"). No other check runs for it.
 
-**Fix:** create it or fix the entry.
+**Fix:** let the sync run, or fix the `repo` of the entry.
 
 ## managed-settings
 
-🔴 A managed repository deviates from its declared settings (issues, pull requests, wiki, discussions, projects, Actions).
+🔴 A managed repository deviates from its settings: issues, pull requests,
+wiki, discussions, projects and Actions are all off unless its `settings:`
+says otherwise. The detail lists each difference
+(`has_wiki is true, expected false`).
 
-**Fix:** correct the repository or the `settings:` of its entry.
+**Fix:** correct the repository settings, or the `settings:` of its entry.
 
 ## managed-behind
 
-🔴 A managed repository lacks upstream commits older than 48 hours.
+🔴 A managed repository lacks upstream changes for more than 48 hours (the
+24-hour sync interval plus 24 hours):
 
-**Fix:** look at the sync job.
+- a fork: its default branch misses commits of the upstream default branch,
+  or a branch declared with `rebase: auto` misses commits of its `onto`, and
+  the oldest missing commit is older than 48 hours
+  (`main: 3 upstream commits missing, oldest from …`). A declared default
+  branch follows its declaration;
+- a mirror, or a fork with `refs: all`: branches or tags of the upstream are
+  missing or differ (declared branches excepted), and the last push is older
+  than 48 hours (`2 refs differ, last push …`).
+
+**Fix:** look at the sync run (see `sync-failed`).
 
 ## branch-undeclared
 
-🔴 A branch of a managed repository with own commits is not declared in `branches:` (🔵 for an unmanaged fork).
+🔴 A branch of a managed fork has own commits but is not declared in
+`branches:` and is not the head of an open pull request from the fork to
+upstream. Own commits are counted against the upstream branch of the same
+name, else the upstream default branch. The sync does not touch such a
+branch. (🔵 for an unmanaged fork.)
 
-**Fix:** declare the branch or remove it.
+**Fix:** declare the branch with its `onto` and `rebase`, or delete it.
 
 ## rebase-pending
 
-🔵 A declared branch with `rebase: manual` awaits a rebase onto upstream.
+🔵 A branch declared with `rebase: manual` is behind its `onto` upstream
+(`wip: 2 upstream commits to rebase onto main`).
 
-**Fix:** rebase it.
+**Fix:** rebase it by hand and push.
 
 ## sync-failed
 
-🔴 The last sync of a managed repository failed.
+🔴 The newest completed run of the workflow `sync.yml` in the control
+repository did not succeed; the detail links the run. No run yet is no
+finding. ⚪ Skipped in a local run, where there is no control repository.
 
-**Fix:** read the sync log.
+**Fix:** read the log of the run, fix the cause, run the sync again.
 
 ## contribution-stale
 

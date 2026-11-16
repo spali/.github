@@ -27,9 +27,9 @@
 # finding is open. The caller owns the schedule and the concurrency group.
 #
 # Jobs: Inventory (control file, inventory, the jobs per check group) → one
-# matrix job per check group (release, settings, health, forks, mirrors) and
-# Lists → Report (collects the findings of all jobs as artifacts, kept 1 day;
-# job summary and overview issue). The control file chooses one job per group
+# matrix job per check group (release, settings, health, forks, mirrors,
+# managed) and Lists → Report (collects the findings of all jobs as artifacts,
+# kept 1 day; job summary and overview issue). The control file chooses one job per group
 # (monitor.jobs: per-group, default) or one per group and repository
 # (per-repo), and the runner of all jobs but Inventory (monitor.runs-on).
 name: Monitor
@@ -70,6 +70,7 @@ jobs:
       health: ${{ steps.matrix.outputs.health }}
       forks: ${{ steps.matrix.outputs.forks }}
       mirrors: ${{ steps.matrix.outputs.mirrors }}
+      managed: ${{ steps.matrix.outputs.managed }}
     steps:
       - &app-token
         name: Create app token
@@ -111,7 +112,7 @@ jobs:
         if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
         run: |
           groups=$(.monitor/scripts/monitor.sh matrix)
-          for g in release settings health forks mirrors; do
+          for g in release settings health forks mirrors managed; do
             echo "$g=$(jq -c --arg g "$g" '.[$g]' <<<"$groups")" >>"$GITHUB_OUTPUT"
             echo "$g: $(jq -r --arg g "$g" '.[$g] | length' <<<"$groups") repositories"
           done
@@ -212,6 +213,18 @@ jobs:
         repo: ${{ fromJSON(needs.prepare.outputs.mirrors) }}
     steps: *group-steps
 
+  managed:
+    name: Managed · ${{ matrix.repo || 'all repositories' }}
+    needs: prepare
+    if: ${{ !cancelled() && needs.prepare.outputs.ready == 'true' && needs.prepare.outputs.managed != '[]' }}
+    runs-on: ${{ fromJSON(needs.prepare.outputs.runner) }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.prepare.outputs.managed) }}
+    steps: *group-steps
+
   lists:
     name: Lists
     needs: prepare
@@ -234,7 +247,7 @@ jobs:
 
   report:
     name: Report
-    needs: [prepare, release, settings, health, forks, mirrors, lists]
+    needs: [prepare, release, settings, health, forks, mirrors, managed, lists]
     if: ${{ !cancelled() && needs.prepare.outputs.ready == 'true' }}
     runs-on: ${{ fromJSON(needs.prepare.outputs.runner) }}
     timeout-minutes: 10

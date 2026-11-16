@@ -186,3 +186,12 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
   [ "$(count fork-sync-stale)" -eq 1 ]
   [ "$(count check-failed)" -eq 0 ]
 }
+
+@test "managed fork is skipped by fork checks" {
+  jq -n '[{name: "spali/F", fork: true, default_branch: "main",
+    parent: {name: "up/f", default_branch: "dev"}}]' >"$INVENTORY"
+  echo '{"mirrors":[],"forks":[],"managed":[{"repo":"spali/f","upstream":"https://github.com/up/f"}]}' >"$CONFIG"
+  run_script
+  [ ! -s "$GH_LOG" ]
+  [ ! -s "$FINDINGS" ]
+}

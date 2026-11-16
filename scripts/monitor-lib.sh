@@ -130,3 +130,69 @@ disabled_workflows() {
     .workflows // [] | .[] | select(.state == "disabled_inactivity") |
     "\(.name) (\(.path)) disabled by GitHub after 60 days of inactivity"'
 }
+
+# ls_remote URL OUTFILE writes "<ref> <sha>" lines (peeled ^{} refs dropped).
+ls_remote() {
+  local raw
+  raw=$(mktemp)
+  if ! GIT_TERMINAL_PROMPT=0 timeout 120 git ls-remote --heads --tags "$1" >"$raw" 2>/dev/null; then
+    rm -f "$raw"
+    return 1
+  fi
+  awk -F'\t' 'NF == 2 && $2 !~ /\^\{\}$/ {print $2, $1}' "$raw" >"$2"
+  rm -f "$raw"
+}
+
+# api_refs REPO OUTFILE [CHECK]: the same list for a private repository via
+# the API. Errors are check-failed findings of CHECK (default mirror-behind).
+api_refs() {
+  local check=${3:-mirror-behind} kind part
+  : >"$2"
+  for kind in heads tags; do
+    part=$(mktemp)
+    if ! paged "$check" "$1" "repos/$1/git/matching-refs/$kind" \
+      '{ref, sha: .object.sha}' "$part"; then
+      rm -f "$part"
+      return 1
+    fi
+    if ! jq -r '.[] | "\(.ref) \(.sha)"' "$part" >>"$2" 2>/dev/null; then
+      parse_failed "$check" "$1"
+      rm -f "$part"
+      return 1
+    fi
+    rm -f "$part"
+  done
+}
+
+# undeclared_branches CHECK REPO UPSTREAM_REPO UPSTREAM_DEFAULT DECLARED_JSON
+# OPEN_PRS_FILE prints "branch<TAB>n" for every branch of REPO with n > 0 own
+# commits that is not declared (DECLARED_JSON: JSON array of branch names) and
+# not the head of an open upstream pull request from REPO (OPEN_PRS_FILE: JSON
+# array of {head_repo, head_ref}). Own commits are counted against the
+# upstream branch of the same name, else UPSTREAM_DEFAULT. API errors are
+# check-failed findings of CHECK; the function then returns 1 after printing
+# the branches found so far.
+undeclared_branches() {
+  local check=$1 repo=$2 up=$3 updef=$4 declared=$5 prs=$6 tb ub list branch base body n
+  tb=$(mktemp)
+  ub=$(mktemp)
+  # shellcheck disable=SC2064 # expand now
+  trap "rm -f '$tb' '$ub'; trap - RETURN" RETURN
+  paged "$check" "$repo" "repos/$repo/branches?per_page=100" '{name}' "$tb" || return 1
+  paged "$check" "$repo" "repos/$up/branches?per_page=100" '{name}' "$ub" || return 1
+  # shellcheck disable=SC2016 # jq program
+  json_out "$check" "$repo" list -r --argjson d "$declared" --arg r "$repo" --arg def "$updef" \
+    --slurpfile u "$ub" --slurpfile p "$prs" '
+    [$u[0][].name] as $un |
+    [$p[0][] | select((.head_repo // "" | ascii_downcase) == ($r | ascii_downcase)) | .head_ref] as $contrib |
+    .[] | .name | select(IN($d[]) or IN($contrib[]) | not) |
+    [., (if IN($un[]) then . else $def end)] | @tsv' "$tb" || return 1
+  while IFS=$'\t' read -r branch base; do
+    [[ -n $branch ]] || continue
+    body=$(fetch "$check" "$repo" "repos/$up/compare/$base...${repo%%/*}:${repo#*/}:$branch") || return 1
+    json_out "$check" "$repo" n -r '.ahead_by // 0' <<<"$body" || return 1
+    if ((n > 0)); then
+      printf '%s\t%s\n' "$branch" "$n"
+    fi
+  done <<<"$list"
+}
