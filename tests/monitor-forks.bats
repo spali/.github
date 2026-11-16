@@ -338,3 +338,14 @@ pr_aged() {
   run_script
   ! grep -q 'state=closed' "$GH_LOG"
 }
+
+@test "compare URLs are encoded" {
+  jq -n '[{name: "spali/f", fork: true, default_branch: "x/a#1",
+    parent: {name: "up/f", default_branch: "rel/b#2"}}]' >"$INVENTORY"
+  respond_jq '*repos/up/f/pulls?state=open&head=spali:*&per_page=100 --paginate' '[]'
+  run_script
+  grep -qF 'repos/spali/f/compare/x%2Fa%231...up:rel%2Fb%232' "$GH_LOG"
+  grep -qF 'repos/up/f/compare/rel%2Fb%232...spali:f:x%2Fa%231' "$GH_LOG"
+  grep -qF 'repos/up/f/compare/rel%2Fb%232...spali:f:feature' "$GH_LOG"
+  run ! grep -E 'compare/[^ ]*#' "$GH_LOG"
+}

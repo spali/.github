@@ -23,7 +23,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
 
 @test "pure fork fast-forwards default branch" {
   set_ref "$TG" refs/heads/main "$A"
-  entry fork default
+  entry fork
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$A" "$B")" ]
@@ -33,7 +33,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
 @test "fork with undeclared own commits is skipped" {
   O=$(commit "$A" o own)
   set_ref "$TG" refs/heads/main "$O"
-  entry fork default
+  entry fork
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
@@ -44,7 +44,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   O1=$(GIT_AUTHOR_NAME=me commit "$A" o1 one "own one")
   O2=$(GIT_AUTHOR_NAME=me commit "$O1" o2 two "own two")
   set_ref "$TG" refs/heads/main "$O2"
-  entry fork default "$AUTO"
+  entry fork "$AUTO"
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   N=$(git -C "$WORK/repo" rev-parse refs/heads/main)
@@ -63,7 +63,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   C=$(commit "$B" o1 one "picked one")
   set_ref "$UP" refs/heads/main "$C"
   set_ref "$TG" refs/heads/main "$O2"
-  entry fork default "$AUTO"
+  entry fork "$AUTO"
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   N=$(git -C "$WORK/repo" rev-parse refs/heads/main)
@@ -74,7 +74,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
 @test "conflict aborts without plan" {
   O=$(commit "$A" f own)
   set_ref "$TG" refs/heads/main "$O"
-  entry fork default "$AUTO"
+  entry fork "$AUTO"
   run --separate-stderr "$SCRIPT" plan
   [ "$status" -eq 1 ]
   [ "${stderr_lines[-1]}" = "error: branch main: rebase onto main failed (conflict)" ]
@@ -86,7 +86,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   O=$(commit "$A" o own)
   set_ref "$TG" refs/heads/main "$B"
   set_ref "$TG" refs/heads/feat "$O"
-  entry fork default '[{"name": "feat", "onto": "dev", "rebase": "auto"}]'
+  entry fork '[{"name": "feat", "onto": "dev", "rebase": "auto"}]'
   run --separate-stderr "$SCRIPT" plan
   [ "$status" -eq 1 ]
   [[ $stderr == *"error: "*"feat"*"onto dev missing upstream"* ]]
@@ -98,7 +98,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   O=$(commit "$A" o own)
   set_ref "$TG" refs/heads/main "$B"
   set_ref "$TG" refs/heads/feat "$O"
-  entry fork default '[{"name": "feat", "onto": "main", "rebase": "manual"}]'
+  entry fork '[{"name": "feat", "onto": "main", "rebase": "manual"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
@@ -118,7 +118,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
 
 @test "missing manual branch is created from onto" {
   set_ref "$TG" refs/heads/main "$B"
-  entry fork default '[{"name": "feat", "onto": "main", "rebase": "manual"}]'
+  entry fork '[{"name": "feat", "onto": "main", "rebase": "manual"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/feat\t%s\t%s\trebase' "$ZERO" "$B")" ]
@@ -127,24 +127,24 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
 
 @test "missing manual branch with a missing onto fails without push" {
   set_ref "$TG" refs/heads/main "$B"
-  entry fork default '[{"name": "feat", "onto": "dev", "rebase": "manual"}]'
+  entry fork '[{"name": "feat", "onto": "dev", "rebase": "manual"}]'
   run --separate-stderr "$SCRIPT" plan
   [ "$status" -eq 1 ]
   [[ $stderr == *"onto dev missing upstream"* ]]
   [ ! -e "$WORK/plan.tsv" ]
 }
 
-@test "mirror mode adds new branches and tags" {
+@test "follow .* syncs all branches" {
   C=$(commit "$A" d dev)
   set_ref "$UP" refs/heads/dev "$C"
   set_ref "$UP" refs/tags/v1 "$A"
   T2=$(atag v2 "$B")
   set_ref "$UP" refs/tags/v2 "$T2"
   set_ref "$TG" refs/heads/main "$A"
-  entry mirror all
+  entry mirror '[]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ "$(plan_line refs/heads/main)" = "$(printf '%s\t%s\tmirror' "$A" "$B")" ]
+  [ "$(plan_line refs/heads/main)" = "$(printf '%s\t%s\tff' "$A" "$B")" ]
   [ "$(plan_line refs/heads/dev)" = "$(printf '%s\t%s\tmirror' "$ZERO" "$C")" ]
   [ "$(plan_line refs/tags/v1)" = "$(printf '%s\t%s\tmirror' "$ZERO" "$A")" ]
   [ "$(plan_line refs/tags/v2)" = "$(printf '%s\t%s\tmirror' "$ZERO" "$T2")" ]
@@ -160,7 +160,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   T2=$(atag v2 "$B")
   set_ref "$TG" refs/tags/v2 "$T1"
   set_ref "$UP" refs/tags/v2 "$T2"
-  entry mirror all
+  entry mirror '[]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(plan_line refs/tags/v1)" = "$(printf '%s\t%s\tmirror' "$A" "$B")" ]
@@ -174,7 +174,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   set_ref "$TG" refs/heads/dev "$A"
   set_ref "$TG" refs/heads/old "$A"
   set_ref "$TG" refs/tags/gone "$A"
-  entry mirror all
+  entry mirror '[]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(plan_line refs/heads/old)" = "$(printf '%s\t%s\tdelete' "$A" "$ZERO")" ]
@@ -186,7 +186,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   O=$(commit "$A" o own)
   set_ref "$TG" refs/heads/main "$B"
   set_ref "$TG" refs/heads/old "$O"
-  entry mirror all
+  entry mirror '[]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
@@ -199,10 +199,10 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   set_ref "$UP" refs/heads/dev "$C"
   set_ref "$TG" refs/heads/main "$A"
   set_ref "$TG" refs/heads/dev "$O"
-  entry fork all
+  entry fork '[]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\tmirror' "$A" "$B")" ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$A" "$B")" ]
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/dev\tundeclared')" ]
 }
 
@@ -213,7 +213,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   set_ref "$TG" refs/heads/feat "$A"
   set_ref "$TG" refs/heads/fix "$A"
   printf '%s\n' fix feat >"$WORK/contrib.txt"
-  entry mirror all
+  entry mirror '[]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
@@ -223,10 +223,9 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
 @test "empty source aborts" {
   del_ref "$UP" refs/heads/main
   set_ref "$TG" refs/heads/main "$A"
-  for kind in "fork default" "mirror all"; do
+  for kind in fork mirror; do
     fresh_work
-    # shellcheck disable=SC2086 # two words on purpose
-    entry $kind
+    entry "$kind" '[]' '[".*"]'
     run --separate-stderr "$SCRIPT" plan
     [ "$status" -eq 1 ]
     [ "$stderr" = "error: upstream has 0 refs, target 1: refusing (empty or broken source)" ]
@@ -239,7 +238,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   for r in heads/main heads/a heads/b heads/c heads/d tags/v1; do
     set_ref "$TG" "refs/$r" "$A"
   done
-  entry mirror all
+  entry mirror '[]' '[".*"]'
   run --separate-stderr "$SCRIPT" plan
   [ "$status" -eq 1 ]
   [ "$stderr" = "error: upstream has 2 refs, target 6: refusing (empty or broken source)" ]
@@ -256,7 +255,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   set_ref "$UP" 'refs/heads/--upload-pack=touch_pwned' "$A"
   set_ref "$UP" refs/tags/-t "$A"
   printf '%s\n' "$A" >"$UP/refs/heads/bad..name"
-  entry mirror all
+  entry mirror '[]' '[".*"]'
   cd "$BATS_TEST_TMPDIR"
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
@@ -265,12 +264,11 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   [ -z "$(find "$BATS_TEST_TMPDIR" -name 'touch_pwned*' -o -name pwned)" ]
   # a declared branch from the config is checked too
   fresh_work
-  entry fork default '[{"name": "--exec=x", "onto": "main", "rebase": "auto"}, {"name": "main", "onto": "-x", "rebase": "auto"}]'
+  entry fork '[{"name": "--exec=x", "onto": "main", "rebase": "auto"}, {"name": "main", "onto": "-x", "rebase": "auto"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
-  # default mode reads no tags
-  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/%s\tinvalid ref name\n' --exec=x --upload-pack=touch_pwned main)" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/%s\tinvalid ref name\n' --exec=x --upload-pack=touch_pwned main; printf 'refs/tags/-t\tinvalid ref name')" ]
   [ -z "$(find "$BATS_TEST_TMPDIR" -name 'touch_pwned*' -o -name pwned)" ]
 }
 
@@ -281,7 +279,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   set_ref "$UP" refs/merge-requests/1/head "$C"
   set_ref "$UP" refs/pull/2/head "$D"
   set_ref "$UP" refs/remotes/origin/x "$D"
-  entry mirror all
+  entry mirror '[]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
@@ -301,7 +299,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   set_ref "$TG" refs/backup/main "$X"
   C=$(commit "$B" f c)
   set_ref "$UP" refs/heads/main "$C"
-  entry fork default '[{"name": "main", "onto": "main", "rebase": "auto"},
+  entry fork '[{"name": "main", "onto": "main", "rebase": "auto"},
     {"name": "feat", "onto": "main", "rebase": "auto"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
@@ -319,9 +317,9 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
 @test "missing onto fails without own commits" {
   set_ref "$TG" refs/heads/main "$B"
   set_ref "$TG" refs/heads/feat "$B"
-  for refs in default all; do
+  for follow in '[]' '[".*"]'; do
     fresh_work
-    entry fork "$refs" '[{"name": "feat", "onto": "dev", "rebase": "auto"}]'
+    entry fork '[{"name": "feat", "onto": "dev", "rebase": "auto"}]' "$follow"
     run --separate-stderr "$SCRIPT" plan
     [ "$status" -eq 1 ]
     [ "$stderr" = "error: branch feat: onto dev missing upstream" ]
@@ -330,20 +328,21 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
 }
 
 @test "target default branch is never deleted" {
+  # master is gone upstream and has own commits: kept as undeclared
   git -C "$TG" symbolic-ref HEAD refs/heads/master
-  set_ref "$TG" refs/heads/master "$A"
+  set_ref "$TG" refs/heads/master "$(commit "$A" o own)"
   set_ref "$TG" refs/heads/main "$B"
-  entry mirror all
+  entry mirror '[]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
-  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/master\tdefault branch')" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/master\tundeclared')" ]
 }
 
 @test "target default follows the upstream default" {
   git -C "$TG" symbolic-ref HEAD refs/heads/master
   set_ref "$TG" refs/heads/master "$A"
-  entry fork default
+  entry fork
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/master\t%s\t%s\tff' "$A" "$B")" ]
@@ -356,12 +355,12 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/master\tundeclared')" ]
 }
 
-@test "contribution branches are never planned in default mode" {
+@test "contribution branches are never planned without follow" {
   O=$(commit "$A" o own)
   set_ref "$TG" refs/heads/main "$A"
   set_ref "$TG" refs/heads/feat "$O"
   printf '%s\n' main feat >"$WORK/contrib.txt"
-  entry fork default '[{"name": "feat", "onto": "main", "rebase": "auto"}]'
+  entry fork '[{"name": "feat", "onto": "main", "rebase": "auto"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
@@ -370,7 +369,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
 
 @test "rebase needs a committer identity" {
   set_ref "$TG" refs/heads/main "$B"
-  entry fork default
+  entry fork
   for v in GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL; do
     fresh_work
     run --separate-stderr env -u "$v" "$SCRIPT" plan
@@ -381,7 +380,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
 
 @test "backup prefix must not be a branch or tag namespace" {
   set_ref "$TG" refs/heads/main "$B"
-  entry fork default
+  entry fork
   for p in refs/heads/ refs/heads/backup/ refs/tags/ refs/backup refs/; do
     fresh_work
     BACKUP_PREFIX=$p run --separate-stderr "$SCRIPT" plan
@@ -399,7 +398,7 @@ AUTO='[{"name": "main", "onto": "main", "rebase": "auto"}]'
   O=$(commit "$A" o own)
   set_ref "$TG" refs/heads/main "$B"
   set_ref "$TG" refs/heads/feat "$O"
-  entry fork default '[{"name": "feat", "onto": "", "rebase": "auto"}, {"name": "", "onto": "main", "rebase": "auto"}]'
+  entry fork '[{"name": "feat", "onto": "", "rebase": "auto"}, {"name": "", "onto": "main", "rebase": "auto"}]'
   SYNC_BRANCH=feat run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
@@ -411,23 +410,52 @@ up_refs() {
   git -C "$WORK/repo" for-each-ref --format='%(refname)' refs/up/
 }
 
-@test "default mode fetches only the default branch" {
+@test "mirror without follow syncs only the default branch and tags" {
   C=$(commit "$A" d dev)
-  T=$(atag v2 "$C")
+  D=$(commit "$A" x other)
+  T=$(atag v2 "$D")
   set_ref "$UP" refs/heads/dev "$C"
   set_ref "$UP" refs/tags/v1 "$A"
   set_ref "$UP" refs/tags/v2 "$T"
   set_ref "$TG" refs/heads/main "$A"
-  entry fork default
+  entry mirror
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$A" "$B")" ]
-  [ "$(up_refs)" = refs/up/heads/main ]
-  [ -z "$(git -C "$WORK/repo" for-each-ref refs/tags/ refs/up/tags/)" ]
-  run git -C "$WORK/repo" cat-file -e "$T"
-  [ "$status" -ne 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\tff\nrefs/tags/v1\t%s\t%s\tmirror\nrefs/tags/v2\t%s\t%s\tmirror' \
+    "$A" "$B" "$ZERO" "$A" "$ZERO" "$T")" ]
+  [ ! -s "$WORK/skipped.txt" ]
+  [ "$(up_refs)" = "$(printf 'refs/up/heads/main\nrefs/up/tags/v1\nrefs/up/tags/v2')" ]
   run git -C "$WORK/repo" cat-file -e "$C"
   [ "$status" -ne 0 ]
+}
+
+@test "tags are synced by default" {
+  T1=$(atag v1 "$A")
+  set_ref "$UP" refs/tags/v1 "$T1"
+  set_ref "$UP" refs/tags/v2 "$B"
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/tags/v2 "$B"
+  entry fork
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/tags/v1\t%s\t%s\tmirror' "$ZERO" "$T1")" ]
+  [ "$(git -C "$WORK/repo" cat-file -t "$T1")" = tag ]
+}
+
+@test "deleted upstream tag with unique commits is kept" {
+  O=$(commit "$A" o own)
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/tags/mine "$O"
+  set_ref "$TG" refs/tags/old "$A"
+  for t in v1 v2; do
+    set_ref "$UP" "refs/tags/$t" "$B"
+    set_ref "$TG" "refs/tags/$t" "$B"
+  done
+  entry fork
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/tags/old\t%s\t%s\tdelete' "$A" "$ZERO")" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/tags/mine\tunique commits')" ]
 }
 
 @test "onto branches are fetched for declared branches" {
@@ -438,7 +466,7 @@ up_refs() {
   set_ref "$UP" refs/heads/rel "$D"
   set_ref "$TG" refs/heads/main "$B"
   set_ref "$TG" refs/heads/feat "$O"
-  entry fork default '[{"name": "feat", "onto": "dev", "rebase": "auto"}]'
+  entry fork '[{"name": "feat", "onto": "dev", "rebase": "auto"}]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(up_refs)" = "$(printf 'refs/up/heads/dev\nrefs/up/heads/main')" ]
@@ -453,7 +481,7 @@ up_refs() {
   set_ref "$UP" refs/heads/release/v1 "$C"
   set_ref "$UP" refs/heads/feature/x "$D"
   set_ref "$TG" refs/heads/main "$B"
-  entry fork default '[]' '["^release/.*"]'
+  entry fork '[]' '["^release/.*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/release/v1\t%s\t%s\tmirror' "$ZERO" "$C")" ]
@@ -468,7 +496,7 @@ up_refs() {
   set_ref "$UP" refs/heads/stable-2 "$C"
   set_ref "$UP" refs/heads/pre-stable "$C"
   set_ref "$TG" refs/heads/main "$B"
-  entry fork default '[]' '["release", "stable"]'
+  entry fork '[]' '["release", "stable"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/stable\t%s\t%s\tmirror' "$ZERO" "$C")" ]
@@ -483,7 +511,7 @@ up_refs() {
   set_ref "$TG" refs/heads/main "$B"
   set_ref "$TG" refs/heads/release/v1 "$O"
   set_ref "$TG" refs/heads/release/v2 "$A"
-  entry fork default '[]' '["release/.*"]'
+  entry fork '[]' '["release/.*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/release/v2\t%s\t%s\tmirror' "$A" "$C")" ]
@@ -499,7 +527,7 @@ up_refs() {
   set_ref "$TG" refs/heads/release/v1 "$A"
   set_ref "$TG" refs/heads/release/v2 "$O"
   printf '%s\n' release/v1 >"$WORK/contrib.txt"
-  entry fork default '[{"name": "release/v2", "onto": "main", "rebase": "manual"}]' '["release/.*"]'
+  entry fork '[{"name": "release/v2", "onto": "main", "rebase": "manual"}]' '["release/.*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
@@ -509,7 +537,7 @@ up_refs() {
 @test "followed branch gone upstream is deleted when contained" {
   set_ref "$TG" refs/heads/main "$B"
   set_ref "$TG" refs/heads/release/old "$A"
-  entry fork default '[]' '["release/.*"]'
+  entry fork '[]' '["release/.*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/release/old\t%s\t%s\tdelete' "$A" "$ZERO")" ]
@@ -520,7 +548,7 @@ up_refs() {
   O=$(commit "$A" o own)
   set_ref "$TG" refs/heads/main "$B"
   set_ref "$TG" refs/heads/release/old "$O"
-  entry fork default '[]' '["release/.*"]'
+  entry fork '[]' '["release/.*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
@@ -530,7 +558,7 @@ up_refs() {
 @test "followed target default branch is never deleted" {
   git -C "$TG" symbolic-ref HEAD refs/heads/master
   set_ref "$TG" refs/heads/master "$B"
-  entry fork default '[]' '["master"]'
+  entry fork '[]' '["master"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
@@ -539,7 +567,7 @@ up_refs() {
 
 @test "invalid follow pattern fails without plan" {
   set_ref "$TG" refs/heads/main "$A"
-  entry fork default '[]' '["release/(v"]'
+  entry fork '[]' '["release/(v"]'
   run --separate-stderr "$SCRIPT" plan
   [ "$status" -eq 1 ]
   [[ $stderr == *"error: invalid follow pattern"* ]]
@@ -554,43 +582,43 @@ up_refs() {
   set_ref "$TG" refs/heads/feature/x "$A"
   set_ref "$TG" refs/heads/feature/y "$O"
   set_ref "$TG" refs/heads/gone "$A"
-  entry fork default '[]' '["release/.*"]'
+  entry fork '[]' '["release/.*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ ! -s "$WORK/plan.tsv" ]
   [ ! -s "$WORK/skipped.txt" ]
 }
 
-@test "default mode fetches no target tags" {
+@test "tags false leaves tags alone" {
   T=$(atag v2 "$A")
+  set_ref "$UP" refs/tags/v1 "$B"
+  set_ref "$UP" refs/tags/new "$B"
   set_ref "$TG" refs/heads/main "$A"
   set_ref "$TG" refs/tags/v1 "$A"
   set_ref "$TG" refs/tags/v2 "$T"
   set_ref "$TG" refs/backup/main "$A"
-  entry fork default
-  run "$SCRIPT" plan
-  [ "$status" -eq 0 ]
-  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$A" "$B")" ]
-  [ "$(git -C "$WORK/repo" for-each-ref --format='%(refname)' refs/tg/)" = "$(printf 'refs/tg/backup/main\nrefs/tg/heads/main')" ]
-  run git -C "$WORK/repo" cat-file -e "$T"
-  [ "$status" -ne 0 ]
-  # mode all still reads the target tags (upstream has them too: no guard)
-  set_ref "$UP" refs/tags/v1 "$A"
-  fresh_work
-  entry fork all
-  run "$SCRIPT" plan
-  [ "$status" -eq 0 ]
-  [ -n "$(git -C "$WORK/repo" for-each-ref refs/tg/tags/v2)" ]
+  for kind in fork mirror; do
+    fresh_work
+    entry "$kind" '[]' '[".*"]' false
+    run "$SCRIPT" plan
+    [ "$status" -eq 0 ]
+    [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$A" "$B")" ]
+    [ ! -s "$WORK/skipped.txt" ]
+    [ "$(up_refs)" = refs/up/heads/main ]
+    [ "$(git -C "$WORK/repo" for-each-ref --format='%(refname)' refs/tg/)" = "$(printf 'refs/tg/backup/main\nrefs/tg/heads/main')" ]
+    run git -C "$WORK/repo" cat-file -e "$T"
+    [ "$status" -ne 0 ]
+  done
 }
 
-@test "mode all still fetches everything" {
+@test "follow .* fetches every branch and tag" {
   C=$(commit "$A" d dev)
   T=$(atag v2 "$C")
   set_ref "$UP" refs/heads/dev "$C"
   set_ref "$UP" refs/tags/v1 "$A"
   set_ref "$UP" refs/tags/v2 "$T"
   set_ref "$TG" refs/heads/main "$B"
-  entry fork all
+  entry fork '[]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(up_refs)" = "$(printf 'refs/up/heads/dev\nrefs/up/heads/main\nrefs/up/tags/v1\nrefs/up/tags/v2')" ]
@@ -611,9 +639,9 @@ hook() {
   chmod +x "$TG/hooks/$1"
 }
 
-# full_plan sets up a fork (refs all) whose plan has every reason:
-# rebase + backup (feat), mirror create (dev), mirror update (main, tag v1),
-# delete (old).
+# full_plan sets up a fork (follow .*) whose plan has every reason:
+# rebase + backup (feat), ff (main), mirror create (dev), mirror update (tag
+# v1), delete (old).
 full_plan() {
   C=$(commit "$A" d dev)
   OF=$(commit "$A" g feat)
@@ -623,10 +651,10 @@ full_plan() {
   set_ref "$TG" refs/heads/feat "$OF"
   set_ref "$TG" refs/heads/old "$A"
   set_ref "$TG" refs/tags/v1 "$A"
-  entry fork all '[{"name": "feat", "onto": "main", "rebase": "auto"}]'
+  entry fork '[{"name": "feat", "onto": "main", "rebase": "auto"}]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ "$(cut -f4 "$WORK/plan.tsv" | sort | tr '\n' ' ')" = "backup delete mirror mirror mirror rebase " ]
+  [ "$(cut -f4 "$WORK/plan.tsv" | sort | tr '\n' ' ')" = "backup delete ff mirror mirror rebase " ]
 }
 
 @test "push updates all planned refs" {
@@ -661,7 +689,7 @@ full_plan() {
   C=$(commit "$A" d dev)
   set_ref "$UP" refs/heads/dev "$C"
   set_ref "$TG" refs/heads/main "$A"
-  entry fork all
+  entry fork '[]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(wc -l <"$WORK/plan.tsv")" -eq 2 ]
@@ -718,7 +746,7 @@ full_plan() {
   C=$(commit "$A" d dev)
   set_ref "$UP" refs/heads/dev "$C"
   set_ref "$TG" refs/heads/main "$OM"
-  entry fork all "$AUTO"
+  entry fork "$AUTO" '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
   [ "$(cut -f1,4 "$WORK/plan.tsv" | sort | tr '\t\n' ' ,')" = "refs/backup/main backup,refs/heads/dev mirror,refs/heads/main rebase," ]
@@ -844,7 +872,7 @@ full_plan() {
   before=$(snap)
   run --separate-stderr "$SCRIPT" push
   [ "$status" -eq 1 ]
-  [ "${stderr_lines[-1]}" = "error: push failed, target in mixed state: refs/heads/feat refs/backup/feat refs/heads/dev refs/tags/v1 refs/heads/old" ]
+  [ "${stderr_lines[-1]}" = "error: push failed, target in mixed state: refs/heads/feat refs/backup/feat refs/heads/dev refs/heads/old refs/tags/v1" ]
   [ "$(snap)" = "$before" ]
 }
 

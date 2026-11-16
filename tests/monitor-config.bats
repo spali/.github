@@ -230,7 +230,8 @@ version: 1
 managed:
   - repo: spali/a
     upstream: https://github.com/o/a.git/
-    refs: all
+    follow: ['.*']
+    tags: false
     private: true
     branches:
       release/1.x: { onto: main, rebase: manual }
@@ -254,12 +255,14 @@ YAML
   managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a/tree/x"}' "managed[0].upstream is not a github.com repository URL"
 }
 
-@test "managed: refs must be default or all" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", refs: some}' "managed[0].refs must be default or all"
+@test "managed: refs is an unknown key" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", refs: all}' "managed[0]: unknown key refs"
+  managed_bad '  - {repo: spali/a, upstream: "https://example.org/a", refs: default}' "managed[0]: unknown key refs"
 }
 
-@test "managed: refs only applies to forks" {
-  managed_bad '  - {repo: spali/a, upstream: "https://example.org/a", refs: all}' "managed[0]: refs only applies to forks"
+@test "managed: tags must be a boolean" {
+  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", tags: "no"}' "managed[0].tags must be a boolean"
+  managed_bad '  - {repo: spali/a, upstream: "https://example.org/a", tags: 0}' "managed[0].tags must be a boolean"
 }
 
 @test "managed: branch onto is required" {
@@ -319,7 +322,7 @@ YAML
 
 @test "managed: github.com host is case-insensitive" {
   managed_bad '  - {repo: spali/a, upstream: "https://GitHub.com/o/a/tree/x"}' "managed[0].upstream is not a github.com repository URL"
-  f=$(printf 'version: 1\nmanaged:\n  - {repo: spali/a, upstream: "https://GitHub.com/o/a", refs: all}\n' | mk ok.yml)
+  f=$(printf 'version: 1\nmanaged:\n  - {repo: spali/a, upstream: "https://GitHub.com/o/a", tags: true}\n' | mk ok.yml)
   run --separate-stderr "$CONFIG" validate "$f"
   [ "$status" -eq 0 ]
 }
@@ -361,9 +364,11 @@ YAML
   managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: ["a)|(?:.*"]}' "managed[0].follow[0]: invalid regular expression"
 }
 
-@test "managed: follow only applies to forks with refs default" {
-  managed_bad '  - {repo: spali/a, upstream: "https://example.org/a", follow: ["x"]}' "managed[0]: follow only applies to forks with refs default"
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", refs: all, follow: ["x"]}' "managed[0]: follow only applies to forks with refs default"
+@test "managed: follow allowed for a mirror" {
+  f=$(printf 'version: 1\nmanaged:\n  - {repo: spali/a, upstream: "https://example.org/a", follow: [".*"], tags: false}\n' | mk ok.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
 }
 
 @test "managed: valid follow passes" {
@@ -373,7 +378,6 @@ version: 1
 managed:
   - repo: spali/a
     upstream: https://github.com/o/a
-    refs: default
     follow: ['^release/v[0-9]+\.[0-9]+$', 'stable']
   - repo: spali/b
     upstream: https://github.com/o/b

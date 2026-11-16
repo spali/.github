@@ -356,11 +356,13 @@ The workflow `sync.yml` runs daily (04:47 UTC) and on every change of
    `branches:` (step 1), or delete it or reset it to upstream by hand.
 8. Right after the sync created a fork, the first fetch may fail once (GitHub
    is still copying the repository); the next run recovers, or re-run.
-9. A fork with `refs: default` fetches only the upstream default branch, the
-   `onto` branches and the branches matching `follow:` (whole-name regular
-   expressions, jq syntax). To sync more upstream branches (e.g. release
-   branches), add a pattern to `follow:`, not `refs: all` (that fetches every
-   branch and tag). `follow` with a mirror or `refs: all` is a config error.
+9. Forks and mirrors are synced the same way; they differ only in how the
+   repository is created. The sync fetches only the upstream default branch,
+   the `onto` branches, the branches matching `follow:` (whole-name regular
+   expressions, jq syntax) and all tags. To sync more upstream branches
+   (e.g. release branches), add a pattern to `follow:`; all branches:
+   `follow: ['.*']`. `tags: false` leaves the tags alone (neither fetched
+   nor touched). The key `refs` no longer exists (`unknown key refs`).
 
 ## 5. Error catalog
 
@@ -429,8 +431,8 @@ and the log of the failed step. Explanations for humans:
 | `list-archived` (info) | an archived own repository is in a list other than the archive list | move it |
 | `managed-missing` | a repository under `managed:` does not exist (no other check runs for it) | let the sync create it (a mirror: run the `gh repo create` command from the failed sync job once, 4.11), or fix the entry |
 | `managed-settings` | a managed repository's issues/pull requests/wiki/discussions/projects/Actions differ from its `settings:` (default all off) | correct the setting (owner approval) or the `settings:` entry |
-| `managed-behind` | a managed fork's default branch, `rebase: auto` branch or followed branch (`follow:`) misses upstream commits older than 48 h, or a declared or followed branch is missing in the fork; a mirror or `refs: all` fork has refs differing from upstream and no push for 48 h; heads of open upstream PRs from the fork excepted | read the sync run |
-| `branch-undeclared` | a fork branch with own commits (the default branch counted against the upstream default branch) is neither declared in `branches:` nor the head of an open upstream PR from the fork (info for an unmanaged fork) | declare it, or delete or reset it by hand (4.11) |
+| `managed-behind` | a managed repository's default branch, `rebase: auto` branch or followed branch (`follow:`) misses upstream commits older than 48 h (a mirror branch lacking the upstream commit: `differs from upstream` and no push for 48 h), or a declared or followed branch is missing in the target; tags (unless `tags: false`) differ from upstream and no push for 48 h; heads of open upstream PRs from the fork excepted | read the sync run |
+| `branch-undeclared` | a fork or mirror branch with own commits (the default branch counted against the upstream default branch) is neither declared in `branches:` nor the head of an open upstream PR from the fork; a mirror branch the sync does not move that cannot be compared: `differs from upstream` (info for an unmanaged fork) | declare it, or delete or reset it by hand (4.11) |
 | `rebase-pending` (info) | a `rebase: manual` branch is behind its `onto` upstream | `gh workflow run sync.yml -f repo=<repo> -f branch=<branch>` in the control repository (4.11) |
 | `sync-failed` | the newest completed run of `sync.yml` in the control repository did not succeed (checked in Lists when `managed:` has entries; skipped in a local run) | read the sync log |
 | `contribution-stale` (info) | an open upstream pull request from a fork is older than 90 days (unmanaged forks) | follow up or close it |

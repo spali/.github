@@ -17,10 +17,10 @@ def gh: capture("^https://github\\.com/(?<o>[^/]+)/(?<n>[^/]+?)(\\.git)?/?$"; "i
       upstream,
       kind: (if $fork then "fork" else "mirror" end),
       upstream_repo: (if $fork then (.upstream | gh | "\(.o)/\(.n)") else null end),
-      refs: (if $fork then (.refs // "default") else "all" end),
       branches: ((.branches // {}) | to_entries | sort_by(.key)
         | map({name: .key, onto: .value.onto, rebase: (.value.rebase // "manual")})),
       follow: (.follow // []),
+      tags: (.tags != false),
       settings: ($defaults + (.settings // {})),
       private: (.private // false)
     }'

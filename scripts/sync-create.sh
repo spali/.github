@@ -63,8 +63,9 @@ if [[ $KIND == mirror ]]; then
   die "create $REPO by hand: gh repo create $REPO $visibility"
 fi
 
+# a follow pattern may need other branches; tags are fetched by the sync
 only_default=true
-[[ $(entry_get .refs) == default ]] || only_default=false
+[[ $(entry_get '.follow | length') == 0 ]] || only_default=false
 jq -n --arg name "${REPO#*/}" --argjson only "$only_default" \
   '{name: $name, default_branch_only: $only}' >"$TMP/fork.json"
 gh api -X POST "repos/$UPSTREAM_REPO/forks" --input "$TMP/fork.json" >/dev/null 2>"$TMP/err" ||
