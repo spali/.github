@@ -235,13 +235,55 @@ else
   echo "refs/heads/main 1111111..2222222 (ff)"
 fi'
   run "$SYNC" repo spali/tool
-  [ "$status" -eq 0 ]
+  # a kept undeclared ref fails the run
+  [ "$status" -eq 1 ]
   grep -q '^### spali/tool' "$GITHUB_STEP_SUMMARY"
   grep -q 'exists' "$GITHUB_STEP_SUMMARY"
   grep -qx -- '- settings: ok' "$GITHUB_STEP_SUMMARY"
   grep -qF '`refs/heads/main 1111111..2222222 (ff)`' "$GITHUB_STEP_SUMMARY"
   grep -qF '`refs/heads/x`: undeclared' "$GITHUB_STEP_SUMMARY"
   grep -qF '`refs/heads/y`: contribution' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "refs kept with own commits fail the run after the push" {
+  stub_step sync-git.sh '
+if [[ $1 == plan ]]; then
+  printf "refs/heads/x\tundeclared\nrefs/heads/y\tcontribution\nrefs/tags/t\tunique commits\n" >"$WORK/skipped.txt"
+else
+  echo "refs/heads/main 1111111..2222222 (ff)"
+fi'
+  run --separate-stderr "$SYNC" repo spali/tool
+  [ "$status" -eq 1 ]
+  [ "$(steps | tail -n 1)" = "sync-git.sh push" ]
+  [[ $stderr == *"error: 2 refs kept with own commits: refs/heads/x refs/tags/t"* ]]
+  grep -qF 'error: 2 refs kept with own commits: refs/heads/x refs/tags/t' "$GITHUB_STEP_SUMMARY"
+  grep -qF '`refs/heads/main 1111111..2222222 (ff)`' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "refs skipped for other reasons keep the run green" {
+  stub_step sync-git.sh '
+if [[ $1 == plan ]]; then
+  printf "refs/heads/-x\tinvalid ref name\nrefs/heads/main\tdefault branch\nrefs/heads/y\tcontribution\n" >"$WORK/skipped.txt"
+else
+  echo "nothing to do"
+fi'
+  run --separate-stderr "$SYNC" repo spali/tool
+  [ "$status" -eq 0 ]
+  [[ $stderr != *"kept with own commits"* ]]
+  ! grep -q 'kept with own commits' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "kept refs are reported also when the push failed" {
+  stub_step sync-git.sh '
+if [[ $1 == plan ]]; then
+  printf "refs/heads/x\tundeclared\n" >"$WORK/skipped.txt"
+else
+  echo "error: push rejected, target unchanged" >&2; exit 1
+fi'
+  run "$SYNC" repo spali/tool
+  [ "$status" -eq 1 ]
+  grep -q 'push rejected, target unchanged' "$GITHUB_STEP_SUMMARY"
+  grep -qF 'error: 1 refs kept with own commits: refs/heads/x' "$GITHUB_STEP_SUMMARY"
 }
 
 @test "contrib.txt holds open PR heads of this repo only" {

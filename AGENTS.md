@@ -349,6 +349,13 @@ The workflow `sync.yml` runs daily (04:47 UTC) and on every change of
    the owner.
 6. A lease failure (`push rejected, target unchanged`) means somebody pushed to
    the repository during the run: nothing was overwritten, re-run.
+7. `error: <n> refs kept with own commits: <refs>`: the sync pushed everything
+   else but never overwrites a branch or tag with own commits that is not
+   declared (skipped as `undeclared` or `unique commits`), and the run stays
+   red until it is resolved. Ask the owner: declare the branch under
+   `branches:` (step 1), or delete it or reset it to upstream by hand.
+8. Right after the sync created a fork, the first fetch may fail once (GitHub
+   is still copying the repository); the next run recovers, or re-run.
 
 ## 5. Error catalog
 

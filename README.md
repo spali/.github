@@ -601,7 +601,10 @@ For each managed repository it
 It writes **only to the repositories under `managed:`**. A branch with own
 commits that is not declared, and the head branch of an open upstream pull
 request from the fork, are never overwritten (the monitor reports the first
-one as `branch-undeclared`). A conflict pushes nothing for that repository.
+one as `branch-undeclared`). Such a kept branch or tag with own commits
+fails the run after the push (`error: <n> refs kept with own commits: …`):
+declare the branch in `branches:`, or delete or reset it by hand. A conflict
+pushes nothing for that repository.
 Every push is one atomic push with a lease on the old commit of each ref:
 if somebody pushed in between, nothing is overwritten and the job fails. The
 job summary lists, per repository, whether it existed or was created, the
