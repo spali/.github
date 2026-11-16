@@ -34,6 +34,10 @@ you should fix the document that is wrong.
   `managed:` of the control file, take a target URL from anything but the
   entry, or pass a token in an argument, URL, log or artifact (git gets it
   only through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`);
+- make the profile cards (`profile-cards.yml`) write anything but the card
+  paths of its `cards` input to its one target repository, force-push, or use
+  the write app token beyond contents write on that repository (the sync's
+  write app is reused there, scoped per run);
 - put the name of a private repository into `spali/.github`: not in code, docs,
   tests, fixtures, PRs or commits (say "the private control repository"; the
   monitor's control file lives there);
@@ -80,6 +84,8 @@ pull request closed
 | `.github/workflows/monitor.yml` | reusable; job `monitor`; run by the private control repository |
 | `.github/workflows/monitor-config.yml` | reusable; job `config`; validates the control file |
 | `.github/workflows/sync.yml` | reusable; jobs `plan` (Managed repositories) and `sync` (one per managed repository); run by the private control repository |
+| `.github/workflows/profile-cards.yml` | reusable; jobs `card` (one per card) and `commit`; run by the private control repository |
+| `scripts/profile-cards.sh` | `check` (validates the card list), `commit` (writes the cards to the profile repository) |
 | `scripts/lib.sh` | `die`, `out`, `need_env` |
 | `scripts/check-pr.sh` | title regex, release label present, warning on several |
 | `scripts/prepare.sh` | `next` / `release` / `pr`: decide kind, version, tag, sha |
@@ -129,7 +135,11 @@ schedule, the caller owns both. `monitor-config.yml` (job `config`): input
 inputs `app-client-id` (required), `config` (default `repos.yml`), `repo`
 and `branch` (default empty), secret `app-key` (required), caller permission
 `contents: read`; the caller owns the schedule and the concurrency group
-`sync`. Renaming or removing an input or secret needs a new major version.
+`sync`. `profile-cards.yml` (jobs `card`, `commit`): inputs `app-client-id`
+and `cards` (required), `repository` and `branch` (default empty), secrets
+`token` and `app-key` (required), caller permission `contents: read`; the
+caller owns the schedule and the concurrency group `profile-cards`.
+Renaming or removing an input or secret needs a new major version.
 
 The reusable workflows check out `spali/.github` at `job.workflow_sha` (the
 commit the caller pinned) and load `release-drafter.yml` from the same commit.
@@ -497,7 +507,7 @@ and the log of the failed step. Explanations for humans:
   every red finding and would otherwise keep the control repository red.
   Without the variable (local runs) nothing is skipped.
 - A repository that only calls `monitor.yml` / `monitor-config.yml` /
-  `sync.yml` (`MAINTENANCE_WORKFLOWS` in `monitor-repos.sh`) is not
+  `sync.yml` / `profile-cards.yml` (`MAINTENANCE_WORKFLOWS` in `monitor-repos.sh`) is not
   `central` (not a release-flow repository): no release checks and, because it
   has pins, no `adoption` finding, but `pin-behind` applies.
 - A fork's own sync workflow is disabled after 60 days without repository

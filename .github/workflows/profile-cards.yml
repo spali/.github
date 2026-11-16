@@ -1,0 +1,159 @@
+# Reusable: render GitHub readme stats cards (stats-organization/
+# github-readme-stats-action) and commit them to the profile repository.
+#
+# Call it from the PRIVATE control repository, which holds the read token:
+#
+#   on:
+#     schedule:
+#       - cron: "37 3 * * *"
+#     workflow_dispatch:
+#   concurrency:
+#     group: profile-cards
+#   permissions:
+#     contents: read
+#   jobs:
+#     profile-cards:
+#       uses: spali/.github/.github/workflows/profile-cards.yml@<sha> # vX.Y.Z
+#       with:
+#         app-client-id: ${{ vars.SYNC_APP_CLIENT_ID }}
+#         cards: >-
+#           [{"card": "stats", "path": "profile/stats.svg",
+#             "options": "username=octocat&hide_title=true"}]
+#       secrets:
+#         token: ${{ secrets.ACCOUNT_READ_TOKEN }}
+#         app-key: ${{ secrets.SYNC_APP_KEY }}
+#
+# `cards` is a JSON array of {card, options, path} (see
+# scripts/profile-cards.sh: card stats, top-langs, pin, wakatime or gist; a
+# unique relative .svg path). The cards are rendered with `token`, a personal
+# access token of the owner (read-only; private repositories and private
+# contributions count only with a token of the owner). The commit writes only
+# the card paths, to `repository` (default <owner>/<owner>, the profile
+# repository), with a token of the write GitHub App scoped to that repository
+# and to contents write; it commits only when a card changed, never
+# force-pushes, and leaves the cards untouched when any card failed.
+#
+# Jobs: Card · <path> (one per card) → Commit.
+name: Profile cards
+
+on:
+  workflow_call:
+    inputs:
+      app-client-id:
+        description: Client id of the write GitHub App
+        type: string
+        required: true
+      cards:
+        description: JSON array of {card, options, path}
+        type: string
+        required: true
+      repository:
+        description: Target repository owner/name (default <owner>/<owner>)
+        type: string
+        default: ""
+      branch:
+        description: Target branch (default the default branch)
+        type: string
+        default: ""
+    secrets:
+      token:
+        description: Read-only personal access token of the owner for the cards
+        required: true
+      app-key:
+        description: Private key of the write GitHub App
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  card:
+    name: Card · ${{ matrix.path }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.cards) }}
+    steps:
+      - &scripts
+        name: Checkout shared scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: spali/.github
+          ref: ${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
+          path: .profile
+          persist-credentials: false
+      - name: Check cards
+        id: check
+        env:
+          PROFILE_CARDS: ${{ inputs.cards }}
+        run: .profile/scripts/profile-cards.sh check >/dev/null
+      - name: Render ${{ matrix.card }}
+        id: render
+        uses: stats-organization/github-readme-stats-action@2c498845f71017821efaad14293ebc736156ef21 # v2.1.0
+        with:
+          card: ${{ matrix.card }}
+          options: ${{ matrix.options }}
+          path: out/${{ matrix.path }}
+          token: ${{ secrets.token }}
+          fail_on_error: true
+      - name: Upload card
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: card-${{ strategy.job-index }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
+
+  commit:
+    name: Commit
+    needs: card
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - *scripts
+      - name: Download cards
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: card-*
+          path: out
+          merge-multiple: true
+      - name: Target repository
+        id: target
+        env:
+          REPOSITORY: ${{ inputs.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          repo=${REPOSITORY:-$OWNER/$OWNER}
+          if [[ ! $repo =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::invalid repository: $repo"
+            exit 1
+          fi
+          {
+            echo "repo=$repo"
+            echo "owner=${repo%%/*}"
+            echo "name=${repo#*/}"
+          } >>"$GITHUB_OUTPUT"
+      - name: App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-key }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-contents: write
+          permission-metadata: read
+      - name: Commit cards
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PROFILE_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          PROFILE_CARDS: ${{ inputs.cards }}
+          PROFILE_BRANCH: ${{ inputs.branch }}
+          TARGET_URL: https://github.com/${{ steps.target.outputs.repo }}.git
+          WORK: ${{ runner.temp }}/profile-cards
+        run: |
+          result=$(.profile/scripts/profile-cards.sh commit out)
+          echo "$result"
+          echo "Profile cards: $result" >>"$GITHUB_STEP_SUMMARY"

@@ -30,7 +30,7 @@ list_repos() {
 
 # Shared workflows of the maintenance tooling: pinning only these does not make
 # a repository a release-flow (central) one.
-MAINTENANCE_WORKFLOWS='["monitor.yml","monitor-config.yml","sync.yml"]'
+MAINTENANCE_WORKFLOWS='["monitor.yml","monitor-config.yml","sync.yml","profile-cards.yml"]'
 
 # workflow_pins REPO BRANCH prints the central workflow pins as JSON lines
 # and returns 1 when the workflow directory could not be read.
