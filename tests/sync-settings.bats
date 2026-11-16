@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 
 setup() {
+  # shellcheck source=scripts/managed-lib.sh
+  source "$BATS_TEST_DIRNAME/../scripts/managed-lib.sh"
   load helpers/gh-stub
   stub_gh
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/sync-settings.sh"
@@ -8,13 +10,12 @@ setup() {
   settings '{}'
 }
 
-# settings <json> sets ENTRY with the given settings merged over the defaults
+# settings <json> sets ENTRY through managed_entry with the given exceptions
 settings() {
-  ENTRY=$(jq -cn --argjson s "$1" \
-    '{repo: "spali/tool", upstream: "https://github.com/up/tool", kind: "fork",
-      upstream_repo: "up/tool", refs: "default", branches: [], private: false,
-      settings: ({has_issues: false, has_pull_requests: false, has_wiki: false,
-        has_discussions: false, has_projects: false, actions: false} + $s)}')
+  local cfg="$BATS_TEST_TMPDIR/config.json"
+  jq -n --argjson s "$1" \
+    '{version: 1, managed: [{repo: "spali/tool", upstream: "https://github.com/up/tool", settings: $s}]}' >"$cfg"
+  ENTRY=$(managed_entry "$cfg" spali/tool)
   export ENTRY
 }
 
