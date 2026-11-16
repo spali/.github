@@ -289,7 +289,8 @@ list_out() {
 
 # kept fails (after error lines on stderr and in the summary) when the plan
 # stopped or kept refs ($WORK/skipped.txt): one line per ref stopped by an
-# upstream rewrite or a moved tag (accept it after a check of upstream), one
+# upstream rewrite or a moved tag (accept it after a check of upstream; no
+# accept hint when the accept was refused, the reason says what to do), one
 # line for the refs kept with own commits (reasons undeclared or unique
 # commits; someone must declare, delete or reset them).
 kept() {
@@ -299,6 +300,7 @@ kept() {
   while IFS=$'\t' read -r ref why; do
     case $why in
       undeclared | "unique commits") refs+=("$ref") ;;
+      *"; accept refused:"*) msgs+=("error: $ref: $why") ;;
       "upstream rewritten"* | "upstream moved tag"*)
         acc=${ref#refs/heads/}
         acc=${acc#refs/}

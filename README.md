@@ -655,7 +655,8 @@ Accept backs up the old tip (a branch in `refs/backup/<branch>`, a tag in
 branch and a tag are set to upstream, a declared branch rebases only its
 own commits after the record onto the new `onto`. A default or followed
 branch with own commits on top is refused (`; accept refused: own commits on
-top, …`): declare it in `branches:`, or reset it by hand. A declared branch
+top, …`, the error line then has no accept hint): declare it in
+`branches:`, or reset it by hand. A declared branch
 whose record is not in the branch (reset or rebased by hand) is no stop and
 rebases as usual. The records are first created by the first run after an
 update of the sync; nothing stops in that run.
