@@ -491,15 +491,14 @@ full_plan() {
 @test "verify mismatch restores old state" {
   full_plan
   before=$(snap)
-  SYNC_TEST_VERIFY_FAIL=1 run --separate-stderr "$SCRIPT" push
+  # the created dev is gone right after the push: verify fails, the other
+  # five refs are restored
+  hook post-receive 'git update-ref -d refs/heads/dev; rm -f "$0"'
+  run --separate-stderr "$SCRIPT" push
   [ "$status" -eq 1 ]
-  [ "${stderr_lines[-1]}" = "error: verify failed, restored 6 refs" ]
+  [ "${stderr_lines[-1]}" = "error: verify failed, restored 5 refs" ]
   [ -z "$output" ]
   [ "$(snap)" = "$before" ]
-  # the switch is ignored outside of bats
-  SYNC_TEST_VERIFY_FAIL=1 run --separate-stderr env -u BATS_TEST_TMPDIR "$SCRIPT" push
-  [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 6 ]
 }
 
 @test "failed restore is reported loudly" {
@@ -526,12 +525,12 @@ full_plan() {
   rm -rf "$TG"
   git init -q --bare -b main "$TG"
   set_ref "$TG" refs/heads/main "$OM"
-  hook post-receive 'printf "#!/bin/sh\nexit 1\n" >hooks/pre-receive; chmod +x hooks/pre-receive; rm -f "$0"'
-  SYNC_TEST_VERIFY_FAIL=1 run --separate-stderr "$SCRIPT" push
+  hook post-receive 'git update-ref -d refs/heads/dev; printf "#!/bin/sh\nexit 1\n" >hooks/pre-receive; chmod +x hooks/pre-receive; rm -f "$0"'
+  run --separate-stderr "$SCRIPT" push
   [ "$status" -eq 1 ]
-  [ "${stderr_lines[-1]}" = "error: RESTORE FAILED for refs/heads/main refs/backup/main refs/heads/dev, backups at refs/backup/" ]
+  [ "${stderr_lines[-1]}" = "error: RESTORE FAILED for refs/heads/main refs/backup/main, backups at refs/backup/" ]
+  [ "$(ref "$TG" refs/heads/main)" = "$(plan_line refs/heads/main | cut -f2)" ]
   [ "$(ref "$TG" refs/backup/main)" = "$OM" ]
-  [ "$(ref "$TG" refs/heads/dev)" = "$C" ]
 }
 
 @test "token is never in the process args or output" {
@@ -542,9 +541,19 @@ full_plan() {
   chmod +x "$BATS_TEST_TMPDIR/bin/git"
   tok=ghs_dummyTOKEN0123456789
   export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
-  export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $tok" GIT_TRACE=0
+  export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $tok"
+  # tracing from the caller's environment is switched off
+  export GIT_TRACE=1 GIT_TRACE2=1 GIT_TRACE2_EVENT=1 GIT_TRACE_CURL=1
+  # the failure path copies git's output to stderr
+  hook pre-receive 'exit 1'
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" run "$SCRIPT" push
+  [ "$status" -eq 1 ]
+  [ "${lines[-1]}" = "error: push rejected, target unchanged" ]
+  [[ $output != *"$tok"* ]]
+  rm "$TG/hooks/pre-receive"
   PATH="$BATS_TEST_TMPDIR/bin:$PATH" run "$SCRIPT" push
   [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 6 ]
   [[ $output != *"$tok"* ]]
   grep -q push "$BATS_TEST_TMPDIR/args.log"
   ! grep -q "$tok" "$BATS_TEST_TMPDIR/args.log"
@@ -598,4 +607,45 @@ full_plan() {
     [ "$stderr" = "error: invalid plan line 7" ]
     [ "$(snap)" = "$before" ]
   done
+}
+
+@test "same plan pushed twice is not reverted" {
+  full_plan
+  cp -r "$WORK" "$BATS_TEST_TMPDIR/w2"
+  run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 0 ]
+  first=$output
+  after=$(snap)
+  # a second sync with the same plan: its leases fail, the target already
+  # shows every new sha, so it reports success and touches nothing
+  WORK=$BATS_TEST_TMPDIR/w2 run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 0 ]
+  [ "$output" = "$first" ]
+  [ "$(snap)" = "$after" ]
+}
+
+@test "failed push in a mixed state touches nothing" {
+  full_plan
+  # another writer has put main at its new sha and moved feat (lease fails)
+  set_ref "$TG" refs/heads/main "$B"
+  set_ref "$TG" refs/heads/feat "$(commit "$OF" u user)"
+  before=$(snap)
+  run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 1 ]
+  [ "${stderr_lines[-1]}" = "error: push failed, target in mixed state: refs/heads/feat refs/backup/feat refs/heads/dev refs/tags/v1 refs/heads/old" ]
+  [ "$(snap)" = "$before" ]
+}
+
+@test "global git config does not change the push" {
+  full_plan
+  git -C "$WORK/repo" -c user.name=x -c user.email=x@example.com tag -a -m x extra "$C"
+  export HOME=$BATS_TEST_TMPDIR/home
+  mkdir "$HOME"
+  printf '[push]\n\tfollowTags = true\n' >"$HOME/.gitconfig"
+  unset GIT_CONFIG_GLOBAL
+  [ "$(git config --get push.followTags)" = true ]
+  run --separate-stderr "$SCRIPT" push
+  [ "$status" -eq 0 ]
+  run git -C "$TG" rev-parse --verify --quiet refs/tags/extra
+  [ "$status" -ne 0 ]
 }
