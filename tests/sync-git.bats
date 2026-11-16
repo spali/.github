@@ -784,16 +784,29 @@ rewrite_setup() {
   [ ! -e "$WORK/plan.tsv" ]
 }
 
-@test "accept refused when the record is not in the branch" {
+@test "accept has no effect when the record is not in the branch" {
   X=$(commit "$A" x old)
   O=$(commit "$A" o own)
   set_ref "$TG" refs/heads/main "$O"
   set_ref "$TG" "$REC/main" "$X"
   entry fork "$AUTO"
-  SYNC_ACCEPT=main run "$SCRIPT" plan
+  run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ ! -s "$WORK/plan.tsv" ]
-  [ "$(cat "$WORK/skipped.txt")" = "$(rewrite_skip refs/heads/main "$X" "$B" 1 '1 own commits'); accept refused: record not in branch, rebase by hand" ]
+  # the rebased sha depends on the commit time: compare without it
+  plan=$(cut -f1,2,4 "$WORK/plan.tsv")
+  [ "$plan" = "$(printf 'refs/heads/main\t%s\trebase\nrefs/backup/main\t%s\tbackup\n%s/main\t%s\trecord' "$O" "$ZERO" "$REC" "$X")" ]
+  for a in main '*'; do
+    fresh_work
+    SYNC_ACCEPT=$a run "$SCRIPT" plan
+    [ "$status" -eq 0 ]
+    [ "$(cut -f1,2,4 "$WORK/plan.tsv")" = "$plan" ]
+    [ "$(plan_line "$REC/main")" = "$(printf '%s\t%s\trecord' "$X" "$B")" ]
+    N=$(git -C "$WORK/repo" rev-parse refs/heads/main)
+    [ "$(plan_line refs/heads/main)" = "$(printf '%s\t%s\trebase' "$O" "$N")" ]
+    [ "$(git -C "$WORK/repo" rev-parse "$N~1")" = "$B" ]
+    [ "$(git -C "$WORK/repo" log -1 --format=%s "$N")" = "o: own" ]
+    [ ! -s "$WORK/skipped.txt" ]
+  done
 }
 
 @test "accepted moved tag with backup" {
