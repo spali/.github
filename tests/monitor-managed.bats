@@ -169,10 +169,7 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   run ! grep -F "compare/$(sha 2)" "$GH_LOG"
 }
 
-@test "declared branch missing in a refs all target is managed-behind" {
-  jq '.managed[0].refs = "all"' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
-  refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/up/f.git' -
-  refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/spali/f.git' -
+@test "declared branches missing in the target are managed-behind" {
   jq -nc --arg a "$(sha 1)" '[{name: "main", commit: {sha: $a}}]' | gh_respond "$TB" -
   run_script
   [ "$(count managed-behind)" -eq 2 ]
@@ -221,15 +218,13 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   run ! grep -F 'compare/main...spali:f:main' "$GH_LOG"
 }
 
-@test "with refs all the default branch is compared with the same name upstream" {
-  # refs all mirrors upstream main onto the target main by name
-  jq '.managed[0].refs = "all"' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
-  refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/up/f.git' -
-  refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/spali/f.git' -
-  respond_jq '*repos/up/f/compare/dev...spali:f:main' '{ahead_by: 9}'
+@test "with follow .* the default branch is still compared with the upstream default" {
+  jq '.managed[0].follow = [".*"]' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
   respond_jq '*repos/up/f/compare/main...spali:f:main' '{ahead_by: 0}'
+  respond_jq '*repos/up/f/compare/dev...spali:f:main' '{ahead_by: 9}'
   run_script
-  [ "$(count branch-undeclared)" -eq 0 ]
+  [ "$(count branch-undeclared)" -eq 1 ]
+  [ "$(message branch-undeclared)" = "main: 9 own commits, not declared in repos.yml" ]
 }
 
 @test "declared default branch is not undeclared" {
@@ -271,22 +266,20 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   [ "$(count managed-behind)" -eq 2 ]
 }
 
-@test "contribution heads are excluded from the refs all comparison" {
-  jq '.managed[0].refs = "all"' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
-  refs refs/heads/dev:1 refs/heads/main:5 refs/heads/fix:6 |
-    git_respond '*ls-remote --heads --tags https://github.com/up/f.git' -
-  refs refs/heads/dev:1 refs/heads/main:9 refs/heads/fix:7 |
-    git_respond '*ls-remote --heads --tags https://github.com/spali/f.git' -
-  open_on main '[{head: {repo: {full_name: "spali/f"}, ref: "main"}}]'
+@test "contribution heads are excluded from followed branches" {
+  jq '.managed[0].follow = [".*"]' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  respond_jq "$UB" '[{name: "dev"}, {name: "main"}, {name: "fix"}]'
+  jq -nc --arg a "$(sha 1)" --arg b "$(sha 2)" --arg c "$(sha 3)" --arg f "$(sha 7)" \
+    '[{name: "main", commit: {sha: $a}}, {name: "feat", commit: {sha: $b}}, {name: "wip", commit: {sha: $c}},
+      {name: "dev", commit: {sha: $a}}, {name: "fix", commit: {sha: $f}}]' | gh_respond "$TB" -
+  open_on fix '[{head: {repo: {full_name: "spali/f"}, ref: "fix"}}]'
+  respond_jq "*repos/up/f/compare/$(sha 7)...fix" "$(behind 2 2026-11-01T00:00:00Z)"
   run_script
-  [ "$(count managed-behind)" -eq 1 ]
-  [ "$(message managed-behind)" = "1 refs differ, last push 2026-11-01T00:00:00Z" ]
+  [ "$(count managed-behind)" -eq 0 ]
+  run ! grep -F "compare/$(sha 7)" "$GH_LOG"
 }
 
 @test "open pulls are looked up once per target branch" {
-  jq '.managed[0].refs = "all"' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
-  refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/up/f.git' -
-  refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/spali/f.git' -
   run_script
   [ "$(grep -c 'pulls?state=open' "$GH_LOG")" -eq 3 ]
   grep -qF 'repos/up/f/pulls?state=open&head=spali:wip&per_page=100 --paginate' "$GH_LOG"
@@ -328,7 +321,7 @@ follow() {
 
 @test "followed branch behind more than 48 h is managed-behind" {
   follow
-  respond_jq "*repos/up/f/compare/$(sha 6)...rel/1" "$(behind 2 2026-11-01T00:00:00Z)"
+  respond_jq "*repos/up/f/compare/$(sha 6)...rel%2F1" "$(behind 2 2026-11-01T00:00:00Z)"
   run_script
   [ "$(count managed-behind)" -eq 1 ]
   [ "$(level managed-behind)" = red ]
@@ -346,11 +339,11 @@ follow() {
 
 @test "followed branch with own commits is compared with the same name upstream" {
   follow
-  respond_jq '*repos/up/f/compare/rel/1...spali:f:rel/1' '{ahead_by: 3}'
+  respond_jq '*repos/up/f/compare/rel%2F1...spali:f:rel%2F1' '{ahead_by: 3}'
   run_script
   [ "$(count branch-undeclared)" -eq 1 ]
   [ "$(message branch-undeclared)" = "rel/1: 3 own commits, not declared in repos.yml" ]
-  run ! grep -F 'compare/dev...spali:f:rel/1' "$GH_LOG"
+  run ! grep -F 'compare/dev...spali:f:rel' "$GH_LOG"
 }
 
 @test "unfollowed upstream branch is no finding" {
@@ -359,6 +352,22 @@ follow() {
   run_script
   [ ! -s "$FINDINGS" ]
   run ! grep -F 'other' "$GH_LOG"
+}
+
+@test "compare URLs are encoded" {
+  jq '.managed[0].follow = ["fix/.*"] | .managed[0].branches["x/a#1"] = {onto: "fix/a#1", rebase: "auto"}' \
+    "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  respond_jq "$UB" '[{name: "dev"}, {name: "main"}, {name: "fix/a#1"}]'
+  jq -nc --arg a "$(sha 1)" --arg b "$(sha 2)" --arg c "$(sha 3)" --arg d "$(sha 4)" --arg e "$(sha 5)" \
+    '[{name: "main", commit: {sha: $a}}, {name: "feat", commit: {sha: $b}}, {name: "wip", commit: {sha: $c}},
+      {name: "fix/a#1", commit: {sha: $d}}, {name: "x/a#1", commit: {sha: $e}}, {name: "o/b#2", commit: {sha: $e}}]' |
+    gh_respond "$TB" -
+  run_script
+  grep -qF "repos/up/f/compare/$(sha 4)...fix%2Fa%231" "$GH_LOG"
+  grep -qF "repos/up/f/compare/$(sha 5)...fix%2Fa%231" "$GH_LOG"
+  grep -qF 'repos/up/f/compare/fix%2Fa%231...spali:f:fix%2Fa%231' "$GH_LOG"
+  grep -qF 'repos/up/f/compare/dev...spali:f:o%2Fb%232' "$GH_LOG"
+  run ! grep -E 'compare/[^ ]*#' "$GH_LOG"
 }
 
 @test "without follow the upstream branches are read once" {
@@ -383,11 +392,13 @@ follow() {
   [ "$(count managed-missing)" -eq 0 ]
 }
 
-# --- mirrors and refs: all -----------------------------------------------
+# --- tags and mirrors ----------------------------------------------------
 
 SRC='*ls-remote --heads --tags https://src.example/m.git'
 TGT='*ls-remote --heads --tags https://github.com/spali/m.git'
+HEAD_SRC='*ls-remote --symref -- https://src.example/m.git HEAD'
 MREPO='*api repos/spali/m'
+MCMP='*repos/spali/m/compare/'
 
 # refs "NAME:N ..." prints ls-remote lines.
 refs() {
@@ -395,9 +406,11 @@ refs() {
   for e in "$@"; do printf '%s\t%s\n' "$(sha "${e#*:}")" "${e%%:*}"; done
 }
 
+# a mirror of src.example with default branch main up and down
 mirror() {
   jq -n '{version: 1, managed: [{repo: "spali/m", upstream: "https://src.example/m.git"}]}' >"$CONFIG"
   respond_jq '*api repos/spali/m/actions/permissions' '{enabled: false}'
+  printf 'ref: refs/heads/main\tHEAD\n%s\tHEAD\n' "$(sha 1)" | git_respond "$HEAD_SRC" -
 }
 
 # mirror_repo PRIVATE PUSHED_AT
@@ -406,33 +419,46 @@ mirror_repo() {
     has_issues: false, has_pull_requests: false, has_wiki: false, has_discussions: false, has_projects: false}"
 }
 
+# no_commit: GitHub knows no such comparison (a commit is not in the mirror)
+no_commit() { gh_fail "$MCMP$1" 'gh: Not Found (HTTP 404)'; }
+
 @test "synced mirror has no findings" {
   mirror
   mirror_repo false 2026-11-01T00:00:00Z
-  refs refs/heads/main:1 refs/tags/v1:2 | git_respond "$SRC" -
+  refs refs/heads/main:1 refs/tags/v1:2 refs/heads/dev:3 | git_respond "$SRC" -
   refs refs/heads/main:1 refs/tags/v1:2 refs/heads/extra:7 | git_respond "$TGT" -
+  respond_jq "$MCMP$(sha 1)...$(sha 7)" '{ahead_by: 0}'
   run_script
   [ ! -s "$FINDINGS" ]
-  run ! grep -F 'compare' "$GH_LOG"
-  run ! grep -F 'branches' "$GH_LOG"
+  run ! grep -vE '^api repos/spali/m(/actions/permissions|/compare/[0-9]{40}\.\.\.[0-9]{40})?$' "$GH_LOG"
 }
 
-@test "mirror with differing refs is managed-behind" {
+@test "mirror tags behind is red" {
   mirror
   mirror_repo false 2026-11-01T00:00:00Z
-  refs refs/heads/main:1 refs/heads/dev:3 refs/tags/v1:2 | git_respond "$SRC" -
-  refs refs/heads/main:9 refs/tags/v1:2 | git_respond "$TGT" -
+  refs refs/heads/main:1 refs/heads/dev:3 refs/tags/v1:2 refs/tags/v2:4 refs/tags/v3:5 | git_respond "$SRC" -
+  refs refs/heads/main:1 refs/tags/v1:2 refs/tags/v2:9 refs/tags/old:8 | git_respond "$TGT" -
   run_script
   [ "$(count managed-behind)" -eq 1 ]
   [ "$(level managed-behind)" = red ]
-  [ "$(message managed-behind)" = "2 refs differ, last push 2026-11-01T00:00:00Z" ]
+  [ "$(message managed-behind)" = "2 tags differ, last push 2026-11-01T00:00:00Z" ]
+}
+
+@test "mirror with tags false ignores tags" {
+  mirror
+  jq '.managed[0].tags = false' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  mirror_repo false 2026-11-01T00:00:00Z
+  refs refs/heads/main:1 refs/tags/v1:2 | git_respond "$SRC" -
+  refs refs/heads/main:1 | git_respond "$TGT" -
+  run_script
+  [ ! -s "$FINDINGS" ]
 }
 
 @test "mirror pushed exactly 48 h ago is no finding" {
   mirror
   mirror_repo false 2026-11-12T12:00:00Z
-  refs refs/heads/main:1 | git_respond "$SRC" -
-  refs refs/heads/main:9 | git_respond "$TGT" -
+  refs refs/heads/main:1 refs/tags/v1:2 | git_respond "$SRC" -
+  refs refs/heads/main:1 | git_respond "$TGT" -
   run_script
   [ ! -s "$FINDINGS" ]
 }
@@ -440,21 +466,94 @@ mirror_repo() {
 @test "mirror pushed 48 h and a second ago is red" {
   mirror
   mirror_repo false 2026-11-12T11:59:59Z
-  refs refs/heads/main:1 | git_respond "$SRC" -
-  refs refs/heads/main:9 | git_respond "$TGT" -
+  refs refs/heads/main:1 refs/tags/v1:2 | git_respond "$SRC" -
+  refs refs/heads/main:1 | git_respond "$TGT" -
   run_script
   [ "$(count managed-behind)" -eq 1 ]
+}
+
+@test "mirror default branch behind is compared in the mirror" {
+  mirror
+  mirror_repo false 2026-11-13T00:00:00Z
+  refs refs/heads/main:1 | git_respond "$SRC" -
+  refs refs/heads/main:9 | git_respond "$TGT" -
+  respond_jq "$MCMP$(sha 9)...$(sha 1)" "$(behind 3 2026-11-01T00:00:00Z)"
+  respond_jq "$MCMP$(sha 1)...$(sha 9)" '{ahead_by: 0}'
+  run_script
+  [ "$(count managed-behind)" -eq 1 ]
+  [ "$(message managed-behind)" = "main: 3 upstream commits missing, oldest from 2026-11-01T00:00:00Z" ]
+  [ "$(count branch-undeclared)" -eq 0 ]
+}
+
+# behind_mirror PUSHED_AT: main and the followed rel/1 lack the upstream
+# commit, rel/2 is missing, wip (manual onto main) is behind.
+behind_mirror() {
+  mirror
+  jq '.managed[0].follow = ["rel/.*"] | .managed[0].branches = {wip: {onto: "main", rebase: "manual"}}' \
+    "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  mirror_repo false "$1"
+  refs refs/heads/main:1 refs/heads/rel/1:2 refs/heads/rel/2:4 | git_respond "$SRC" -
+  refs refs/heads/main:9 refs/heads/rel/1:8 refs/heads/wip:7 | git_respond "$TGT" -
+  no_commit '*'
+}
+
+@test "mirror branch without the upstream commit differs after 48 h" {
+  behind_mirror 2026-11-01T00:00:00Z
+  run_script
+  [ "$(count managed-behind)" -eq 3 ]
+  [ "$(message managed-behind 0)" = "main: differs from upstream, last push 2026-11-01T00:00:00Z" ]
+  [ "$(message managed-behind 1)" = "rel/1: differs from upstream, last push 2026-11-01T00:00:00Z" ]
+  [ "$(message managed-behind 2)" = "rel/2: missing in the target" ]
+  [ "$(count rebase-pending)" -eq 1 ]
+  [ "$(message rebase-pending)" = "wip: upstream commits to rebase onto main" ]
+  # default and followed branches are behind: the sync handles them, so no
+  # branch-undeclared without a comparison
+  [ "$(count branch-undeclared)" -eq 0 ]
+}
+
+@test "mirror branch without the upstream commit and a recent push is not red yet" {
+  behind_mirror 2026-11-13T00:00:00Z
+  run_script
+  [ "$(count managed-behind)" -eq 1 ]
+  [ "$(message managed-behind)" = "rel/2: missing in the target" ]
+}
+
+@test "mirror undeclared branch is red" {
+  mirror
+  mirror_repo false 2026-11-01T00:00:00Z
+  refs refs/heads/main:1 refs/heads/odd:5 | git_respond "$SRC" -
+  refs refs/heads/main:1 refs/heads/extra:7 refs/heads/odd:8 refs/heads/same:1 | git_respond "$TGT" -
+  respond_jq "$MCMP$(sha 1)...$(sha 7)" '{ahead_by: 2}'
+  no_commit "$(sha 5)...$(sha 8)"
+  run_script
+  [ "$(count branch-undeclared)" -eq 2 ]
+  [ "$(level branch-undeclared)" = red ]
+  [ "$(message branch-undeclared 0)" = "extra: 2 own commits, not declared in repos.yml" ]
+  [ "$(message branch-undeclared 1)" = "odd: differs from upstream, not declared in repos.yml" ]
+  [ "$(count managed-behind)" -eq 0 ]
+  run ! grep -F "compare/$(sha 1)...$(sha 1)" "$GH_LOG"
+}
+
+@test "mirror without upstream default branch is check-failed" {
+  git_fail "$HEAD_SRC" 'fatal: unable to access'
+  mirror
+  mirror_repo false 2026-11-01T00:00:00Z
+  refs refs/heads/main:1 | git_respond "$SRC" -
+  refs refs/heads/main:1 | git_respond "$TGT" -
+  run_script
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(message check-failed)" = "managed-behind: cannot read the upstream default branch" ]
 }
 
 @test "private mirror is read through the API" {
   mirror
   mirror_repo true 2026-11-01T00:00:00Z
-  refs refs/heads/main:1 | git_respond "$SRC" -
-  jq -nc --arg s "$(sha 9)" '[{ref: "refs/heads/main", object: {sha: $s}}]' |
+  refs refs/heads/main:1 refs/tags/v1:2 | git_respond "$SRC" -
+  jq -nc --arg s "$(sha 1)" '[{ref: "refs/heads/main", object: {sha: $s}}]' |
     gh_respond '*repos/spali/m/git/matching-refs/heads --paginate' -
   echo '[]' | gh_respond '*repos/spali/m/git/matching-refs/tags --paginate' -
   run_script
-  [ "$(message managed-behind)" = "1 refs differ, last push 2026-11-01T00:00:00Z" ]
+  [ "$(message managed-behind)" = "1 tags differ, last push 2026-11-01T00:00:00Z" ]
   run ! grep -q 'github.com/spali/m' "$GIT_LOG"
 }
 
@@ -477,19 +576,21 @@ mirror_repo() {
   [ "$(message check-failed)" = "managed-behind: cannot read upstream" ]
 }
 
-@test "fork with refs all compares refs except declared branches" {
-  jq '.managed[0].refs = "all"' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
-  refs refs/heads/dev:1 refs/heads/main:5 refs/heads/feat:6 refs/heads/wip:7 refs/tags/v1:8 |
+@test "fork tags are compared with upstream" {
+  refs refs/heads/dev:1 refs/heads/main:5 refs/tags/v1:8 refs/tags/v2:6 |
     git_respond '*ls-remote --heads --tags https://github.com/up/f.git' -
-  refs refs/heads/dev:1 refs/heads/main:5 refs/heads/feat:2 refs/heads/wip:3 |
+  refs refs/heads/dev:1 refs/heads/main:1 refs/tags/v2:6 |
     git_respond '*ls-remote --heads --tags https://github.com/spali/f.git' -
-  respond_jq "$WIP" "$(behind 2 2026-11-01T00:00:00Z)"
   run_script
   [ "$(count managed-behind)" -eq 1 ]
-  [ "$(message managed-behind)" = "1 refs differ, last push 2026-11-01T00:00:00Z" ]
-  [ "$(count rebase-pending)" -eq 1 ]
-  # the default branch is part of the ref comparison, not compared on its own
-  run ! grep -F "compare/$(sha 1)...dev" "$GH_LOG"
+  [ "$(message managed-behind)" = "1 tags differ, last push 2026-11-01T00:00:00Z" ]
+  # tags false: not read at all
+  : >"$FINDINGS"
+  : >"$GIT_LOG"
+  jq '.managed[0].tags = false' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  run_script
+  [ ! -s "$FINDINGS" ]
+  [ ! -s "$GIT_LOG" ]
 }
 
 @test "several managed repositories are all checked" {

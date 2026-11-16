@@ -7,18 +7,18 @@ setup() {
   stub_gh
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/sync-create.sh"
   export GH_TOKEN=secret-token SYNC_POLL_SLEEP=0
-  entry fork default
+  entry fork
 }
 
-# entry <kind> <refs> [private] sets ENTRY through managed_entry, so it has
-# the real shape (upstream_repo is null for mirrors)
+# entry <kind> [follow_json [private]] sets ENTRY through managed_entry, so
+# it has the real shape (upstream_repo is null for mirrors)
 entry() {
-  local kind=$1 refs=$2 private=${3:-false} upstream=https://github.com/Up/Tool
+  local kind=$1 follow=${2:-[]} private=${3:-false} upstream=https://github.com/Up/Tool
   [[ $kind == fork ]] || upstream=https://gitlab.com/up/tool
   local cfg="$BATS_TEST_TMPDIR/config.json"
-  jq -n --arg up "$upstream" --arg refs "$refs" --argjson private "$private" \
+  jq -n --arg up "$upstream" --argjson follow "$follow" --argjson private "$private" \
     '{version: 1, managed: [{repo: "spali/tool", upstream: $up, private: $private}
-      + (if $refs == "all" then {refs: "all"} else {} end)]}' >"$cfg"
+      + (if $follow == [] then {} else {follow: $follow} end)]}' >"$cfg"
   ENTRY=$(managed_entry "$cfg" spali/tool)
   export ENTRY
 }
@@ -72,8 +72,8 @@ FORK_OK='{"fork": true, "parent": {"full_name": "up/tool"}}'
   [ "$(jq -c . "$GH_INPUTS/2")" = '{"name":"tool","default_branch_only":true}' ]
 }
 
-@test "refs all creates full fork" {
-  entry fork all
+@test "default_branch_only false when follow is set" {
+  entry fork '["release/.*"]'
   repo_appears_later
   echo "$FORK_OK" | gh_respond 'api repos/spali/tool' -
   run "$SCRIPT"
@@ -109,7 +109,7 @@ FORK_OK='{"fork": true, "parent": {"full_name": "up/tool"}}'
 }
 
 @test "existing fork with mirror entry fails" {
-  entry mirror all
+  entry mirror
   echo "$FORK_OK" | gh_respond 'api repos/spali/tool' -
   run "$SCRIPT"
   [ "$status" -eq 1 ]
@@ -118,7 +118,7 @@ FORK_OK='{"fork": true, "parent": {"full_name": "up/tool"}}'
 }
 
 @test "existing mirror is left alone" {
-  entry mirror all
+  entry mirror
   echo '{"fork": false}' | gh_respond 'api repos/spali/tool' -
   run "$SCRIPT"
   [ "$status" -eq 0 ]
@@ -126,7 +126,7 @@ FORK_OK='{"fork": true, "parent": {"full_name": "up/tool"}}'
 }
 
 @test "mirror creation fallback message" {
-  entry mirror all
+  entry mirror
   gh_fail 'api repos/spali/tool' 'gh: Not Found (HTTP 404)'
   run "$SCRIPT"
   [ "$status" -eq 1 ]
@@ -136,7 +136,7 @@ FORK_OK='{"fork": true, "parent": {"full_name": "up/tool"}}'
 }
 
 @test "private mirror fallback message" {
-  entry mirror all true
+  entry mirror '[]' true
   gh_fail 'api repos/spali/tool' 'gh: Not Found (HTTP 404)'
   run "$SCRIPT"
   [ "$status" -eq 1 ]
@@ -173,6 +173,6 @@ FORK_OK='{"fork": true, "parent": {"full_name": "up/tool"}}'
 }
 
 @test "mirror entry has no upstream_repo" {
-  entry mirror all
+  entry mirror
   [ "$(jq -r .upstream_repo <<<"$ENTRY")" = null ]
 }

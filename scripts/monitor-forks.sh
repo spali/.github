@@ -17,7 +17,7 @@ need_env FINDINGS INVENTORY CONFIG
 check_behind() {
   local repo=$1 branch=$2 parent=$3 pbranch=$4 sync=$5 body n date age
   body=$(fetch fork-behind "$repo" \
-    "repos/$repo/compare/$branch...${parent%%/*}:$pbranch") || return 0
+    "repos/$repo/compare/$(uri "$branch")...${parent%%/*}:$(uri "$pbranch")") || return 0
   json_out fork-behind "$repo" n -r '.ahead_by // 0' <<<"$body" || return 0
   ((n > 0)) || return 0
   if [[ -z $sync ]]; then
@@ -63,7 +63,7 @@ check_workflows() {
 check_delete_candidate() {
   local repo=$1 branch=$2 parent=$3 pbranch=$4 prs=$5 fb=$6 body n mine pb cl extra
   body=$(fetch fork-delete-candidate "$repo" \
-    "repos/$parent/compare/$pbranch...${repo%%/*}:${repo#*/}:$branch") || return 0
+    "repos/$parent/compare/$(uri "$pbranch")...${repo%%/*}:${repo#*/}:$(uri "$branch")") || return 0
   json_out fork-delete-candidate "$repo" n -r '.ahead_by // "x"' <<<"$body" || return 0
   [[ $n == 0 ]] || return 0
   json_out fork-delete-candidate "$repo" mine --arg r "$repo" \

@@ -86,7 +86,7 @@ if type != "object" then "top level must be a mapping" else
   (if has("managed") and (.managed | type) != "array" then "managed must be a list" else empty end),
   (list_of("managed") | to_entries[] | "managed[\(.key)]" as $p | .value
     | if type != "object" then "\($p) must be a mapping" else
-        (keys[] | select(IN("repo", "upstream", "refs", "branches", "follow", "settings", "private") | not)
+        (keys[] | select(IN("repo", "upstream", "branches", "follow", "tags", "settings", "private") | not)
           | "\($p): unknown key \(.)"),
         (if has("repo") | not then "\($p).repo is required" else repo_err("\($p).repo"; .repo) end),
         (if has("upstream") | not then "\($p).upstream is required"
@@ -94,19 +94,13 @@ if type != "object" then "top level must be a mapping" else
          then "\($p).upstream must start with https://"
          elif (.upstream | on_github) and ((.upstream | gh_repo_url) | not)
          then "\($p).upstream is not a github.com repository URL" else empty end),
-        (if has("refs") then
-           (if (.refs | IN("default", "all")) | not then "\($p).refs must be default or all"
-            elif (.upstream | on_github) | not then "\($p): refs only applies to forks"
-            else empty end)
-         else empty end),
         (if has("private") and (.private | type) != "boolean" then "\($p).private must be a boolean" else empty end),
+        (if has("tags") and (.tags | type) != "boolean" then "\($p).tags must be a boolean" else empty end),
         (if has("follow") then
            (if (.follow | type == "array" and all(type == "string")) | not
             then "\($p).follow must be a list of strings"
             else (.follow | to_entries[] | select(.value | regex_ok | not)
-              | "\($p).follow[\(.key)]: invalid regular expression") end),
-           (if ((.upstream | on_github) | not) or .refs == "all"
-            then "\($p): follow only applies to forks with refs default" else empty end)
+              | "\($p).follow[\(.key)]: invalid regular expression") end)
          else empty end),
         (if has("branches") then
            (if (.branches | type) != "object" then "\($p).branches must be a mapping"

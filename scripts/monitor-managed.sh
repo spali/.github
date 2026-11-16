@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Checks of the repositories under managed: in the control file:
-# managed-missing, managed-settings, managed-behind, rebase-pending and
-# branch-undeclared (forks only). sync-failed runs once, in monitor-lists.sh.
+# managed-missing, managed-settings, managed-behind (branches and, unless
+# tags is false, tags), rebase-pending and branch-undeclared. sync-failed runs once, in monitor-lists.sh.
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
@@ -51,78 +51,132 @@ check_settings() {
   [[ -z $diff ]] || finding red managed-settings "$repo" "$diff"
 }
 
-# check_refs REPO ENTRY PRIVATE PUSHED CONTRIB: every upstream branch and tag
-# must exist with the same sha in the target (declared branches excepted,
-# they are rebased, and the contribution branches CONTRIB, a JSON array of
-# names the sync never writes). Red only when the last push is older than
-# 48 h.
-check_refs() {
-  local repo=$1 entry=$2 private=$3 pushed=$4 contrib=$5 upstream src tgt skip n
-  upstream=$(jq -r .upstream <<<"$entry")
-  src=$(mktemp)
-  tgt=$(mktemp)
-  skip=$(mktemp)
-  # shellcheck disable=SC2064 # expand now
-  trap "rm -f '$src' '$tgt' '$skip'; trap - RETURN" RETURN
-  jq -r --argjson c "$contrib" '.branches[].name, $c[] | "refs/heads/\(.)"' <<<"$entry" >"$skip"
-  if ! ls_remote "$upstream" "$src"; then
-    finding red check-failed "$repo" "managed-behind: cannot read upstream"
-    return 0
-  fi
-  if [[ $private == true ]]; then
-    api_refs "$repo" "$tgt" managed-behind || return 0
-  elif ! ls_remote "https://github.com/$repo.git" "$tgt"; then
-    finding red check-failed "$repo" "managed-behind: cannot read target"
-    return 0
-  fi
-  n=$(awk 'FILENAME == ARGV[1] {s[$1]; next} FILENAME == ARGV[2] {t[$1] = $2; next}
-    !($1 in s) && t[$1] != $2 {n++} END {print n + 0}' "$skip" "$tgt" "$src")
-  ((n > 0)) || return 0
-  if [[ -z $pushed || $pushed == null ]]; then
-    finding red managed-behind "$repo" "$n refs differ, last push never"
-  elif too_old "$pushed"; then
-    finding red managed-behind "$repo" "$n refs differ, last push $pushed"
+# pushed_label PUSHED prints the last push for a message (empty or null:
+# never); push_too_old PUSHED is true when it is older than 48 h or never.
+pushed_label() {
+  if [[ -z $1 || $1 == null ]]; then
+    printf 'never\n'
+  else
+    printf '%s\n' "$1"
   fi
 }
 
-# check_branches REPO ENTRY DEFAULT UPSTREAM_REPO UPSTREAM_DEFAULT CONTRIB:
-# compares each declared branch (and, with refs default, the undeclared
-# default branch onto the upstream default branch) with its onto upstream,
-# and each upstream branch that matches a follow pattern (not the default,
-# not declared) with the target branch of the same name.
+push_too_old() {
+  [[ -z $1 || $1 == null ]] || too_old "$1"
+}
+
+# read_refs REPO UPSTREAM_URL PRIVATE SRC TGT writes the branches and tags of
+# upstream (git ls-remote) and of the target (ls-remote, or the API for a
+# private one) as "<ref> <sha>" lines. Returns 1 after a check-failed finding.
+read_refs() {
+  local repo=$1 upstream=$2 private=$3 src=$4 tgt=$5
+  if ! ls_remote "$upstream" "$src"; then
+    finding red check-failed "$repo" "managed-behind: cannot read upstream"
+    return 1
+  fi
+  if [[ $private == true ]]; then
+    api_refs "$repo" "$tgt" managed-behind || return 1
+  elif ! ls_remote "https://github.com/$repo.git" "$tgt"; then
+    finding red check-failed "$repo" "managed-behind: cannot read target"
+    return 1
+  fi
+}
+
+# check_tags REPO PUSHED SRC TGT: every upstream tag must exist with the same
+# sha in the target (extra target tags are fine). Red only when the last
+# push is older than 48 h.
+check_tags() {
+  local repo=$1 pushed=$2 src=$3 tgt=$4 n
+  n=$(awk 'FILENAME == ARGV[1] {t[$1] = $2; next}
+    $1 ~ /^refs\/tags\// && t[$1] != $2 {n++} END {print n + 0}' "$tgt" "$src")
+  ((n > 0)) || return 0
+  ! push_too_old "$pushed" ||
+    finding red managed-behind "$repo" "$n tags differ, last push $(pushed_label "$pushed")"
+}
+
+# heads_json REFS_FILE prints the branches of a "<ref> <sha>" file as
+# [{name, sha}].
+heads_json() {
+  jq -Rn '[inputs | split(" ") | select(length == 2 and (.[0] | startswith("refs/heads/")))
+    | {name: (.[0] | ltrimstr("refs/heads/")), sha: .[1]}]' "$1"
+}
+
+# mirror_compare REPO BASE HEAD OUTVAR CHECK stores GET
+# repos/REPO/compare/BASE...HEAD (two shas) in OUTVAR. Returns 3 when GitHub
+# has no such comparison (404: a commit is not in the mirror yet), 1 after a
+# check-failed finding of CHECK.
+mirror_compare() {
+  local mc_err mc_body
+  mc_err=$(mktemp)
+  if mc_body=$(gh api "repos/$1/compare/$2...$3" 2>"$mc_err"); then
+    rm -f "$mc_err"
+    printf -v "$4" '%s' "$mc_body"
+    return 0
+  fi
+  if grep -qF '(HTTP 404)' "$mc_err"; then
+    rm -f "$mc_err"
+    return 3
+  fi
+  finding red check-failed "$1" "$5: $(err_line "$mc_err")"
+  rm -f "$mc_err"
+  return 1
+}
+
+# check_branches REPO ENTRY DEFAULT UPSTREAM_REPO UPSTREAM_DEFAULT CONTRIB TB
+# UB PUSHED compares the default branch (unless declared) with the upstream
+# default branch, each declared branch with its onto upstream and each
+# upstream branch that matches a follow pattern (not the default, not
+# declared) with the target branch of the same name. TB: the target branches
+# [{name, sha}]; UB: the upstream branches [{name, sha}] (forks: the sha is
+# not needed). A fork is compared in UPSTREAM_REPO (branch names
+# URL-encoded); a mirror (UPSTREAM_REPO empty) in the mirror itself, which
+# fails when the upstream commit is not there yet: the branch then differs
+# and only the last push PUSHED tells its age.
 # auto (and followed): missing commits older than 48 h are managed-behind;
 # manual: rebase-pending. A declared or followed branch missing in the target
 # is managed-behind. The contribution branches CONTRIB (JSON array of names)
 # are left out: the sync never writes them.
 check_branches() {
-  local repo=$1 entry=$2 default=$3 up=$4 updef=$5 contrib=$6 tb ub list name sha onto rebase body n date
-  tb=$(mktemp)
-  ub=$(mktemp)
-  # shellcheck disable=SC2064 # expand now
-  trap "rm -f '$tb' '$ub'; trap - RETURN" RETURN
-  paged managed-behind "$repo" "repos/$repo/branches?per_page=100" '{name, sha: .commit.sha}' "$tb" || return 0
-  if [[ $(jq -r '.follow // [] | length' <<<"$entry") -gt 0 ]]; then
-    paged managed-behind "$repo" "repos/$up/branches?per_page=100" '{name}' "$ub" || return 0
-  else
-    echo '[]' >"$ub"
-  fi
+  local repo=$1 entry=$2 default=$3 up=$4 updef=$5 contrib=$6 tb=$7 ub=$8 pushed=$9
+  local list name sha onto uri usha rebase body n date rc
   json_out managed-behind "$repo" list -r --argjson e "$entry" --arg def "$default" --arg updef "$updef" \
     --argjson c "$contrib" --slurpfile u "$ub" '
     (map({key: .name, value: .sha}) | from_entries) as $sha |
+    ($u[0] | map({key: .name, value: (.sha // "-")}) | from_entries) as $usha |
     [$e.branches[].name] as $decl |
     [$u[0][].name | select(. as $n | . != $def and (IN($decl[]) | not)
       and any($e.follow // [] | .[]; . as $re | $n | test("^(?:" + $re + ")$")))
      | {name: ., onto: ., rebase: "auto"}] as $fol |
-    (if $e.refs == "default" and ($def | IN($decl[]) | not)
-     then [{name: $def, onto: $updef, rebase: "auto"}] else [] end) + $e.branches + $fol |
-    .[] | select(.name | IN($c[]) | not) | [.name, ($sha[.name] // "-"), .onto, .rebase] | @tsv' "$tb" || return 0
-  while IFS=$'\t' read -r name sha onto rebase; do
+    (if ($def | IN($decl[]) | not) then [{name: $def, onto: $updef, rebase: "auto"}] else [] end)
+      + $e.branches + $fol |
+    .[] | select(.name | IN($c[]) | not)
+    | [.name, ($sha[.name] // "-"), .onto, (.onto | @uri), ($usha[.onto] // "-"), .rebase] | @tsv' "$tb" || return 0
+  while IFS=$'\t' read -r name sha onto uri usha rebase; do
     [[ -n $name ]] || continue
     if [[ $sha == - ]]; then
       finding red managed-behind "$repo" "$name: missing in the target"
       continue
     fi
-    body=$(fetch managed-behind "$repo" "repos/$up/compare/$sha...$onto") || continue
+    if [[ -n $up ]]; then
+      body=$(fetch managed-behind "$repo" "repos/$up/compare/$sha...$uri") || continue
+    else
+      if [[ $usha == - ]]; then
+        finding red managed-behind "$repo" "$name: onto $onto missing upstream"
+        continue
+      fi
+      [[ $sha != "$usha" ]] || continue
+      rc=0
+      mirror_compare "$repo" "$sha" "$usha" body managed-behind || rc=$?
+      ((rc != 1)) || continue
+      if ((rc == 3)); then
+        if [[ $rebase == manual ]]; then
+          finding info rebase-pending "$repo" "$name: upstream commits to rebase onto $onto"
+        elif push_too_old "$pushed"; then
+          finding red managed-behind "$repo" "$name: differs from upstream, last push $(pushed_label "$pushed")"
+        fi
+        continue
+      fi
+    fi
     json_out managed-behind "$repo" n -r '.ahead_by // 0' <<<"$body" || continue
     ((n > 0)) || continue
     if [[ $rebase == manual ]]; then
@@ -138,18 +192,48 @@ check_branches() {
   done <<<"$list"
 }
 
-# check_undeclared REPO ENTRY DEFAULT UPSTREAM_REPO UPSTREAM_DEFAULT PRS_FILE:
-# the default branch counts only when it is not declared. With refs default
-# it is compared with the upstream default branch (the sync moves it there);
-# with refs all like any other branch (the sync mirrors it by name).
+# check_undeclared REPO ENTRY DEFAULT UPSTREAM_REPO UPSTREAM_DEFAULT PRS_FILE
+# (forks): the default branch counts only when it is not declared; it is
+# compared with the upstream default branch (the sync moves it there).
 check_undeclared() {
-  local repo=$1 entry=$2 default=$3 up=$4 updef=$5 prs=$6 found branch n tdef=
-  [[ $(jq -r .refs <<<"$entry") != default ]] || tdef=$default
+  local repo=$1 entry=$2 default=$3 up=$4 updef=$5 prs=$6 found branch n
   found=$(undeclared_branches branch-undeclared "$repo" "$up" "$updef" \
-    "$(jq -c '[.branches[].name]' <<<"$entry")" "$prs" "$tdef") || true
+    "$(jq -c '[.branches[].name]' <<<"$entry")" "$prs" "$default") || true
   while IFS=$'\t' read -r branch n; do
     [[ -z $branch ]] || finding red branch-undeclared "$repo" "$branch: $n own commits, not declared in repos.yml"
   done <<<"$found"
+}
+
+# mirror_undeclared REPO ENTRY DEFAULT UPSTREAM_DEFAULT TB UB: the rule of
+# check_undeclared for a mirror, compared in the mirror itself: own commits of
+# the default branch count against UPSTREAM_DEFAULT, those of any other
+# branch against the upstream branch of the same name, else
+# UPSTREAM_DEFAULT. When the upstream commit is not in the mirror, a branch
+# the sync moves (the default or a followed one) is left to managed-behind;
+# any other branch is reported as differing.
+mirror_undeclared() {
+  local repo=$1 entry=$2 default=$3 updef=$4 tb=$5 ub=$6 list branch sha usha moved body n rc
+  json_out branch-undeclared "$repo" list -r --argjson e "$entry" --arg def "$default" --arg updef "$updef" \
+    --slurpfile u "$ub" '
+    ($u[0] | map({key: .name, value: .sha}) | from_entries) as $usha |
+    [$e.branches[].name] as $decl |
+    .[] | select(.name | IN($decl[]) | not) | .name as $n |
+    (if $n != $def and $usha[$n] then $n else $updef end) as $base |
+    [$n, .sha, ($usha[$base] // "-"),
+     ($n == $def or any($e.follow // [] | .[]; . as $re | $n | test("^(?:" + $re + ")$")))] | @tsv' "$tb" || return 0
+  while IFS=$'\t' read -r branch sha usha moved; do
+    [[ -n $branch && $usha != - && $sha != "$usha" ]] || continue
+    rc=0
+    mirror_compare "$repo" "$usha" "$sha" body branch-undeclared || rc=$?
+    ((rc != 1)) || continue
+    if ((rc == 3)); then
+      [[ $moved == true ]] ||
+        finding red branch-undeclared "$repo" "$branch: differs from upstream, not declared in repos.yml"
+      continue
+    fi
+    json_out branch-undeclared "$repo" n -r '.ahead_by // 0' <<<"$body" || continue
+    ((n == 0)) || finding red branch-undeclared "$repo" "$branch: $n own commits, not declared in repos.yml"
+  done <<<"$list"
 }
 
 # open_pulls REPO UPSTREAM_REPO PRS_FILE CONTRIB_VAR writes the open upstream
@@ -169,31 +253,65 @@ open_pulls() {
     '[.[] | select((.head_repo // "" | ascii_downcase) == ($r | ascii_downcase)) | .head_ref]' "$prs"
 }
 
-# check_repo REPO ENTRY PRS_FILE (a temporary file for the open pulls)
-check_repo() {
-  local repo=$1 entry=$2 prs=$3 info fields default private pushed body up updef contrib='[]' pulls=0
-  repo_info "$repo" info || return 0
-  json_out managed-missing "$repo" fields -r '[.default_branch, .private, .pushed_at] | @tsv' <<<"$info" || return 0
-  IFS=$'\t' read -r default private pushed <<<"$fields"
-  check_settings "$repo" "$(jq -c .settings <<<"$entry")" "$info"
-  if [[ $(jq -r .kind <<<"$entry") == fork ]]; then
-    up=$(jq -r .upstream_repo <<<"$entry")
-    if open_pulls "$repo" "$up" "$prs" contrib; then
-      pulls=1
-    fi
+# check_fork REPO ENTRY DEFAULT PUSHED PRS_FILE TMPDIR
+check_fork() {
+  local repo=$1 entry=$2 default=$3 pushed=$4 prs=$5 tmp=$6 up updef body contrib='[]' pulls=0
+  up=$(jq -r .upstream_repo <<<"$entry")
+  if open_pulls "$repo" "$up" "$prs" contrib; then
+    pulls=1
   fi
-  if [[ $(jq -r .refs <<<"$entry") == all ]]; then
-    check_refs "$repo" "$entry" "$private" "$pushed" "$contrib"
+  if [[ $(jq -r .tags <<<"$entry") == true ]] &&
+    read_refs "$repo" "$(jq -r .upstream <<<"$entry")" "$PRIVATE" "$tmp/src" "$tmp/tgt"; then
+    check_tags "$repo" "$pushed" "$tmp/src" "$tmp/tgt"
   fi
-  [[ $(jq -r .kind <<<"$entry") == fork ]] || return 0
   body=$(fetch managed-behind "$repo" "repos/$up") || return 0
   json_out managed-behind "$repo" updef -r '.default_branch // empty' <<<"$body" || return 0
   if [[ -z $updef ]]; then
     parse_failed managed-behind "$repo"
     return 0
   fi
-  check_branches "$repo" "$entry" "$default" "$up" "$updef" "$contrib"
+  paged managed-behind "$repo" "repos/$repo/branches?per_page=100" '{name, sha: .commit.sha}' "$tmp/tb" || return 0
+  if [[ $(jq -r '.follow | length' <<<"$entry") -gt 0 ]]; then
+    paged managed-behind "$repo" "repos/$up/branches?per_page=100" '{name}' "$tmp/ub" || return 0
+  else
+    echo '[]' >"$tmp/ub"
+  fi
+  check_branches "$repo" "$entry" "$default" "$up" "$updef" "$contrib" "$tmp/tb" "$tmp/ub" "$pushed"
   ((pulls == 0)) || check_undeclared "$repo" "$entry" "$default" "$up" "$updef" "$prs"
+}
+
+# check_mirror REPO ENTRY DEFAULT PUSHED TMPDIR: the upstream is not on
+# github.com, so its refs come from git ls-remote and comparisons run in the
+# mirror. A mirror has no upstream pull requests (no contribution branches).
+check_mirror() {
+  local repo=$1 entry=$2 default=$3 pushed=$4 tmp=$5 upstream updef
+  upstream=$(jq -r .upstream <<<"$entry")
+  read_refs "$repo" "$upstream" "$PRIVATE" "$tmp/src" "$tmp/tgt" || return 0
+  [[ $(jq -r .tags <<<"$entry") != true ]] || check_tags "$repo" "$pushed" "$tmp/src" "$tmp/tgt"
+  if ! updef=$(remote_head "$upstream") || [[ -z $updef ]]; then
+    finding red check-failed "$repo" "managed-behind: cannot read the upstream default branch"
+    return 0
+  fi
+  heads_json "$tmp/tgt" >"$tmp/tb"
+  heads_json "$tmp/src" >"$tmp/ub"
+  check_branches "$repo" "$entry" "$default" "" "$updef" '[]' "$tmp/tb" "$tmp/ub" "$pushed"
+  mirror_undeclared "$repo" "$entry" "$default" "$updef" "$tmp/tb" "$tmp/ub"
+}
+
+# check_repo REPO ENTRY PRS_FILE (a temporary file for the open pulls)
+check_repo() {
+  local repo=$1 entry=$2 prs=$3 info fields default pushed tmp
+  repo_info "$repo" info || return 0
+  json_out managed-missing "$repo" fields -r '[.default_branch, .private, .pushed_at] | @tsv' <<<"$info" || return 0
+  IFS=$'\t' read -r default PRIVATE pushed <<<"$fields"
+  check_settings "$repo" "$(jq -c .settings <<<"$entry")" "$info"
+  tmp=$(mktemp -d)
+  if [[ $(jq -r .kind <<<"$entry") == fork ]]; then
+    check_fork "$repo" "$entry" "$default" "$pushed" "$prs" "$tmp"
+  else
+    check_mirror "$repo" "$entry" "$default" "$pushed" "$tmp"
+  fi
+  rm -rf "$tmp"
 }
 
 main() {

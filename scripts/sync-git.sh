@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Syncs the git refs of one managed fork or mirror.
 #
-#   sync-git.sh plan  fetches upstream (refs default: only the default branch,
-#                     the onto branches and the branches matching a follow
-#                     pattern, no tags) and target into $WORK/repo, rebases the
-#                     declared branches there and writes $WORK/plan.tsv
+#   sync-git.sh plan  fetches upstream (only the default branch, the onto
+#                     branches, the branches matching a follow pattern and,
+#                     unless tags is false, all tags) and target into
+#                     $WORK/repo, rebases the declared branches there and
+#                     writes $WORK/plan.tsv
 #                     (<ref> <old sha> <new sha> <reason>, tab separated;
 #                     reasons ff, rebase, mirror, delete, backup) and
 #                     $WORK/skipped.txt (<ref> <why>). Fails without a plan on
@@ -167,10 +168,11 @@ follow_match() {
     die "invalid follow pattern"
 }
 
-# fetch_needed UPSTREAM_DEFAULT fetches (refs default) only the upstream
-# default branch, the onto of every declared branch and the branches that
-# match a follow pattern (FOL), no tags. The branch names come from
-# ls-remote; invalid ones are skipped.
+# fetch_needed UPSTREAM_DEFAULT fetches only the upstream default branch, the
+# onto of every declared branch, the branches that match a follow pattern
+# (FOL) and, with TAGS, all tags (invalid tag names are dropped by load).
+# The branch names come from ls-remote; invalid ones are skipped. Other
+# namespaces are never fetched.
 fetch_needed() {
   local udef=$1 out sha name onto fol
   local -a specs=()
@@ -198,6 +200,7 @@ fetch_needed() {
     [[ -n ${have[$name]:-} ]] || continue
     specs+=("+refs/heads/$name:refs/up/heads/$name")
   done
+  [[ $TAGS != true ]] || specs+=('+refs/tags/*:refs/up/tags/*')
   ((${#specs[@]})) || return 0
   g fetch -q --no-tags --no-write-fetch-head -- "$UPSTREAM_URL" "${specs[@]}" ||
     die "cannot fetch upstream"
@@ -209,18 +212,22 @@ sorted_keys() {
   printf '%s\n' "${!a[@]}" | LC_ALL=C sort
 }
 
+# in_scope KEY succeeds for a ref (heads/x or tags/x) the sync mirrors by
+# name: a followed branch, or a tag when TAGS is true.
+in_scope() {
+  [[ $1 == tags/* ]] && [[ $TAGS == true ]] && return 0
+  [[ $1 == heads/* && -n ${SCOPE[${1#heads/}]:-} ]]
+}
+
 plan() {
-  local mode kind name onto how key up tg tdef udef n u sha fol
+  local name onto how key up tg tdef udef n u sha fol
   local -a keys
   need_env ENTRY TARGET_URL UPSTREAM_URL WORK GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
   [[ -d $WORK ]] || die "WORK $WORK is not a directory"
   [[ $UPSTREAM_URL != -* && $TARGET_URL != -* ]] || die "invalid URL"
   check_backup_prefix
   # shellcheck disable=SC2153 # ENTRY comes from the environment
-  kind=$(jq -r .kind <<<"$ENTRY")
-  mode=$(jq -r .refs <<<"$ENTRY")
-  [[ $mode == default || $mode == all ]] || die "invalid refs mode $mode"
-  [[ $kind == fork || $mode == all ]] || die "a mirror needs refs all"
+  TAGS=$(jq -r '.tags != false' <<<"$ENTRY")
 
   REPO=$WORK/repo
   PLAN_TMP=$WORK/plan.tsv.tmp
@@ -230,19 +237,13 @@ plan() {
   : >"$WORK/skipped.txt"
   git init -q "$REPO"
 
-  declare -gA UPR=() TGR=() BKR=() DECL=() CONTRIB=() FOL=()
+  declare -gA UPR=() TGR=() BKR=() DECL=() CONTRIB=() FOL=() SCOPE=()
   FOLLOW=$(jq -c '.follow // []' <<<"$ENTRY")
-  if [[ $mode == default ]]; then
-    udef=$(default_branch "$UPSTREAM_URL" upstream)
-    fetch_needed "$udef"
-  else
-    g fetch -q --no-tags --no-write-fetch-head -- "$UPSTREAM_URL" \
-      '+refs/heads/*:refs/up/heads/*' '+refs/tags/*:refs/up/tags/*' ||
-      die "cannot fetch upstream"
-  fi
-  # refs default never writes tags: read only the target branches (and backups)
+  udef=$(default_branch "$UPSTREAM_URL" upstream)
+  fetch_needed "$udef"
+  # tags false: target tags are neither read nor written
   local -a tgspecs=('+refs/heads/*:refs/tg/heads/*')
-  [[ $mode == default ]] || tgspecs+=('+refs/tags/*:refs/tg/tags/*')
+  [[ $TAGS != true ]] || tgspecs+=('+refs/tags/*:refs/tg/tags/*')
   g fetch -q --no-tags --no-write-fetch-head -- "$TARGET_URL" \
     "${tgspecs[@]}" "+${BACKUP_PREFIX}*:refs/tg/backup/*" ||
     die "cannot fetch target"
@@ -260,9 +261,26 @@ plan() {
 
   u=${#UPR[@]}
   n=${#TGR[@]}
-  if ((u == 0)) || { [[ $mode == all ]] && ((2 * u < n)); }; then
-    die "upstream has $u refs, target $n: refusing (empty or broken source)"
-  fi
+  ((u > 0)) || die "upstream has $u refs, target $n: refusing (empty or broken source)"
+  # the default branch and the refs mirrored by name (followed branches,
+  # tags): upstream must have at least half as many as the target
+  for name in "${!FOL[@]}"; do SCOPE[$name]=1; done
+  fol=$(sorted_keys TGR | sed -n 's|^heads/||p' | follow_match)
+  while IFS= read -r name; do
+    [[ -z $name ]] || SCOPE[$name]=1
+  done <<<"$fol"
+  tdef=$(default_branch "$TARGET_URL" target)
+  tdef=${tdef:-$udef}
+  u=0 n=0
+  for key in "${!UPR[@]}"; do
+    in_scope "$key" || [[ $key == "heads/$udef" ]] || continue
+    u=$((u + 1))
+  done
+  for key in "${!TGR[@]}"; do
+    in_scope "$key" || [[ $key == "heads/$tdef" ]] || continue
+    n=$((n + 1))
+  done
+  ((2 * u >= n)) || die "upstream has $u refs, target $n: refusing (empty or broken source)"
 
   # declared branches; \x1f is no IFS whitespace, so empty fields stay empty,
   # control characters become ? (an invalid ref name)
@@ -284,94 +302,64 @@ plan() {
   done < <(jq -r '.branches[] | [.name, .onto, .rebase]
     | map((. // "") | tostring | explode | map(if . < 32 or . == 127 then 63 else . end) | implode) | join("\u001f")' <<<"$ENTRY")
 
-  if [[ $mode == default ]]; then
-    [[ -n $udef && -n ${UPR[heads/$udef]:-} ]] || die "upstream default branch missing"
-    tdef=$(default_branch "$TARGET_URL" target)
-    tdef=${tdef:-$udef}
-    if [[ -n ${DECL[$tdef]:-} ]]; then
-      :
-    elif [[ -n ${CONTRIB[$tdef]:-} ]]; then
-      skip "refs/heads/$tdef" contribution
-    else
-      up=${UPR[heads/$udef]}
-      tg=${TGR[heads/$tdef]:-$ZERO}
-      if [[ $tg == "$ZERO" ]] || { [[ $tg != "$up" ]] && is_ancestor "$tg" "$up"; }; then
-        add "refs/heads/$tdef" "$tg" "$up" ff
-      elif [[ $tg != "$up" ]]; then
-        skip "refs/heads/$tdef" undeclared
-      fi
-    fi
-    # followed branches: like the heads in mode all
-    mapfile -t keys < <(sorted_keys FOL)
-    for name in "${keys[@]}"; do
-      [[ $name != "$tdef" && -z ${DECL[$name]:-} ]] || continue
-      up=${UPR[heads/$name]:-}
-      tg=${TGR[heads/$name]:-$ZERO}
-      [[ -n $up && $tg != "$up" ]] || continue
-      if [[ -n ${CONTRIB[$name]:-} ]]; then
-        skip "refs/heads/$name" contribution
-      elif [[ $tg != "$ZERO" ]] && ! is_ancestor "$tg" "$up"; then
-        skip "refs/heads/$name" undeclared
-      else
-        add "refs/heads/$name" "$tg" "$up" mirror
-      fi
-    done
-    # followed target branches gone upstream (the default branch never)
-    fol=$(sorted_keys TGR | sed -n 's|^heads/||p' | follow_match)
-    mapfile -t keys <<<"$fol"
-    for name in "${keys[@]}"; do
-      [[ -n $name && $name != "$tdef" && -z ${DECL[$name]:-} && -z ${UPR[heads/$name]:-} ]] || continue
-      if [[ -n ${CONTRIB[$name]:-} ]]; then
-        skip "refs/heads/$name" contribution
-      elif contained "${TGR[heads/$name]}"; then
-        add "refs/heads/$name" "${TGR[heads/$name]}" "$ZERO" delete
-      else
-        skip "refs/heads/$name" "unique commits"
-      fi
-    done
+  [[ -n $udef && -n ${UPR[heads/$udef]:-} ]] || die "upstream default branch missing"
+  if [[ -n ${DECL[$tdef]:-} ]]; then
+    :
+  elif [[ -n ${CONTRIB[$tdef]:-} ]]; then
+    skip "refs/heads/$tdef" contribution
   else
-    mapfile -t keys < <(sorted_keys UPR)
-    for key in "${keys[@]}"; do
-      name=${key#*/}
-      up=${UPR[$key]}
-      tg=${TGR[$key]:-$ZERO}
-      [[ $tg != "$up" ]] || continue
-      if [[ $key == heads/* ]]; then
-        [[ -z ${DECL[$name]:-} ]] || continue
-        if [[ -n ${CONTRIB[$name]:-} ]]; then
-          skip "refs/$key" contribution
-          continue
-        fi
-        if [[ $tg != "$ZERO" ]] && ! is_ancestor "$tg" "$up"; then
-          skip "refs/$key" undeclared
-          continue
-        fi
-      fi
-      add "refs/$key" "$tg" "$up" mirror
-    done
-    tdef=$(default_branch "$TARGET_URL" target)
-    mapfile -t keys < <(sorted_keys TGR)
-    for key in "${keys[@]}"; do
-      [[ -z ${UPR[$key]:-} ]] || continue
-      name=${key#*/}
-      if [[ $key == heads/* ]]; then
-        [[ -z ${DECL[$name]:-} ]] || continue
-        if [[ $name == "$tdef" ]]; then
-          skip "refs/$key" "default branch"
-          continue
-        fi
-        if [[ -n ${CONTRIB[$name]:-} ]]; then
-          skip "refs/$key" contribution
-          continue
-        fi
-      fi
-      if contained "${TGR[$key]}"; then
-        add "refs/$key" "${TGR[$key]}" "$ZERO" delete
-      else
-        skip "refs/$key" "unique commits"
-      fi
-    done
+    up=${UPR[heads/$udef]}
+    tg=${TGR[heads/$tdef]:-$ZERO}
+    if [[ $tg == "$ZERO" ]] || { [[ $tg != "$up" ]] && is_ancestor "$tg" "$up"; }; then
+      add "refs/heads/$tdef" "$tg" "$up" ff
+    elif [[ $tg != "$up" ]]; then
+      skip "refs/heads/$tdef" undeclared
+    fi
   fi
+  # followed branches: fast-forward or create by name
+  mapfile -t keys < <(sorted_keys FOL)
+  for name in "${keys[@]}"; do
+    [[ $name != "$tdef" && -z ${DECL[$name]:-} ]] || continue
+    up=${UPR[heads/$name]:-}
+    tg=${TGR[heads/$name]:-$ZERO}
+    [[ -n $up && $tg != "$up" ]] || continue
+    if [[ -n ${CONTRIB[$name]:-} ]]; then
+      skip "refs/heads/$name" contribution
+    elif [[ $tg != "$ZERO" ]] && ! is_ancestor "$tg" "$up"; then
+      skip "refs/heads/$name" undeclared
+    else
+      add "refs/heads/$name" "$tg" "$up" mirror
+    fi
+  done
+  # followed target branches gone upstream (the default branch never)
+  mapfile -t keys < <(sorted_keys SCOPE)
+  for name in "${keys[@]}"; do
+    [[ $name != "$tdef" && -z ${DECL[$name]:-} && -z ${UPR[heads/$name]:-} && -n ${TGR[heads/$name]:-} ]] || continue
+    if [[ -n ${CONTRIB[$name]:-} ]]; then
+      skip "refs/heads/$name" contribution
+    elif contained "${TGR[heads/$name]}"; then
+      add "refs/heads/$name" "${TGR[heads/$name]}" "$ZERO" delete
+    else
+      skip "refs/heads/$name" "unique commits"
+    fi
+  done
+  # tags (only loaded when TAGS is true): new and moved ones by name (an
+  # annotated tag keeps its tag object), those gone upstream only when
+  # nothing is lost
+  mapfile -t keys < <(sorted_keys UPR | grep '^tags/' || true)
+  for key in "${keys[@]}"; do
+    [[ -n $key && ${TGR[$key]:-$ZERO} != "${UPR[$key]}" ]] || continue
+    add "refs/$key" "${TGR[$key]:-$ZERO}" "${UPR[$key]}" mirror
+  done
+  mapfile -t keys < <(sorted_keys TGR | grep '^tags/' || true)
+  for key in "${keys[@]}"; do
+    [[ -n $key && -z ${UPR[$key]:-} ]] || continue
+    if contained "${TGR[$key]}"; then
+      add "refs/$key" "${TGR[$key]}" "$ZERO" delete
+    else
+      skip "refs/$key" "unique commits"
+    fi
+  done
 
   LC_ALL=C sort -u -o "$WORK/skipped.txt" "$WORK/skipped.txt"
   mv "$PLAN_TMP" "$WORK/plan.tsv"

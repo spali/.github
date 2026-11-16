@@ -136,6 +136,12 @@ head_pulls() {
   printf '%s\n' "$heads" >"$out"
 }
 
+# uri NAME prints NAME URL-encoded (for a branch name in an API path).
+uri() {
+  # shellcheck disable=SC2016 # jq program
+  jq -rn --arg s "$1" '$s | @uri'
+}
+
 # json_out CHECK REPO OUTVAR JQ_ARGS... runs jq, stores its output in OUTVAR.
 # On failure records check-failed and returns 1.
 json_out() {
@@ -168,6 +174,14 @@ ls_remote() {
   rm -f "$raw"
 }
 
+# remote_head URL prints the default branch of a remote (empty if it has
+# none); fails when the remote cannot be read.
+remote_head() {
+  local out
+  out=$(GIT_TERMINAL_PROMPT=0 timeout 120 git ls-remote --symref -- "$1" HEAD 2>/dev/null) || return 1
+  awk '$1 == "ref:" && $3 == "HEAD" { sub(/^refs\/heads\//, "", $2); print $2; exit }' <<<"$out"
+}
+
 # api_refs REPO OUTFILE [CHECK]: the same list for a private repository via
 # the API. Errors are check-failed findings of CHECK (default mirror-behind).
 api_refs() {
@@ -197,7 +211,8 @@ api_refs() {
 # TARGET_DEFAULT (the default branch of REPO, may be empty) are counted against
 # UPSTREAM_DEFAULT, never against an upstream branch of the same name (the
 # sync moves it onto the upstream default); those of any other branch against
-# the upstream branch of the same name, else UPSTREAM_DEFAULT. API errors are
+# the upstream branch of the same name, else UPSTREAM_DEFAULT (branch names
+# URL-encoded in the compare URL). API errors are
 # check-failed findings of CHECK; the function then returns 1 after printing
 # the branches found so far.
 undeclared_branches() {
@@ -214,10 +229,10 @@ undeclared_branches() {
     [$u[0][].name] as $un |
     [$p[0][] | select((.head_repo // "" | ascii_downcase) == ($r | ascii_downcase)) | .head_ref] as $contrib |
     .[] | .name | select(IN($d[]) or IN($contrib[]) | not) |
-    [., (if . != $tdef and IN($un[]) then . else $def end)] | @tsv' "$tb" || return 1
-  while IFS=$'\t' read -r branch base; do
+    [., (if . != $tdef and IN($un[]) then . else $def end | @uri), @uri] | @tsv' "$tb" || return 1
+  while IFS=$'\t' read -r branch base uri; do
     [[ -n $branch ]] || continue
-    body=$(fetch "$check" "$repo" "repos/$up/compare/$base...${repo%%/*}:${repo#*/}:$branch") || return 1
+    body=$(fetch "$check" "$repo" "repos/$up/compare/$base...${repo%%/*}:${repo#*/}:$uri") || return 1
     json_out "$check" "$repo" n -r '.ahead_by // 0' <<<"$body" || return 1
     if ((n > 0)); then
       printf '%s\t%s\n' "$branch" "$n"

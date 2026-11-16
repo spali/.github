@@ -19,7 +19,7 @@ setup() {
   [ "$status" -eq 0 ]
   [ "$(jq -r .kind <<<"$output")" = fork ]
   [ "$(jq -r .upstream_repo <<<"$output")" = dannerph/homeassistant-keba ]
-  [ "$(jq -r .refs <<<"$output")" = default ]
+  [ "$(jq -r 'has("refs")' <<<"$output")" = false ]
   [ "$(jq -r .private <<<"$output")" = false ]
 }
 
@@ -32,7 +32,7 @@ setup() {
 @test "kind is mirror for bitbucket upstream" {
   run managed_entry "$CONFIG" spali/knx.js
   [ "$(jq -r .kind <<<"$output")" = mirror ]
-  [ "$(jq -r .refs <<<"$output")" = all ]
+  [ "$(jq -r 'has("refs")' <<<"$output")" = false ]
   [ "$(jq -r .upstream_repo <<<"$output")" = null ]
   [ "$(jq -c .branches <<<"$output")" = "[]" ]
 }
@@ -80,4 +80,16 @@ setup() {
   [ "$(jq -c .follow <<<"$output")" = "[]" ]
   run managed_entry "$CONFIG" spali/d
   [ "$(jq -c .follow <<<"$output")" = '["release/.*"]' ]
+}
+
+@test "tags defaults to true" {
+  jq -n '{managed: [{repo: "spali/c", upstream: "https://github.com/o/c"},
+    {repo: "spali/d", upstream: "https://example.org/d", tags: false},
+    {repo: "spali/e", upstream: "https://example.org/e", tags: true}]}' >"$CONFIG"
+  run managed_entry "$CONFIG" spali/c
+  [ "$(jq -c .tags <<<"$output")" = true ]
+  run managed_entry "$CONFIG" spali/d
+  [ "$(jq -c .tags <<<"$output")" = false ]
+  run managed_entry "$CONFIG" spali/e
+  [ "$(jq -c .tags <<<"$output")" = true ]
 }

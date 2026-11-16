@@ -258,18 +258,23 @@ says otherwise. The detail lists each difference
 🔴 A managed repository lacks upstream changes for more than 48 hours (the
 24-hour sync interval plus 24 hours):
 
-- a fork: its default branch misses commits of the upstream default branch,
-  or a branch declared with `rebase: auto` misses commits of its `onto`, and
-  the oldest missing commit is older than 48 hours
-  (`main: 3 upstream commits missing, oldest from …`). A declared default
-  branch follows its declaration. With `refs: default`, an upstream branch
-  that matches a `follow` pattern is compared with the fork branch of the
-  same name the same way. A declared or followed branch that does not exist
-  in the fork is red at once (`feat: missing in the target`); a followed
-  branch that is new upstream shows this until the next sync run creates it;
-- a mirror, or a fork with `refs: all`: branches or tags of the upstream are
-  missing or differ (declared branches excepted), and the last push is older
-  than 48 hours (`2 refs differ, last push …`).
+- branches (forks and mirrors alike): the default branch misses commits of
+  the upstream default branch, or a branch declared with `rebase: auto`
+  misses commits of its `onto`, and the oldest missing commit is older than
+  48 hours (`main: 3 upstream commits missing, oldest from …`). A declared
+  default branch follows its declaration. An upstream branch that matches a
+  `follow` pattern is compared with the target branch of the same name the
+  same way. A declared or followed branch that does not exist in the target
+  is red at once (`feat: missing in the target`); a followed branch that is
+  new upstream shows this until the next sync run creates it. A fork is
+  compared in the upstream repository; a mirror (upstream not on github.com)
+  in the mirror itself, which works only when the upstream commit is already
+  there: otherwise the branch is red once the last push is older than 48
+  hours (`main: differs from upstream, last push …`; a `rebase: manual`
+  branch: `rebase-pending` without a count);
+- tags (unless `tags: false`): upstream tags are missing or differ in the
+  target, and the last push is older than 48 hours
+  (`2 tags differ, last push …`).
 
 The head branch of an open upstream pull request from the fork is left out:
 the sync never writes it.
@@ -278,19 +283,21 @@ the sync never writes it.
 
 ## branch-undeclared
 
-🔴 A branch of a managed fork has own commits but is not declared in
-`branches:` and is not the head of an open pull request from the fork to
+🔴 A branch of a managed fork or mirror has own commits but is not declared
+in `branches:` and is not the head of an open pull request from the fork to
 upstream. Own commits of the default branch are counted against the upstream
-default branch (never against an upstream branch of the same name; with
-`refs: all`, which mirrors branches by name, like any other branch), those
+default branch (never against an upstream branch of the same name), those
 of any other branch (a followed one too, the sync mirrors it by name)
 against the upstream branch of the same name, else the upstream default
-branch. The default branch counts too unless it is
-declared. With `refs: default` the sync ignores an undeclared branch that is
-neither the default branch nor followed: its run stays green, only the
-monitor reports it. The default branch, a followed branch, or (with
-`refs: all`) any branch with own commits is kept by the sync and fails its
-run. (🔵 for an unmanaged fork, where no sync manages anything.)
+branch. The default branch counts too unless it is declared. The sync
+ignores an undeclared branch that is neither the default branch nor
+followed: its run stays green, only the monitor reports it. The default
+branch or a followed branch with own commits is kept by the sync and fails
+its run. A mirror is compared in the mirror itself: when the upstream commit
+is not there, a branch the sync moves (the default or a followed one) is
+left to `managed-behind`, any other branch is reported as
+`<branch>: differs from upstream, not declared in repos.yml`. (🔵 for an
+unmanaged fork, where no sync manages anything.)
 
 **Fix:** declare the branch with its `onto` and `rebase`, or delete it (or
 reset the default branch to upstream) by hand.
