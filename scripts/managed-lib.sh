@@ -37,17 +37,19 @@ SYNC_REPO_JOB_RE='^(?:.* / )?Sync · (?<r>.+)$'
 
 # check_sync_failed CONFIG_JSON_FILE: with at least one managed entry, reads
 # the newest completed runs of the workflow sync.yml on main of the control
-# repository ($GITHUB_REPOSITORY; unset: skip finding), newest first. Per
-# managed repository the newest job "Sync · <repo>" that succeeded or failed
-# counts (cancelled or skipped jobs are passed over); a failed one is a red
+# repository ($GITHUB_REPOSITORY; unset: skip finding), newest first. A job
+# has a result unless its conclusion is cancelled, skipped or null (e.g. a run
+# GitHub cancelled in the concurrency group); such jobs are passed over and an
+# older job counts. Per managed repository the newest job "Sync · <repo>" with
+# a result counts; anything but success (failure, timed_out, ...) is a red
 # finding of that repository. The non-repository jobs (the plan job) of the
-# newest run where one of them has a result (cancelled or skipped jobs passed
-# over, like a run GitHub cancelled in the concurrency group) must have
-# succeeded, else a red finding without repository. Stops reading runs once
-# every managed repository and the plan job have a result; a repository
-# without a job (or no run at all) is no finding. Runs once per monitor run.
+# newest run where one of them has a result must have succeeded, else a red
+# finding without repository. Stops reading runs once every managed
+# repository and the plan job have a result; a repository without a job (or
+# no run at all) is no finding. A run with more jobs than one page is
+# check-failed. Runs once per monitor run.
 check_sync_failed() {
-  local open body runs id run_url step failed plan=1 repo url
+  local open body runs id run_url step page plan_state repo_failures plan=1 repo url
   json_out sync-failed - open -c '[(.managed // [])[].repo]' "$1" || return 0
   [[ $open != '[]' ]] || return 0
   if [[ -z ${GITHUB_REPOSITORY:-} ]]; then
@@ -60,29 +62,35 @@ check_sync_failed() {
   while IFS=$'\t' read -r id run_url; do
     [[ -n $id ]] || continue
     body=$(fetch sync-failed - "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?per_page=100") || return 0
-    if [[ -n $plan ]]; then
-      # the non-repository jobs with a result: none, ok or failed
-      # shellcheck disable=SC2016 # jq program
-      json_out sync-failed - failed -r --arg re "$SYNC_REPO_JOB_RE" '
-        [.jobs // [] | .[] | select((.name | test($re) | not)
-          and (.conclusion | IN("cancelled", "skipped", null) | not))]
-        | if length == 0 then "none" elif all(.conclusion == "success") then "ok" else "failed" end' <<<"$body" || return 0
-      [[ $failed == none ]] || plan=
-      [[ $failed != failed ]] ||
-        finding red sync-failed - "sync run failed before the repositories: $run_url"
+    # empty when the page holds every job, else "<total>, read <n>"
+    # shellcheck disable=SC2016 # jq program
+    json_out sync-failed - page -r '
+      (.jobs // [] | length) as $n | select((.total_count // 0) > $n) | "\(.total_count), read \($n)"' <<<"$body" || return 0
+    if [[ -n $page ]]; then
+      finding red check-failed - "sync-failed: more jobs than one page ($page): $run_url"
+      return 0
     fi
-    # {done: repos with a result in this run, failed: [[repo, job url]]}
     # shellcheck disable=SC2016 # jq program
     json_out sync-failed - step -c --arg re "$SYNC_REPO_JOB_RE" --argjson open "$open" '
-      [.jobs // [] | .[] | (.name | capture($re).r) as $r
-        | select(IN($r; $open[]) and (.conclusion == "success" or .conclusion == "failure"))
-        | {r: $r, conclusion, html_url}]
+      def result: .conclusion | IN("cancelled", "skipped", null) | not;
+      (.jobs // []) as $jobs
+      | ([$jobs[] | select((.name | test($re) | not) and result)]
+          | if length == 0 then "none" elif all(.conclusion == "success") then "ok" else "failed" end) as $plan
+      | [$jobs[] | (.name | capture($re).r) as $r | select(IN($r; $open[]) and result)
+          | {r: $r, conclusion, html_url}]
       | unique_by(.r)
-      | {done: map(.r), failed: map(select(.conclusion == "failure") | [.r, .html_url])}' <<<"$body" || return 0
-    json_out sync-failed - failed -r '.failed[] | @tsv' <<<"$step" || return 0
+      | {plan: $plan, done: map(.r), failed: map(select(.conclusion != "success") | [.r, .html_url])}' <<<"$body" || return 0
+    if [[ -n $plan ]]; then
+      # none (no plan job with a result), ok or failed
+      json_out sync-failed - plan_state -r '.plan' <<<"$step" || return 0
+      [[ $plan_state == none ]] || plan=
+      [[ $plan_state != failed ]] ||
+        finding red sync-failed - "sync run failed before the repositories: $run_url"
+    fi
+    json_out sync-failed - repo_failures -r '.failed[] | @tsv' <<<"$step" || return 0
     while IFS=$'\t' read -r repo url; do
       [[ -z $repo ]] || finding red sync-failed "$repo" "last sync of this repository failed: $url"
-    done <<<"$failed"
+    done <<<"$repo_failures"
     # shellcheck disable=SC2016 # jq program
     json_out sync-failed - open -c --argjson open "$open" '$open - .done' <<<"$step" || return 0
     [[ $open != '[]' || -n $plan ]] || return 0

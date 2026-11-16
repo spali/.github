@@ -334,22 +334,28 @@ rebase it by hand and push.
 
 ## sync-failed
 
-🔴 The last sync of a managed repository failed: per repository under
-`managed:` the newest job `Sync · <repo>` of the workflow `sync.yml` on the
-branch `main` of the control repository that succeeded or failed counts
-(cancelled and skipped jobs are passed over, the older job counts); the
-detail links the job (`last sync of this repository failed: <url>`). A sync
-of one repository (`-f repo=…`) thus never hides a failure of another one.
+🔴 The last sync of a managed repository did not succeed: per repository
+under `managed:` the newest job `Sync · <repo>` of the workflow `sync.yml` on
+the branch `main` of the control repository that has a result counts; any
+result but success (`failure`, `timed_out`, …) is red. A cancelled or skipped
+job, or one without a conclusion (e.g. a run GitHub cancelled in the sync
+concurrency group), has no result and is passed over: the older job counts.
+The detail links the job (`last sync of this repository failed: <url>`). A
+sync of one repository (`-f repo=…`) thus never hides a failure of another
+one.
 🔴 Without a repository: in the newest run whose non-repository job
 (`Managed repositories`) has a result, that job did not succeed (`sync run
-failed before the repositories: <url>`); a cancelled or skipped job (e.g. a
-run GitHub cancelled in the sync concurrency group) is passed over, the older
-run counts. Only runs on `main` are read; runs on other branches (tests) never
-count. Checked once per monitor run (in the Lists job), only when `managed:`
-has entries; reads the 20 newest completed runs and stops once every managed
+failed before the repositories: <url>`).
+
+Only runs on `main` are read; runs on other branches (tests) never count.
+Checked once per monitor run (in the Lists job), only when `managed:` has
+entries; reads the 20 newest completed runs and stops once every managed
 repository and the plan job have a result. A repository without a job in
-these runs (new entry) and no run yet are no finding. ⚪ Skipped in a local
-run, where there is no control repository.
+these runs (new entry) and no run yet are no finding. 🔴 A run with more jobs
+than one page (100) is `check-failed` (`sync-failed: more jobs than one page
+…`). ⚪ Skipped in a local run, where there is no control repository. The
+report links the sync runs of the control repository (Fix at) when it knows
+the control file URL.
 
 The job of a repository also fails when the sync stopped a ref because upstream rewrote it:
 `error: <ref>: upstream rewritten (…)` or `upstream moved tag (…)`, with the

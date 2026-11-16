@@ -226,7 +226,6 @@ J
   [[ $output == *"| unused ignore: x | [Control file](https://github.com/o/ctl/blob/abc/repos.yml) |"* ]]
 }
 
-
 @test "sync-failed with a repo from the lists job renders under that repo, once, in both job modes" {
   local lists=$BATS_TEST_TMPDIR/lists.jsonl one=$BATS_TEST_TMPDIR/one.jsonl
   printf '%s\n' \
@@ -242,7 +241,18 @@ J
     run "$REPORT"
     [ "$status" -eq 1 ]
     [[ $output == *"**3 red**"* ]]
-    [ "$(grep -c '^| \[spali/knx.js\](https://github.com/spali/knx.js) | last sync of this repository failed: \[run\](https://github.com/ctl/x/actions/runs/9/job/7) |' <<<"$output")" -eq 1 ]
-    [ "$(grep -c '^| - | sync run failed before the repositories: \[run\](https://github.com/ctl/x/actions/runs/9) |' <<<"$output")" -eq 1 ]
+    [ "$(grep -c '^| \[spali/knx.js\](https://github.com/spali/knx.js) | last sync of this repository failed: \[job\](https://github.com/ctl/x/actions/runs/9/job/7) |  |' <<<"$output")" -eq 1 ]
+    [ "$(grep -c '^| - | sync run failed before the repositories: \[run\](https://github.com/ctl/x/actions/runs/9) |  |' <<<"$output")" -eq 1 ]
   done
+}
+
+@test "sync-failed links the sync runs of the control repository when its URL is known" {
+  findings <<'J'
+{"level":"red","check":"sync-failed","repo":"o/r","message":"last sync of this repository failed: https://github.com/o/ctl/actions/runs/9/job/7"}
+{"level":"red","check":"sync-failed","repo":null,"message":"sync run failed before the repositories: https://github.com/o/ctl/actions/runs/9"}
+J
+  export MONITOR_CONFIG_URL=https://github.com/o/ctl/blob/abc/repos.yml
+  run "$REPORT"
+  [[ $output == *"| [o/r](https://github.com/o/r) | last sync of this repository failed: [job](https://github.com/o/ctl/actions/runs/9/job/7) | [Sync runs](https://github.com/o/ctl/actions/workflows/sync.yml) |"* ]]
+  [[ $output == *"| - | sync run failed before the repositories: [run](https://github.com/o/ctl/actions/runs/9) | [Sync runs](https://github.com/o/ctl/actions/workflows/sync.yml) |"* ]]
 }
