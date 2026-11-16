@@ -292,7 +292,9 @@ reset the default branch to upstream) by hand.
 🔵 A branch declared with `rebase: manual` is behind its `onto` upstream
 (`wip: 2 upstream commits to rebase onto main`).
 
-**Fix:** rebase it by hand and push.
+**Fix:** in the control repository run
+`gh workflow run sync.yml -f repo=<repo> -f branch=<branch>`; on a conflict
+rebase it by hand and push.
 
 ## sync-failed
 
