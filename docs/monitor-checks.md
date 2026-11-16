@@ -271,7 +271,9 @@ says otherwise. The detail lists each difference
   in the mirror itself, which works only when the upstream commit is already
   there: otherwise the branch is red once the last push is older than 48
   hours (`main: differs from upstream, last push …`; a `rebase: manual`
-  branch: `rebase-pending` without a count);
+  branch: `rebase-pending` without a count). A mirror branch declared onto
+  a branch the upstream does not have is red at once
+  (`feat: onto dev missing upstream`; the sync fails on it too);
 - tags (unless `tags: false`): upstream tags are missing or differ in the
   target, and the last push is older than 48 hours
   (`2 tags differ, last push …`).
@@ -279,7 +281,13 @@ says otherwise. The detail lists each difference
 The head branch of an open upstream pull request from the fork is left out:
 the sync never writes it.
 
-**Fix:** look at the sync run (see `sync-failed`).
+When the default branch of a mirror's upstream cannot be read (`git
+ls-remote --symref` fails or the upstream has no `HEAD`), its branches are
+not compared: `check-failed` with
+`managed-behind: cannot read the upstream default branch`.
+
+**Fix:** look at the sync run (see `sync-failed`); for a missing `onto`,
+fix the `onto` of the branch in `repos.yml`.
 
 ## branch-undeclared
 
@@ -295,9 +303,16 @@ followed: its run stays green, only the monitor reports it. The default
 branch or a followed branch with own commits is kept by the sync and fails
 its run. A mirror is compared in the mirror itself: when the upstream commit
 is not there, a branch the sync moves (the default or a followed one) is
-left to `managed-behind`, any other branch is reported as
-`<branch>: differs from upstream, not declared in repos.yml`. (🔵 for an
-unmanaged fork, where no sync manages anything.)
+left to `managed-behind`. (🔵 for an unmanaged fork, where no sync manages
+anything.)
+
+🔵 A mirror branch that is neither the default branch, declared nor
+followed is never synced, so it may be an old copy of an upstream branch
+that has moved on since; the mirror cannot tell such a stale copy from own
+commits. It is no finding when its tip is the sha of any upstream branch or
+tag; otherwise it is compared with the mirror's own default branch and,
+when it is ahead, reported as info:
+`<branch>: differs from upstream, not followed (own commits or a stale upstream copy)`.
 
 **Fix:** declare the branch with its `onto` and `rebase`, or delete it (or
 reset the default branch to upstream) by hand.
