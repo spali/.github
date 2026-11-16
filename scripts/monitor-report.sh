@@ -6,27 +6,36 @@
 # MONITOR_DOCS_URL (the check explanations, default: docs/monitor-checks.md on
 # main of spali/.github), MONITOR_CONFIG_URL (the control file on GitHub,
 # optional), INVENTORY (the inventory JSON array, optional: without it there
-# is no section of clean repositories).
+# is no overview and no section of clean repositories), MONITOR_NOW (epoch,
+# default now: the time in the summary line), GITHUB_SERVER_URL,
+# GITHUB_REPOSITORY, GITHUB_RUN_ID (optional, all three: link to the run).
 # Exit status: 1 if a red finding is left, else 0.
 set -euo pipefail
 
 # shellcheck source=scripts/monitor-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 
-# JQ program, run with -s over $FINDINGS. Arguments: $cfg (slurped config),
-# $inv (slurped inventory, [] without one), $docs (URL of the check
-# explanations), $control (URL of the control file, may be empty). Prints
-# {markdown, red}.
-# The summary links each section by an explicit anchor in its heading:
-# GitHub issues give headings no ids, but keep <a name="x"> as
-# id/name "user-content-x", so the links point at #user-content-x directly
-# (no page script needed).
+# JQ program, run with -s over $FINDINGS, after $MONITOR_GROUPS_JQ.
+# Arguments: $cfg (slurped config), $inv (slurped inventory, [] without one),
+# $docs (URL of the check explanations), $control (URL of the control file,
+# may be empty), $todo (MONITOR_TODO), $now (time of the summary line), $run
+# (URL of the run, may be empty). Prints {markdown, red}.
+# Layout: summary line, TODO (one entry per check and category), Overview
+# (repository × area; only with an inventory), Red, Info, Clean, Not checked.
+# Each section has an explicit anchor on its own line above the heading, then
+# <br> and an empty line (keeps the heading clear of the sticky issue header):
+# GitHub issues give headings no ids, but keep <a name="x"> as id/name
+# "user-content-x", so the links point at #user-content-x directly. Each
+# Red/Info row with a repository starts with the anchor f-<check>-<slug>[-n]
+# that the overview icons link to.
 # shellcheck disable=SC2016 # jq program, no shell expansion wanted
 REPORT_JQ='
 $cfg[0] as $cfg | . as $f
 | def gh: "https://github.com/\(.)";
   def repo_link: "[\(.)](\(gh))";
   def cell: tostring | gsub("\\|"; "\\|") | gsub("[\\r\\n]+"; " ");
+  def slug: ascii_downcase | gsub("[^a-z0-9-]"; "-");
+  def section($name; $title): "<a name=\"\($name)\"></a>\n<br>\n", "## \($title)\n";
   # Where to fix a finding: [label, url] or null.
   def fix:
     .repo as $r | .check as $c
@@ -57,8 +66,11 @@ $cfg[0] as $cfg | . as $f
     | (.message // "" | cell)
     | gsub("(?<u>https://[^\\s|)\\]]+)"; "[\(if (.u | test("/actions/runs/[0-9]+/job/")) then "job" elif (.u | test("/actions/runs")) then "run" else "link" end)](\(.u))")
     | if $r != null then gsub("(?<![\\w/&\\[])#(?<n>[0-9]+)"; "[#\(.n)](\($r | gh)/issues/\(.n))") else . end;
-  def row: "| \(if .repo then (.repo | repo_link) else "-" end) | \(details) | \(fix | if . then "[\(.[0])](\(.[1]))" else "" end) |";
+  # A table row; with .anchor its first cell starts with that row anchor.
+  def row: "| \(if .anchor then "<a name=\"\(.anchor)\"></a>" else "" end)\(if .repo then (.repo | repo_link) else "-" end) | \(details) | \(fix | if . then "[\(.[0])](\(.[1]))" else "" end) |";
+  def table: "| Repository | Details | Fix at |\n| --- | --- | --- |\n" + (map(row) | join("\n")) + "\n";
   def matches($i): .repo == $i.repo and .check == $i.check;
+  def count($n; $one; $more): "\($n) \(if $n == 1 then $one else $more end)";
 
   ($cfg.ignores // []) as $ign
 | ($f | map(select(. as $x | any($ign[]; . as $i | $x | matches($i)) | not))) as $kept
@@ -66,11 +78,17 @@ $cfg[0] as $cfg | . as $f
     | map({level: "info", check: "ignore-unused", repo, message: "unused ignore: \(.reason)"})) as $unused
 | ($kept + $unused) as $rows
 | def level_rows($l): $rows | map(select(.level == $l));
-  def checks($r):
-    $r | map(.check) | unique[] as $c
-    | ($r | map(select(.check == $c)) | sort_by(.repo // "")) as $cr
-    | "### `\($c)` [ℹ️](\($docs)#\($c))\n\n| Repository | Details | Fix at |\n| --- | --- | --- |\n"
-      + ($cr | map(row) | join("\n")) + "\n";
+  # The red and info rows in the order of their tables (check, then
+  # repository), each with a repository numbered per check and slug: .anchor.
+  ([level_rows("red"), level_rows("info") | sort_by(.check, (.repo // ""))[]]
+    | reduce .[] as $x ({n: {}, out: []};
+        if $x.repo == null then .out += [$x]
+        else "\($x.check)-\($x.repo | slug)" as $k | ((.n[$k] // 0) + 1) as $i
+          | .n[$k] = $i | .out += [$x + {anchor: "f-\($k)\(if $i > 1 then "-\($i)" else "" end)"}] end)
+    | .out | to_entries | map(.value + {pos: .key})) as $listed
+  | def checks($l):
+    $listed | map(select(.level == $l)) | map(.check) | unique[] as $c
+    | "### `\($c)` [ℹ️](\($docs)#\($c))\n\n" + ($listed | map(select(.level == $l and .check == $c)) | table);
   # The not checked findings of one check: one line per reason (the message
   # without "<check>: " and "gh: ", Markdown escaped), its repositories
   # sorted; without a repository only the reason.
@@ -85,35 +103,89 @@ $cfg[0] as $cfg | . as $f
          | map("- \(.[0].reason)"
              + (map(.repo // empty) | unique | if length > 0 then ": " + (map(repo_link) | join(", ")) else "" end))
          | join("\n")) + "\n";
-  def count($n; $one; $more): "\($n) \(if $n == 1 then $one else $more end)";
+  # TODO: one entry per check with red findings (Fix now) and per check with
+  # info findings (category of MONITOR_TODO, Clean up if unknown), in the
+  # order Fix now, Decide, Clean up, then by check.
+  ({fix: ["🔴", "Fix now", 0], decide: ["🤔", "Decide", 1], cleanup: ["🧹", "Clean up", 2]}) as $cats
+| ($listed | group_by(.level, .check)
+    | map(.[0] as $x | ($todo[$x.check] // {}) as $t
+        | {check: $x.check, rows: map(del(.anchor)), title: ($t.title // $x.check), text: ($t.text // ""),
+           cat: (if $x.level == "red" then "fix" elif $t.category == "decide" then "decide" else "cleanup" end)})
+    | sort_by($cats[.cat][2], .check)) as $tasks
+| def task:
+    $cats[.cat] as [$icon, $label]
+    | (.rows | if all(.repo != null) and (map(.repo) | unique | length) == length
+        then count(length; "repository"; "repositories") else count(length; "entry"; "entries") end) as $n
+    | "<details\(if .cat == "fix" then " open" else "" end)><summary>\($icon) <b>\($label)</b> · \(.title) · \($n) · <code>\(.check)</code></summary>\n\n"
+      + "> \(if .text != "" then .text + " " else "" end)[ℹ️](\($docs)#\(.check))\n\n"
+      + (.rows | table) + "\n</details>\n";
   (level_rows("red") | length) as $nred
 | (level_rows("info") | length) as $ninfo
 | (level_rows("skip") | length) as $nskip
+| ($inv[0] | if type == "array" and length > 0 then . else null end) as $inventory
   # ignore-unused and findings without a repository concern no repository;
   # an empty inventory counts as none
-| ($inv[0] | if type == "array" and length > 0 then
+| ($inventory | if . then
       ($rows | map(select(.level != "skip" and .check != "ignore-unused") | .repo // empty)) as $dirty
       | map(.name) | unique | map(select(. as $n | $dirty | index($n) | not))
     else null end) as $clean
-| {
+  # Overview: the groups of the check scripts (as the workflow matrix), by
+  # lowercase name; the column forks also takes the mirrors, lists the
+  # whole inventory.
+| ($inventory | if . then groups($cfg; .) | map_values(map(ascii_downcase))
+    | .forks += .mirrors | .lists = ($inventory | map(.name | ascii_downcase)) else null end) as $applies
+| ([["release", "Release"], ["settings", "Settings"], ["health", "Health"],
+    ["forks", "Fork / Mirror"], ["managed", "Sync"], ["lists", "Lists"]]) as $cols
+| def column:
+    (.repo | ascii_downcase) as $r
+    | (if .check == "check-failed" then ((.message // "" | tostring | capture("^(?<k>[a-z-]+): ") | .k)? // "" | $todo[.].areas) else null end) as $named
+    | ($named // $todo[.check].areas // ($cols | map(.[0])))
+    | map(if . == "mirrors" then "forks" else . end) as $cands
+    | (first($cands[] | select(. as $a | $applies[$a] | index($r))) // $cands[0]);
+  def overview:
+    ($listed | map(select(.repo != null and .check != "ignore-unused") | .col = column | select(.col != null))) as $marks
+    | ($rows | map(select(.level == "skip" and .repo != null) | .col = column)) as $skips
+    | ($marks | group_by(.repo | ascii_downcase)
+        | map({key: (.[0].repo | ascii_downcase), name: .[0].repo, red: any(.level == "red"), marks: .})
+        | sort_by((if .red then 0 else 1 end), .key)) as $repos
+    | if ($repos | length) == 0 then "No repository with findings.\n"
+      else "Each icon is one finding and jumps to its row below. 🔴 fix · 🔵 note · ✅ ok · ⚪ not checked · – does not apply\n",
+        "| Repository | \($cols | map(.[1]) | join(" | ")) |\n| :-- |\($cols | map(" :-: |") | join(""))\n"
+        + ($repos | map(. as $p
+            | "| \($p.name | repo_link) | "
+              + ($cols | map(.[0] as $col
+                  | ($p.marks | map(select(.col == $col)) | sort_by((if .level == "red" then 0 else 1 end), .check, .pos)) as $m
+                  | if ($m | length) > 0 then $m | map("[\(if .level == "red" then "🔴" else "🔵" end)](#user-content-\(.anchor))") | join("")
+                    elif any($skips[]; (.repo | ascii_downcase) == $p.key and .col == $col) then "⚪"
+                    elif $applies[$col] | index($p.key) then "✅"
+                    else "–" end) | join(" | "))
+              + " |") | join("\n")) + "\n"
+      end;
+  {
     red: $nred,
     markdown: ([
       "## Maintenance monitor\n",
       (if $nred > 0 then "> [!CAUTION]" else "> [!TIP]" end)
         + "\n> **[\($nred) red](#user-content-red)** · [\($ninfo) info](#user-content-info)"
         + (if $clean then " · [\($clean | length) clean](#user-content-clean)" else "" end)
-        + " · [\($nskip) not checked](#user-content-not-checked)\n",
-      "## <a name=\"red\"></a>🔴 Red\n",
-      (if $nred == 0 then "✅ Nothing to fix.\n" else checks(level_rows("red")) end),
-      "## <a name=\"info\"></a>🔵 Info\n",
-      (if $ninfo == 0 then "Nothing to note.\n" else checks(level_rows("info")) end),
+        + " · [\($nskip) not checked](#user-content-not-checked)"
+        + " · [\($tasks | length) to do](#user-content-todo) · updated \($now)"
+        + (if $run != "" then " · [run](\($run))" else "" end) + "\n",
+      section("todo"; "📝 TODO"),
+      (if ($tasks | length) == 0 then "Nothing to do.\n" else ($tasks[] | task) end),
+      (if $applies then section("overview"; "📋 Overview"), overview else empty end),
+      section("red"; "🔴 Red"),
+      (if $nred == 0 then "✅ Nothing to fix.\n" else checks("red") end),
+      section("info"; "🔵 Info"),
+      (if $ninfo == 0 then "Nothing to note.\n" else checks("info") end),
+      (if $applies then "[↑ overview](#user-content-overview)\n" else empty end),
       (if $clean then
-        "## <a name=\"clean\"></a>✅ Clean\n",
+        section("clean"; "✅ Clean"),
         (if ($clean | length) == 0 then "No repository without findings.\n"
          else "<details><summary>\(count($clean | length; "repository"; "repositories")), click to show</summary>\n",
            ($clean | map(repo_link) | join(", ")) + "\n", "</details>\n" end)
        else empty end),
-      "## <a name=\"not-checked\"></a>⚪ Not checked\n",
+      section("not-checked"; "⚪ Not checked"),
       (if $nskip == 0 then "Every check ran.\n"
        else "Checks that did not run in these repositories because they do not apply or the feature is not available there; the repositories were checked otherwise. Each line gives the reason.\n",
          "<details><summary>\(count($nskip; "entry"; "entries")), click to show</summary>\n", reasons(level_rows("skip")), "</details>\n" end)
@@ -122,14 +194,19 @@ $cfg[0] as $cfg | . as $f
 
 main() {
   need_env FINDINGS CONFIG
-  local result inv=(--argjson inv '[]')
+  local result now run='' inv=(--argjson inv '[]')
   # a missing or broken inventory means none: no section of clean repositories
   if [[ -n ${INVENTORY:-} ]] && jq -e 'type == "array"' "$INVENTORY" >/dev/null 2>&1; then
     inv=(--slurpfile inv "$INVENTORY")
   fi
+  now=$(date -u -d "@${MONITOR_NOW:-$(date -u +%s)}" '+%Y-%m-%d %H:%M UTC')
+  if [[ -n ${GITHUB_SERVER_URL:-} && -n ${GITHUB_REPOSITORY:-} && -n ${GITHUB_RUN_ID:-} ]]; then
+    run=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+  fi
   result=$(jq -s --slurpfile cfg "$CONFIG" "${inv[@]}" \
     --arg docs "${MONITOR_DOCS_URL:-https://github.com/spali/.github/blob/main/docs/monitor-checks.md}" \
-    --arg control "${MONITOR_CONFIG_URL:-}" "$REPORT_JQ" "$FINDINGS")
+    --arg control "${MONITOR_CONFIG_URL:-}" --argjson todo "$MONITOR_TODO" \
+    --arg now "$now" --arg run "$run" "$MONITOR_GROUPS_JQ$REPORT_JQ" "$FINDINGS")
   jq -r '.markdown' <<<"$result"
   [[ $(jq '.red' <<<"$result") -eq 0 ]]
 }

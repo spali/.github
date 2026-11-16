@@ -78,32 +78,17 @@ phase_inventory() {
 }
 
 # The jobs of each check group: with monitor.jobs per-repo one per repository,
-# as the check scripts select them (tests/monitor-matrix.bats compares both);
-# with per-group (default) one job "" for all, none if the group is empty.
-# Managed repositories (names compared case-insensitively) are left out of
-# health and forks; the group managed takes the names of the control file.
+# as the check scripts select them (groups in monitor-lib.sh, shared with the
+# overview of the report; tests/monitor-matrix.bats compares both); with
+# per-group (default) one job "" for all, none if the group is empty.
 # Plus "runs-on" (monitor.runs-on, default ubuntu-latest). Input: the
 # inventory (anything else counts as empty); $cfg the slurped config.
 # shellcheck disable=SC2016 # jq program
-MATRIX_JQ='
+MATRIX_JQ=$MONITOR_GROUPS_JQ'
   ($cfg[0] // {}) as $c |
-  ([$c.mirrors // [] | .[].target]) as $m |
-  ([$c.managed // [] | .[].repo]) as $mg |
-  ([$mg[] | ascii_downcase]) as $mgl |
-  def unmanaged: (.name | ascii_downcase | IN($mgl[])) | not;
-  (if type == "array" then . else [] end) as $inv |
-  def names(f): [$inv[] | select(f) | .name] | sort;
   def jobs: if ($c.monitor.jobs // "per-group") == "per-repo" then .
     elif length > 0 then [""] else [] end;
-  {
-    release: names(.central or ((.pins // []) | length > 0)) | jobs,
-    settings: names(.central == true) | jobs,
-    health: names(.fork == false and ([.name] | inside($m) | not) and unmanaged) | jobs,
-    forks: names(.fork == true and .parent != null and ([.name] | inside($m) | not) and unmanaged) | jobs,
-    mirrors: ($m | sort) | jobs,
-    managed: ($mg | sort) | jobs,
-    "runs-on": ($c.monitor["runs-on"] // "ubuntu-latest")
-  }'
+  groups($c; .) | map_values(jobs) + {"runs-on": ($c.monitor["runs-on"] // "ubuntu-latest")}'
 
 phase_matrix() {
   jq -c --slurpfile cfg "$CONFIG" "$MATRIX_JQ" "$INVENTORY" 2>/dev/null ||
@@ -175,9 +160,12 @@ phase_report() {
     return 1
   fi
   summary
-  # the summary line of the report, without its links to the sections:
-  # "> **[N red](#user-content-red)** · [N info](#user-content-info) · [N clean](#user-content-clean) · [N not checked](#user-content-not-checked)"
-  counts=$(grep -m1 -E '^> \*\*\[[0-9]+ red\]' "$WORK/report.md" | sed -E 's/\]\(#[^)]*\)//g; s/[][*]//g' || true)
+  # the summary line of the report, without its links to the sections and
+  # without the time and run link at its end:
+  # "> **[N red](#user-content-red)** · [N info](#user-content-info) · [N clean](#user-content-clean) · [N not checked](#user-content-not-checked) · [N to do](#user-content-todo) · updated … · [run](…)"
+  counts=$(grep -m1 -E '^> \*\*\[[0-9]+ red\]' "$WORK/report.md" || true)
+  counts=${counts%% · updated *}
+  counts=$(sed -E 's/\]\(#[^)]*\)//g; s/[][*]//g' <<<"$counts")
   counts=${counts#> }
   if [[ $counts =~ ^([0-9]+)\ red\ ·\ ([0-9]+)\ info ]]; then
     title="Maintenance monitor: ${BASH_REMATCH[1]} red · ${BASH_REMATCH[2]} info"

@@ -11,6 +11,12 @@ repository because it does not apply or the feature is not available there
 To accept a finding, add `{repo, check, reason}` to `ignores` in the control
 file `repos.yml`. Settings and rulesets change only with the owner's approval.
 
+**TODO in the overview issue:** red findings are 🔴 Fix now. Info findings
+are 🤔 Decide (a choice only you can make: `adoption`, `branch-undeclared`,
+`contribution-stale`, `fork-delete-candidate`, `list-contradiction`,
+`rebase-pending`, `unmanaged`) or 🧹 Clean up (all other checks). The title
+and sentence of each entry are in `MONITOR_TODO` in `scripts/monitor-lib.sh`.
+
 Groups: [Release flow](#release-flow) · [Settings](#settings) ·
 [Health](#health) · [Forks](#forks) · [Mirrors](#mirrors) · [Lists](#lists) ·
 [Managed repositories](#managed-repositories) · [Monitor](#monitor)

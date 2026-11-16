@@ -6,9 +6,9 @@
 # Writes the report into the open issue labelled maintenance-monitor of
 # $MONITOR_ISSUE_REPO (the lowest number if there are several), or creates it.
 # Creates the label if it is missing. This is the only thing the monitor ever
-# writes. Env: MONITOR_ISSUE_REPO (owner/name), ISSUE_TOKEN (used as GH_TOKEN
-# for the gh calls of this script only); optional GITHUB_SERVER_URL,
-# GITHUB_REPOSITORY, GITHUB_RUN_ID (link to the run), MONITOR_NOW (epoch).
+# writes. The body is the report as it is (its summary line carries the time
+# and the run link). Env: MONITOR_ISSUE_REPO (owner/name), ISSUE_TOKEN (used
+# as GH_TOKEN for the gh calls of this script only).
 # Failure: one "error: ..." line on stderr, exit 1.
 set -euo pipefail
 
@@ -49,43 +49,24 @@ ensure_label() {
     -f name="$LABEL" -f color=0e8a16 -f description="Overview of the maintenance monitor"
 }
 
-# footer prints the last line of the body.
-footer() {
-  local now line
-  now=$(date -u -d "@${MONITOR_NOW:-$(date -u +%s)}" +%Y-%m-%dT%H:%M:%SZ)
-  line="Updated $now"
-  if [[ -n ${GITHUB_SERVER_URL:-} && -n ${GITHUB_REPOSITORY:-} && -n ${GITHUB_RUN_ID:-} ]]; then
-    line+=" · [run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
-  fi
-  printf '%s\n' "$line"
-}
-
-# build_body writes the issue body to $WORK/body.md: report, footer; a report
+# build_body writes the issue body to $WORK/body.md: the report; a report
 # that does not fit is cut at a line boundary and followed by NOTE.
 build_body() {
-  local tail_file=$WORK/tail.md size budget
-  footer >"$WORK/footer.md"
-  {
-    printf '\n'
-    cat "$WORK/footer.md"
-  } >"$tail_file"
-  size=$(($(LC_ALL=C wc -c <"$REPORT") + $(LC_ALL=C wc -c <"$tail_file")))
+  local size budget
+  size=$(LC_ALL=C wc -c <"$REPORT")
   if ((size <= LIMIT)); then
-    cat "$REPORT" "$tail_file" >"$WORK/body.md"
+    cat "$REPORT" >"$WORK/body.md"
     return 0
   fi
-  {
-    printf '\n%s\n' "$NOTE"
-    cat "$tail_file"
-  } >"$WORK/tail2.md"
-  budget=$((LIMIT - $(LC_ALL=C wc -c <"$WORK/tail2.md")))
+  printf '\n%s\n' "$NOTE" >"$WORK/tail.md"
+  budget=$((LIMIT - $(LC_ALL=C wc -c <"$WORK/tail.md")))
   head -c "$budget" "$REPORT" >"$WORK/cut.md"
   # the last line of the cut is partial unless the cut ends with a newline
   if [[ -n $(tail -c1 "$WORK/cut.md") ]]; then
     head -n -1 "$WORK/cut.md" >"$WORK/cut2.md"
     mv "$WORK/cut2.md" "$WORK/cut.md"
   fi
-  cat "$WORK/cut.md" "$WORK/tail2.md" >"$WORK/body.md"
+  cat "$WORK/cut.md" "$WORK/tail.md" >"$WORK/body.md"
 }
 
 # find_issue prints the lowest number of the open issues with the label

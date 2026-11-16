@@ -317,12 +317,16 @@ pass.
 - `per-repo` on GitHub-hosted runners costs about one billed minute per job
   (about 55 per run): only with the owner's approval.
 - A new check group needs, in the same PR: the script, its name in `CHECKS`
-  and the selection in `MATRIX_JQ` (`scripts/monitor.sh`), a matrix job in
+  and the selection in `groups` (`MONITOR_GROUPS_JQ` in
+  `scripts/monitor-lib.sh`, shared by the workflow matrix and the overview
+  of the issue; a new overview column in `REPORT_JQ`), a matrix job in
   `.github/workflows/monitor.yml` (copy one, with its own `if` and
   `matrix.repo`), the job in Report's `needs`, and the group in the test
   "matrix selects the same repositories as the check scripts"
   (`tests/monitor-matrix.bats`). That test fails if the matrix and a script
   select different repositories; never change it to pass, fix the selection.
+- A new check id needs its entry in `MONITOR_TODO` (`scripts/monitor-lib.sh`:
+  category of its info findings, TODO title, one sentence, areas); tested.
 - Never add a second workflow for another job layout.
 
 ### 4.11 Add or change a managed repository

@@ -560,17 +560,27 @@ monitor:
 **The overview issue.** Every run writes its report into one issue of the
 control repository, labelled `maintenance-monitor` (the label is created on
 the first run; the lowest-numbered open issue with it is updated, a new one is
-created if none is open). The title shows the counts. The summary at the top
-counts red, info, clean and not checked, each count linked to its section.
-🔴 Red and 🔵 Info have one table per check: the repository, the details and a
-link to where to fix it. ✅ Clean (collapsed) lists the repositories of the
-inventory without a red or info finding (ignored and not checked findings
-count as clean; without an inventory, in a local report, the section is left
-out). ⚪ Not checked (collapsed) explains that these checks did not run because
-they do not apply or the feature is not available there, and lists, per
-check, one line per reason with its repositories. Each check title has an ℹ️ link to its explanation in
-[`docs/monitor-checks.md`](docs/monitor-checks.md). The body ends with the
-time of the update and a link to the run. A report above GitHub's size limit is
+created if none is open). The title shows the counts. The summary line at the
+top counts red, info, clean, not checked and the TODO entries, each count
+linked to its section, and ends with the time of the update and a link to the
+run. 📝 TODO lists what to do: one collapsible entry per check, 🔴 Fix now for
+red findings (open), 🤔 Decide and 🧹 Clean up for info findings (collapsed),
+each with one sentence of explanation, an ℹ️ link and the rows of that check.
+📋 Overview is a matrix of the repositories with a red or info finding (red
+first) and the areas Release, Settings, Health, Fork / Mirror, Sync and Lists:
+one icon per finding that jumps to its row below, ⚪ if a check of that area
+did not run there, ✅ if the area applies and is clean, – if it does not apply
+(without an inventory the overview is left out; findings without a repository
+are only in TODO and the details). 🔴 Red and 🔵 Info have one table per
+check: the repository, the details and a link to where to fix it. ✅ Clean
+(collapsed) lists the repositories of the inventory without a red or info
+finding (ignored and not checked findings count as clean; without an
+inventory, in a local report, the section is left out). ⚪ Not checked
+(collapsed) explains that these checks did not run because they do not apply
+or the feature is not available there, and lists, per check, one line per
+reason with its repositories. Each check title has an ℹ️ link to its
+explanation in [`docs/monitor-checks.md`](docs/monitor-checks.md). A report
+above GitHub's size limit is
 cut and points to the run summary. The issue is a view, not a notification:
 the failed-run e-mail stays the notification.
 
