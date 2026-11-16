@@ -81,16 +81,11 @@ checked_by() {
   [ "$(jq length "$MONITOR_WORK/inventory.json")" -eq 8 ]
 }
 
-@test "MONITOR_REPO limits managed to one repository, the first job checks the sync" {
+@test "MONITOR_REPO limits managed to one repository" {
   export GITHUB_REPOSITORY=ctl/x
-  MONITOR_REPO=o/mfork run --separate-stderr "$MONITOR" managed
+  MONITOR_REPO=O/MFork run --separate-stderr "$MONITOR" managed
   grep -q 'api repos/o/mfork$' "$GH_LOG"
   run ! grep -E 'o/(gone|mplain)|sync.yml' "$GH_LOG"
-  : >"$GH_LOG"
-  MONITOR_REPO=O/Gone run --separate-stderr "$MONITOR" managed
-  grep -q 'api repos/o/gone$' "$GH_LOG"
-  grep -q 'ctl/x/actions/workflows/sync.yml' "$GH_LOG"
-  run ! grep -E 'o/(mfork|mplain)' "$GH_LOG"
 }
 
 @test "MONITOR_REPO with lists is a usage error" {

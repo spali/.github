@@ -258,7 +258,8 @@ says otherwise. The detail lists each difference
   or a branch declared with `rebase: auto` misses commits of its `onto`, and
   the oldest missing commit is older than 48 hours
   (`main: 3 upstream commits missing, oldest from …`). A declared default
-  branch follows its declaration;
+  branch follows its declaration. A declared branch that does not exist in
+  the fork is red at once (`feat: missing in the target`);
 - a mirror, or a fork with `refs: all`: branches or tags of the upstream are
   missing or differ (declared branches excepted), and the last push is older
   than 48 hours (`2 refs differ, last push …`).
@@ -270,8 +271,8 @@ says otherwise. The detail lists each difference
 🔴 A branch of a managed fork has own commits but is not declared in
 `branches:` and is not the head of an open pull request from the fork to
 upstream. Own commits are counted against the upstream branch of the same
-name, else the upstream default branch. The sync does not touch such a
-branch. (🔵 for an unmanaged fork.)
+name, else the upstream default branch. The default branch counts as
+declared. The sync does not touch such a branch. (🔵 for an unmanaged fork.)
 
 **Fix:** declare the branch with its `onto` and `rebase`, or delete it.
 
@@ -285,8 +286,10 @@ branch. (🔵 for an unmanaged fork.)
 ## sync-failed
 
 🔴 The newest completed run of the workflow `sync.yml` in the control
-repository did not succeed; the detail links the run. No run yet is no
-finding. ⚪ Skipped in a local run, where there is no control repository.
+repository did not succeed; the detail links the run. Checked once per
+monitor run (in the Lists job), only when `managed:` has entries. No run yet
+is no finding. ⚪ Skipped in a local run, where there is no control
+repository.
 
 **Fix:** read the log of the run, fix the cause, run the sync again.
 

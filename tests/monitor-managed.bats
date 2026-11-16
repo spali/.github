@@ -15,8 +15,7 @@ setup() {
   echo '[]' >"$INVENTORY"
   export MONITOR_NOW
   MONITOR_NOW=$(date -u -d 2026-11-14T12:00:00Z +%s)
-  export GITHUB_REPOSITORY=ctl/x
-  unset MONITOR_SKIP_SYNC MONITOR_CHECKED
+  unset MONITOR_CHECKED
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/monitor-managed.sh"
   # a fork: default branch main (upstream default dev), feat rebased
   # automatically onto main, wip rebased by hand onto dev
@@ -36,7 +35,6 @@ PRS='*repos/up/f/pulls?state=open&per_page=100 --paginate'
 MAIN="*repos/up/f/compare/$(sha 1)...dev"
 FEAT="*repos/up/f/compare/$(sha 2)...main"
 WIP="*repos/up/f/compare/$(sha 3)...dev"
-SYNC='*repos/ctl/x/actions/workflows/sync.yml/runs?per_page=1&status=completed'
 
 respond_jq() { jq -nc "$2" | gh_respond "$1" -; }
 
@@ -46,7 +44,6 @@ behind() { printf '{ahead_by: %s, commits: [{commit: {committer: {date: "%s"}}}]
 # Compliant defaults for everything the script reads; tests register their own
 # answers first (first match wins).
 run_script() {
-  respond_jq "$SYNC" '{workflow_runs: [{conclusion: "success", html_url: "https://github.com/ctl/x/actions/runs/1"}]}'
   respond_jq "$REPO" '{default_branch: "main", private: false, pushed_at: "2026-11-01T00:00:00Z",
     has_issues: false, has_pull_requests: false, has_wiki: false, has_discussions: false, has_projects: false}'
   respond_jq "$ACT" '{enabled: false}'
@@ -130,13 +127,13 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
 
 @test "behind less than 48 h is no finding" {
   respond_jq "$MAIN" "$(behind 1 2026-11-12T13:00:00Z)"
-  respond_jq "$FEAT" "$(behind 1 2026-11-12T13:00:00Z)"
+  respond_jq "$FEAT" "$(behind 1 2026-11-12T12:00:00Z)"
   run_script
   [ ! -s "$FINDINGS" ]
 }
 
-@test "behind more than 48 h is red" {
-  respond_jq "$MAIN" "$(behind 1 2026-11-12T11:00:00Z)"
+@test "behind more than 48 h is red, to the second" {
+  respond_jq "$MAIN" "$(behind 1 2026-11-12T11:59:59Z)"
   run_script
   [ "$(count managed-behind)" -eq 1 ]
 }
@@ -159,11 +156,25 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   [ "$(count managed-behind)" -eq 0 ]
 }
 
-@test "declared branch missing in the target is not compared" {
+@test "declared branch missing in the target is managed-behind" {
+  jq -nc --arg a "$(sha 1)" --arg c "$(sha 3)" '[{name: "main", commit: {sha: $a}}, {name: "wip", commit: {sha: $c}}]' |
+    gh_respond "$TB" -
+  run_script
+  [ "$(count managed-behind)" -eq 1 ]
+  [ "$(level managed-behind)" = red ]
+  [ "$(message managed-behind)" = "feat: missing in the target" ]
+  run ! grep -F "compare/$(sha 2)" "$GH_LOG"
+}
+
+@test "declared branch missing in a refs all target is managed-behind" {
+  jq '.managed[0].refs = "all"' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/up/f.git' -
+  refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/spali/f.git' -
   jq -nc --arg a "$(sha 1)" '[{name: "main", commit: {sha: $a}}]' | gh_respond "$TB" -
   run_script
-  [ ! -s "$FINDINGS" ]
-  run ! grep -F "compare/$(sha 2)" "$GH_LOG"
+  [ "$(count managed-behind)" -eq 2 ]
+  [ "$(message managed-behind 0)" = "feat: missing in the target" ]
+  [ "$(message managed-behind 1)" = "wip: missing in the target" ]
 }
 
 @test "undeclared branch with own commits is branch-undeclared" {
@@ -180,11 +191,21 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
 }
 
 @test "undeclared branch is compared with the upstream branch of the same name" {
-  respond_jq '*repos/up/f/compare/main...spali:f:main' '{ahead_by: 4}'
+  jq -nc --arg a "$(sha 1)" --arg d "$(sha 4)" \
+    '[{name: "main", commit: {sha: $a}}, {name: "rel", commit: {sha: $d}}]' | gh_respond "$TB" -
+  respond_jq "$UB" '[{name: "dev"}, {name: "main"}, {name: "rel"}]'
+  respond_jq '*repos/up/f/compare/rel...spali:f:rel' '{ahead_by: 4}'
   run_script
   [ "$(count branch-undeclared)" -eq 1 ]
-  [ "$(message branch-undeclared)" = "main: 4 own commits, not declared in repos.yml" ]
-  run ! grep -F 'compare/dev...spali:f:main' "$GH_LOG"
+  [ "$(message branch-undeclared)" = "rel: 4 own commits, not declared in repos.yml" ]
+  run ! grep -F 'compare/dev...spali:f:rel' "$GH_LOG"
+}
+
+@test "the default branch is never undeclared" {
+  respond_jq '*repos/up/f/compare/*...spali:f:main' '{ahead_by: 4}'
+  run_script
+  [ "$(count branch-undeclared)" -eq 0 ]
+  run ! grep -F 'spali:f:main' "$GH_LOG"
 }
 
 @test "contribution branch is not undeclared" {
@@ -213,38 +234,6 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   [ "$(count check-failed)" -eq 1 ]
   [ "$(message check-failed)" = "managed-missing: gh: Server Error (HTTP 502)" ]
   [ "$(count managed-missing)" -eq 0 ]
-}
-
-@test "failed sync run is sync-failed" {
-  respond_jq "$SYNC" '{workflow_runs: [{conclusion: "failure", html_url: "https://github.com/ctl/x/actions/runs/9"}]}'
-  run_script
-  [ "$(count sync-failed)" -eq 1 ]
-  [ "$(level sync-failed)" = red ]
-  [ "$(repo_of sync-failed)" = null ]
-  [ "$(message sync-failed)" = "last sync run failed: https://github.com/ctl/x/actions/runs/9" ]
-}
-
-@test "no sync run yet is no finding" {
-  respond_jq "$SYNC" '{total_count: 0, workflow_runs: []}'
-  run_script
-  [ ! -s "$FINDINGS" ]
-}
-
-@test "local run skips sync-failed" {
-  unset GITHUB_REPOSITORY
-  run_script
-  [ "$(count sync-failed)" -eq 1 ]
-  [ "$(level sync-failed)" = skip ]
-  [ "$(message sync-failed)" = "sync-failed: no control repository (local run)" ]
-  run ! grep -F 'sync.yml' "$GH_LOG"
-}
-
-@test "MONITOR_SKIP_SYNC leaves sync-failed to another job" {
-  export MONITOR_SKIP_SYNC=1
-  respond_jq "$SYNC" '{workflow_runs: [{conclusion: "failure", html_url: "u"}]}'
-  run_script
-  [ ! -s "$FINDINGS" ]
-  run ! grep -F 'sync.yml' "$GH_LOG"
 }
 
 # --- mirrors and refs: all -----------------------------------------------
@@ -292,13 +281,22 @@ mirror_repo() {
   [ "$(message managed-behind)" = "2 refs differ, last push 2026-11-01T00:00:00Z" ]
 }
 
-@test "mirror pushed less than 48 h ago is no finding" {
+@test "mirror pushed exactly 48 h ago is no finding" {
   mirror
-  mirror_repo false 2026-11-12T13:00:00Z
+  mirror_repo false 2026-11-12T12:00:00Z
   refs refs/heads/main:1 | git_respond "$SRC" -
   refs refs/heads/main:9 | git_respond "$TGT" -
   run_script
   [ ! -s "$FINDINGS" ]
+}
+
+@test "mirror pushed 48 h and a second ago is red" {
+  mirror
+  mirror_repo false 2026-11-12T11:59:59Z
+  refs refs/heads/main:1 | git_respond "$SRC" -
+  refs refs/heads/main:9 | git_respond "$TGT" -
+  run_script
+  [ "$(count managed-behind)" -eq 1 ]
 }
 
 @test "private mirror is read through the API" {
