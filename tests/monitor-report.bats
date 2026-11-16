@@ -226,3 +226,23 @@ J
   [[ $output == *"| unused ignore: x | [Control file](https://github.com/o/ctl/blob/abc/repos.yml) |"* ]]
 }
 
+
+@test "sync-failed with a repo from the lists job renders under that repo, once, in both job modes" {
+  local lists=$BATS_TEST_TMPDIR/lists.jsonl one=$BATS_TEST_TMPDIR/one.jsonl
+  printf '%s\n' \
+    '{"level":"red","check":"sync-failed","repo":"spali/knx.js","message":"last sync of this repository failed: https://github.com/ctl/x/actions/runs/9/job/7"}' \
+    '{"level":"red","check":"sync-failed","repo":null,"message":"sync run failed before the repositories: https://github.com/ctl/x/actions/runs/9"}' >"$lists"
+  printf '%s\n' '{"level":"red","check":"managed-behind","repo":"spali/knx.js","message":"m"}' >"$one"
+  # per-group: one managed job for all repos; per-repo: one job per repo (and
+  # an empty file for another); the Lists job runs once in both.
+  for files in "$lists $one" "$lists $one $BATS_TEST_TMPDIR/empty.jsonl"; do
+    : >"$BATS_TEST_TMPDIR/empty.jsonl"
+    # shellcheck disable=SC2086 # word splitting on purpose
+    findings < <(cat $files)
+    run "$REPORT"
+    [ "$status" -eq 1 ]
+    [[ $output == *"**3 red**"* ]]
+    [ "$(grep -c '^| \[spali/knx.js\](https://github.com/spali/knx.js) | last sync of this repository failed: \[run\](https://github.com/ctl/x/actions/runs/9/job/7) |' <<<"$output")" -eq 1 ]
+    [ "$(grep -c '^| - | sync run failed before the repositories: \[run\](https://github.com/ctl/x/actions/runs/9) |' <<<"$output")" -eq 1 ]
+  done
+}
