@@ -24,20 +24,22 @@ OWN='*repos/up/f/compare/dev...spali:f:main'
 PRS='*repos/up/f/pulls?state=open&per_page=100 --paginate'
 FB='*repos/spali/f/branches?per_page=100 --paginate'
 PB='*repos/up/f/branches?per_page=100 --paginate'
-SAME='*repos/up/f/compare/main...spali:f:main'
+FEATURE='*repos/up/f/compare/dev...spali:f:feature'
 CLOSED='*repos/up/f/pulls?state=closed&per_page=100 --paginate'
 
 respond_jq() { jq -nc "$2" | gh_respond "$1" -; }
 
-# Defaults: in sync, one active workflow, own commits present (no candidate).
+# Defaults: in sync, one active workflow, no own commits, a branch feature
+# that upstream does not have (no candidate).
 run_script() {
   respond_jq "$BEHIND" '{ahead_by: 0, commits: []}'
   respond_jq "$WFS" '{workflows: []}'
-  respond_jq "$OWN" '{ahead_by: 1}'
+  respond_jq "$OWN" '{ahead_by: 0}'
   respond_jq "$PRS" '[]'
-  respond_jq "$FB" '[{name: "main"}]'
+  respond_jq "$FB" '[{name: "main"}, {name: "feature"}]'
   respond_jq "$PB" '[{name: "dev"}, {name: "main"}]'
-  respond_jq "$SAME" '{ahead_by: 0}'
+  respond_jq "$CLOSED" '[]'
+  respond_jq "$FEATURE" '{ahead_by: 0}'
   run --separate-stderr "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -128,6 +130,7 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
 
 @test "pure fork without PR is a delete candidate" {
   respond_jq "$OWN" '{ahead_by: 0}'
+  respond_jq "$FB" '[{name: "main"}]'
   run_script
   [ "$(count fork-delete-candidate)" -eq 1 ]
   [ "$(level fork-delete-candidate)" = info ]
@@ -156,6 +159,7 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
 
 @test "open PRs of other forks and deleted head repos do not block" {
   respond_jq "$OWN" '{ahead_by: 0}'
+  respond_jq "$FB" '[{name: "main"}]'
   respond_jq "$PRS" '[{head: {repo: {full_name: "other/x"}}}, {head: {repo: null}}]'
   run_script
   [ "$(count fork-delete-candidate)" -eq 1 ]
@@ -211,9 +215,17 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
 }
 
 @test "the default branch of an unmanaged fork is checked too" {
-  respond_jq "$SAME" '{ahead_by: 2}'
+  respond_jq "$OWN" '{ahead_by: 2}'
   run_script
   [ "$(message branch-undeclared)" = "main: 2 own commits, not declared in repos.yml" ]
+}
+
+@test "the default branch of an unmanaged fork is compared with the upstream default" {
+  respond_jq "$PB" '[{name: "dev"}, {name: "main"}]'
+  respond_jq '*repos/up/f/compare/main...spali:f:main' '{ahead_by: 5}'
+  run_script
+  [ "$(count branch-undeclared)" -eq 0 ]
+  run ! grep -F 'compare/main...spali:f:main' "$GH_LOG"
 }
 
 @test "a branch that is an open PR head is not undeclared" {
@@ -281,6 +293,7 @@ pr_aged() {
 
 @test "closed pulls are only fetched when a branch is missing upstream" {
   respond_jq "$OWN" '{ahead_by: 0}'
+  respond_jq "$FB" '[{name: "main"}]'
   run_script
   ! grep -q 'state=closed' "$GH_LOG"
 }
