@@ -37,9 +37,9 @@
 # write app (Administration, Contents and Workflows write; Pull requests,
 # Actions and Metadata read; installed on all repositories). Each repository
 # gets its own job and tokens: a metadata token checks that it exists, an
-# unscoped token creates a missing fork (forking needs one), and a token
-# scoped to that repository syncs it. A missing mirror fails with the
-# command to create it by hand. The caller owns the schedule and the
+# unscoped token creates a missing fork (forking needs one; it is minted only
+# then), and a token scoped to that repository syncs it. A missing mirror
+# fails with the command to create it by hand. The caller owns the schedule and the
 # concurrency group; each repository also has its own group (sync-<repo>).
 #
 # Jobs: Managed repositories (control file, repository list) → Sync · <repo>
@@ -142,10 +142,11 @@ jobs:
           REPO: ${{ matrix.repo }}
         run: .sync/scripts/sync.sh exists "$REPO"
       # forking needs a token that is not scoped to repositories; a token
-      # cannot be scoped to a repository that does not exist yet
+      # cannot be scoped to a repository that does not exist yet. A missing
+      # mirror cannot be created by the app: no such token for it.
       - name: Create token
         id: create-token
-        if: ${{ steps.exists.outputs.exists != 'true' }}
+        if: ${{ steps.exists.outputs.exists != 'true' && steps.exists.outputs.kind == 'fork' }}
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ inputs.app-client-id }}
@@ -153,11 +154,12 @@ jobs:
           owner: spali
           permission-administration: write
           permission-contents: read
+      # a missing mirror fails here with the command to create it by hand
       - name: Create repository
         id: create
         if: ${{ steps.exists.outputs.exists != 'true' }}
         env:
-          GH_TOKEN: ${{ steps.create-token.outputs.token }}
+          GH_TOKEN: ${{ steps.exists.outputs.kind == 'fork' && steps.create-token.outputs.token || steps.meta-token.outputs.token }}
           REPO: ${{ matrix.repo }}
         run: .sync/scripts/sync.sh create "$REPO"
       - name: Repository token

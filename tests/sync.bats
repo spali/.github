@@ -135,11 +135,20 @@ steps() {
 @test "exists reports an existing and a missing repo" {
   run --separate-stderr "$SYNC" exists spali/tool
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '%s\n' name=tool exists=true)" ]
+  [ "$output" = "$(printf '%s\n' name=tool kind=fork exists=true)" ]
   gh_fail_first 'api repos/spali/tool' 'gh: Not Found (HTTP 404)'
   run --separate-stderr "$SYNC" exists spali/tool
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '%s\n' name=tool exists=false)" ]
+  [ "$output" = "$(printf '%s\n' name=tool kind=fork exists=false)" ]
+}
+
+@test "exists reports the kind of a mirror" {
+  gh_fail_first 'api repos/spali/Web' 'gh: Not Found (HTTP 404)'
+  export GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"
+  : >"$GITHUB_OUTPUT"
+  run --separate-stderr "$SYNC" exists spali/Web
+  [ "$status" -eq 0 ]
+  [ "$(cat "$GITHUB_OUTPUT")" = "$(printf '%s\n' name=Web kind=mirror exists=false)" ]
 }
 
 @test "exists fails on an API error" {
@@ -370,6 +379,22 @@ fi'
   [ "$status" -eq 2 ]
   run "$SYNC" bogus spali/tool
   [ "$status" -eq 2 ]
+}
+
+@test "workflow mints the unscoped admin token only for a missing fork" {
+  local wf="$BATS_TEST_DIRNAME/../.github/workflows/sync.yml"
+  run yq -r '.jobs.sync.steps[] | select(.id == "create-token") | .if' "$wf"
+  [ "$status" -eq 0 ]
+  [[ $output == *"steps.exists.outputs.exists != 'true'"* ]]
+  [[ $output == *"steps.exists.outputs.kind == 'fork'"* ]]
+  # a missing mirror still runs create (it fails with the by-hand command),
+  # with the metadata token
+  run yq -r '.jobs.sync.steps[] | select(.id == "create") | .if' "$wf"
+  [[ $output == *"steps.exists.outputs.exists != 'true'"* ]]
+  [[ $output != *kind* ]]
+  run yq -r '.jobs.sync.steps[] | select(.id == "create") | .env.GH_TOKEN' "$wf"
+  [[ $output == *"steps.exists.outputs.kind == 'fork' && steps.create-token.outputs.token"* ]]
+  [[ $output == *"steps.meta-token.outputs.token"* ]]
 }
 
 @test "workflow skips the repo step when create failed" {
