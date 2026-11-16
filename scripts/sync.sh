@@ -6,9 +6,10 @@
 #                        workflow matrix: all managed repositories, or only
 #                        SYNC_REPO (matched case-insensitively, printed as
 #                        spelled in the control file; unknown: fails).
-#   sync.sh exists REPO  prints name=<repo without owner> and exists=true or
-#                        exists=false (to $GITHUB_OUTPUT if set); fails on
-#                        any other API error.
+#   sync.sh exists REPO  prints name=<repo without owner>, kind=fork or
+#                        kind=mirror and exists=true or exists=false (to
+#                        $GITHUB_OUTPUT if set); fails on any other API
+#                        error.
 #   sync.sh create REPO  creates the missing fork (sync-create.sh). A missing
 #                        mirror fails with the command to create it by hand.
 #                        Forking needs an installation token that is not
@@ -158,6 +159,7 @@ get_repo() {
 cmd_exists() {
   load_entry "$1"
   out name "${REPO#*/}"
+  out kind "$KIND"
   if get_repo; then
     out exists true
   else
