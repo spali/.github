@@ -18,6 +18,9 @@
 #         branch:
 #           description: Also rebase this manual branch (or * for all), needs repo
 #           type: string
+#         accept:
+#           description: Accept an upstream rewrite of this branch, tags/<name> or *; needs repo
+#           type: string
 #   concurrency:
 #     group: sync
 #   permissions:
@@ -29,6 +32,7 @@
 #         app-client-id: ${{ vars.SYNC_APP_CLIENT_ID }}
 #         repo: ${{ inputs.repo }}
 #         branch: ${{ inputs.branch }}
+#         accept: ${{ inputs.accept }}
 #       secrets:
 #         app-key: ${{ secrets.SYNC_APP_KEY }}
 #
@@ -64,6 +68,10 @@ on:
         default: ""
       branch:
         description: Also rebase this manual branch (or * for all); needs repo
+        type: string
+        default: ""
+      accept:
+        description: Accept an upstream rewrite of this branch, tags/<name> or *; needs repo
         type: string
         default: ""
     secrets:
@@ -104,6 +112,7 @@ jobs:
         env:
           SYNC_REPO: ${{ inputs.repo }}
           SYNC_BRANCH: ${{ inputs.branch }}
+          SYNC_ACCEPT: ${{ inputs.accept }}
         run: |
           matrix=$(.sync/scripts/sync.sh matrix)
           echo "repos=$(jq -c .repos <<<"$matrix")" >>"$GITHUB_OUTPUT"
@@ -182,5 +191,6 @@ jobs:
           GH_TOKEN: ${{ steps.repo-token.outputs.token }}
           SYNC_APP_SLUG: ${{ steps.repo-token.outputs.app-slug }}
           SYNC_BRANCH: ${{ inputs.branch }}
+          SYNC_ACCEPT: ${{ inputs.accept }}
           REPO: ${{ matrix.repo }}
         run: .sync/scripts/sync.sh repo "$REPO"

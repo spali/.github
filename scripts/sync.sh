@@ -25,7 +25,9 @@
 #                        contribution lookup or the committer lookup failed.
 #                        A failed plan skips the push. Refs the plan kept
 #                        with own commits (skipped as undeclared or unique
-#                        commits) fail the run after the push.
+#                        commits) or stopped (upstream rewritten, upstream
+#                        moved tag; with the accept command per ref) fail
+#                        the run after the push.
 #
 # REPO is looked up exactly as spelled in the control file and must be listed
 # under `managed:`. Every write goes to that repository only: its URL is built
@@ -37,7 +39,8 @@
 # env: GH_TOKEN, MONITOR_CONFIG (default repos.yml), MONITOR_SCRIPTS_DIR
 #      (default: this script's directory), optional SYNC_REPO (matrix) and
 #      SYNC_BRANCH (a branch name or *, rebases manual branches; needs
-#      SYNC_REPO), repo: SYNC_APP_SLUG (committer <slug>[bot]) unless
+#      SYNC_REPO) and SYNC_ACCEPT (a branch name, tags/<name> or *, accepts
+#      an upstream rewrite or a moved tag; needs SYNC_REPO), repo: SYNC_APP_SLUG (committer <slug>[bot]) unless
 #      GIT_COMMITTER_NAME and GIT_COMMITTER_EMAIL are set.
 # Exit status: 0 ok, 1 a step failed or input refused, 2 usage error.
 set -euo pipefail
@@ -63,13 +66,23 @@ load_config() {
   yq -o=json '.' "$CONFIG_FILE" >"$CONFIG" || die "$CONFIG_FILE: invalid YAML"
 }
 
+# valid_branch NAME succeeds for a valid branch name (no leading dash, no
+# @{...}).
+valid_branch() {
+  [[ $1 != -* && $1 != *@\{* ]] && git check-ref-format --branch "$1" >/dev/null 2>&1
+}
+
 # check_branch fails unless SYNC_BRANCH is empty, * or a valid branch name.
 check_branch() {
   local b=${SYNC_BRANCH:-}
-  [[ -z $b || $b == '*' ]] && return 0
-  if [[ $b == -* || $b == *@\{* ]] || ! git check-ref-format --branch "$b" >/dev/null 2>&1; then
-    die "invalid branch: ${b//[^[:print:]]/?}"
-  fi
+  [[ -z $b || $b == '*' ]] || valid_branch "$b" || die "invalid branch: ${b//[^[:print:]]/?}"
+}
+
+# check_accept fails unless SYNC_ACCEPT is empty, *, a valid branch name or
+# tags/<name> (sync-git.sh checks it the same way).
+check_accept() {
+  local a=${SYNC_ACCEPT:-}
+  [[ -z $a || $a == '*' ]] || valid_branch "$a" || die "invalid accept: ${a//[^[:print:]]/?}"
 }
 
 # load_entry REPO sets ENTRY, REPO, KIND, UPSTREAM, UPSTREAM_REPO or fails.
@@ -134,7 +147,9 @@ step() {
 cmd_matrix() {
   local out n
   check_branch
+  check_accept
   [[ -z ${SYNC_BRANCH:-} || -n ${SYNC_REPO:-} ]] || die "the branch input needs the repo input"
+  [[ -z ${SYNC_ACCEPT:-} || -n ${SYNC_REPO:-} ]] || die "the accept input needs the repo input"
   # shellcheck disable=SC2016 # jq program
   out=$(jq -c --arg want "${SYNC_REPO:-}" '
     [(.managed // [])[].repo] as $all |
@@ -247,9 +262,11 @@ git_auth() {
 }
 
 # git_step plan|push runs sync-git.sh with the URLs of the entry, the
-# committer and the token (GIT_AUTH) as an extraheader for https://github.com/.
+# committer, SYNC_BRANCH, SYNC_ACCEPT and the token (GIT_AUTH) as an
+# extraheader for https://github.com/.
 git_step() {
   TARGET_URL="https://github.com/$REPO.git" UPSTREAM_URL=$UPSTREAM WORK=$WORK \
+    SYNC_BRANCH=${SYNC_BRANCH:-} SYNC_ACCEPT=${SYNC_ACCEPT:-} \
     GIT_COMMITTER_NAME=$COMMITTER_NAME GIT_COMMITTER_EMAIL=$COMMITTER_EMAIL \
     GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
     GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $GIT_AUTH" \
@@ -270,27 +287,38 @@ list_out() {
   done <"$TMP/out"
 }
 
-# kept fails (after an error line on stderr and in the summary) when the plan
-# kept refs with own commits ($WORK/skipped.txt reasons undeclared or unique
-# commits): the sync never overwrites them, someone must declare, delete or
-# reset them.
+# kept fails (after error lines on stderr and in the summary) when the plan
+# stopped or kept refs ($WORK/skipped.txt): one line per ref stopped by an
+# upstream rewrite or a moved tag (accept it after a check of upstream), one
+# line for the refs kept with own commits (reasons undeclared or unique
+# commits; someone must declare, delete or reset them).
 kept() {
-  local ref why msg
-  local -a refs=()
+  local ref why msg acc
+  local -a refs=() msgs=()
   [[ -s $WORK/skipped.txt ]] || return 0
   while IFS=$'\t' read -r ref why; do
-    [[ $why != undeclared && $why != "unique commits" ]] || refs+=("$ref")
+    case $why in
+      undeclared | "unique commits") refs+=("$ref") ;;
+      "upstream rewritten"* | "upstream moved tag"*)
+        acc=${ref#refs/heads/}
+        acc=${acc#refs/}
+        msgs+=("error: $ref: $why. Check upstream, then run the sync with repo=$REPO accept=$acc")
+        ;;
+    esac
   done <"$WORK/skipped.txt"
-  ((${#refs[@]})) || return 0
-  msg="error: ${#refs[@]} refs kept with own commits: ${refs[*]}"
-  printf '%s\n' "$msg" >&2
-  note "- ✗ $(md "$msg")"
+  ((${#refs[@]})) && msgs+=("error: ${#refs[@]} refs kept with own commits: ${refs[*]}")
+  ((${#msgs[@]})) || return 0
+  for msg in "${msgs[@]}"; do
+    printf '%s\n' "$msg" >&2
+    note "- ✗ $(md "$msg")"
+  done
   return 1
 }
 
 cmd_repo() {
   local status=0 git=1 ref why
   check_branch
+  check_accept
   load_entry "$1"
   need_env GH_TOKEN
   if ! get_repo; then
