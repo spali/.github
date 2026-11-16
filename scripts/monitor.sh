@@ -141,7 +141,7 @@ phase_check() {
     def counts: [
       (n("red") | select(. > 0) | "\(.) red"),
       (n("info") | select(. > 0) | "\(.) info"),
-      (n("skip") | select(. > 0) | "\(.) skipped"),
+      (n("skip") | select(. > 0) | "\(.) not checked"),
       (map(select(.ignored)) | length | select(. > 0) | "\(.) ignored")] | join(", ");
     def group_icon: if n("red") > 0 then "✗" elif n("info") > 0 then "ℹ"
       elif n("skip") > 0 then "–" else "◌" end;
@@ -156,7 +156,7 @@ phase_check() {
         "::endgroup::"
       end),
     ($f | map(select(.ignored == null and .level == "red")) | sort_by(.repo // "") | .[] | del(.ignored) | '"$ANNOTATE_JQ"'),
-    "\($name): \([$repos[] | select(. != null)] | length) repositories · \($f | n("red")) red · \($f | n("info")) info · \($f | n("skip")) skipped · \($f | map(select(.ignored)) | length) ignored"
+    "\($name): \([$repos[] | select(. != null)] | length) repositories · \($f | n("red")) red · \($f | n("info")) info · \($f | n("skip")) not checked · \($f | map(select(.ignored)) | length) ignored"
   ' <<<"$rows"
   [[ -z $(jq -c 'select(.ignored == null and .level == "red")' <<<"$rows") ]]
 }

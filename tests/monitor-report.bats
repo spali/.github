@@ -163,7 +163,7 @@ J
 @test "not checked findings are listed in a collapsed section, one line per reason" {
   run "$REPORT"
   nc=$(section "⚪ Not checked")
-  [[ $nc == *"could not run in these repositories because the feature is off there; the repositories were checked otherwise."*"<details>"*"### \`code-scanning-alert\` [ℹ️](https://docs.example/checks.md#code-scanning-alert)"*"- no analysis found: [spali/pub](https://github.com/spali/pub)"*"</details>"* ]]
+  [[ $nc == *"Checks that did not run in these repositories because they do not apply or the feature is not available there; the repositories were checked otherwise. Each line gives the reason."*"<details>"*"### \`code-scanning-alert\` [ℹ️](https://docs.example/checks.md#code-scanning-alert)"*"- no analysis found: [spali/pub](https://github.com/spali/pub)"*"</details>"* ]]
   [[ $nc != *"| Repository |"* ]]
   [[ $output != *"Skipped"* && $output != *"skipped"* ]]
 }
@@ -185,9 +185,43 @@ J
   [[ $nc == *$'\n- no analysis found (HTTP 404): [o/c](https://github.com/o/c)\n'* ]]
   [[ $nc == *$'\n- private repository: [o/a](https://github.com/o/a)\n'* ]]
   [[ $nc != *"Fix at"* && $nc != *"[Code scanning]("* ]]
+  [[ $nc == *"<summary>4 entries, click to show</summary>"* ]]
+}
+
+@test "not checked: one entry is singular" {
+  run "$REPORT"
+  [[ "$(section "⚪ Not checked")" == *"<summary>1 entry, click to show</summary>"* ]]
+}
+
+@test "not checked: empty reason and missing repo" {
+  findings <<'J'
+{"level":"skip","check":"sync-failed","repo":null,"message":"no control repository"}
+{"level":"skip","check":"settings-pvr","repo":"o/a","message":""}
+{"level":"skip","check":"ruleset-tags","repo":"o/b","message":"ruleset-tags: gh: "}
+J
+  run "$REPORT"
+  nc=$(section "⚪ Not checked")
+  [[ $nc == *$'\n- no control repository\n'* ]]
+  [[ $nc == *$'\n- (no details): [o/a](https://github.com/o/a)\n'* ]]
+  [[ $nc == *$'\n- (no details): [o/b](https://github.com/o/b)\n'* ]]
+}
+
+@test "not checked: markdown and html in reasons are escaped" {
+  findings <<'J'
+{"level":"skip","check":"settings-pvr","repo":"o/a","message":"a\\b `c` *d* _e_ [f](g) <h>"}
+J
+  run "$REPORT"
+  [[ "$(section "⚪ Not checked")" == *'- a\\b \`c\` \*d\* \_e\_ \[f\](g) \<h\>: [o/a](https://github.com/o/a)'* ]]
 }
 
 @test "without an inventory there is no clean section" {
+  run "$REPORT"
+  [[ $output != *"Clean"* && $output != *"clean"* ]]
+}
+
+@test "an empty inventory counts as none" {
+  echo '[]' >"$BATS_TEST_TMPDIR/inv.json"
+  export INVENTORY="$BATS_TEST_TMPDIR/inv.json"
   run "$REPORT"
   [[ $output != *"Clean"* && $output != *"clean"* ]]
 }
