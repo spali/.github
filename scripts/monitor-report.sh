@@ -17,9 +17,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 # $inv (slurped inventory, [] without one), $docs (URL of the check
 # explanations), $control (URL of the control file, may be empty). Prints
 # {markdown, red}.
-# The summary links each section by the id GitHub generates for its heading
-# (lowercase, emoji and punctuation removed, spaces to hyphens): "## 🔴 Red"
-# is #-red. The headings carry no count so the ids never change.
+# The summary links each section by an explicit anchor in its heading:
+# GitHub issues give headings no ids, but keep <a name="x"> as
+# id/name "user-content-x", so the links point at #user-content-x directly
+# (no page script needed).
 # shellcheck disable=SC2016 # jq program, no shell expansion wanted
 REPORT_JQ='
 $cfg[0] as $cfg | . as $f
@@ -101,20 +102,20 @@ $cfg[0] as $cfg | . as $f
     markdown: ([
       "## Maintenance monitor\n",
       (if $nred > 0 then "> [!CAUTION]" else "> [!TIP]" end)
-        + "\n> **[\($nred) red](#-red)** · [\($ninfo) info](#-info)"
-        + (if $clean then " · [\($clean | length) clean](#-clean)" else "" end)
-        + " · [\($nskip) not checked](#-not-checked)\n",
-      "## 🔴 Red\n",
+        + "\n> **[\($nred) red](#user-content-red)** · [\($ninfo) info](#user-content-info)"
+        + (if $clean then " · [\($clean | length) clean](#user-content-clean)" else "" end)
+        + " · [\($nskip) not checked](#user-content-not-checked)\n",
+      "## <a name=\"red\"></a>🔴 Red\n",
       (if $nred == 0 then "✅ Nothing to fix.\n" else checks(level_rows("red")) end),
-      "## 🔵 Info\n",
+      "## <a name=\"info\"></a>🔵 Info\n",
       (if $ninfo == 0 then "Nothing to note.\n" else checks(level_rows("info")) end),
       (if $clean then
-        "## ✅ Clean\n",
+        "## <a name=\"clean\"></a>✅ Clean\n",
         (if ($clean | length) == 0 then "No repository without findings.\n"
          else "<details><summary>\(count($clean | length; "repository"; "repositories")), click to show</summary>\n",
            ($clean | map(repo_link) | join(", ")) + "\n", "</details>\n" end)
        else empty end),
-      "## ⚪ Not checked\n",
+      "## <a name=\"not-checked\"></a>⚪ Not checked\n",
       (if $nskip == 0 then "Every check ran.\n"
        else "Checks that did not run in these repositories because they do not apply or the feature is not available there; the repositories were checked otherwise. Each line gives the reason.\n",
          "<details><summary>\(count($nskip; "entry"; "entries")), click to show</summary>\n", reasons(level_rows("skip")), "</details>\n" end)

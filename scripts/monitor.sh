@@ -176,7 +176,7 @@ phase_report() {
   fi
   summary
   # the summary line of the report, without its links to the sections:
-  # "> **[N red](#-red)** · [N info](#-info) · [N clean](#-clean) · [N not checked](#-not-checked)"
+  # "> **[N red](#user-content-red)** · [N info](#user-content-info) · [N clean](#user-content-clean) · [N not checked](#user-content-not-checked)"
   counts=$(grep -m1 -E '^> \*\*\[[0-9]+ red\]' "$WORK/report.md" | sed -E 's/\]\(#[^)]*\)//g; s/[][*]//g' || true)
   counts=${counts#> }
   if [[ $counts =~ ^([0-9]+)\ red\ ·\ ([0-9]+)\ info ]]; then
