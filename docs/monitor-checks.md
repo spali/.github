@@ -334,18 +334,27 @@ rebase it by hand and push.
 
 ## sync-failed
 
-🔴 The newest completed run of the workflow `sync.yml` in the control
-repository did not succeed; the detail links the run. Checked once per
-monitor run (in the Lists job), only when `managed:` has entries. No run yet
-is no finding. ⚪ Skipped in a local run, where there is no control
-repository.
+🔴 The last sync of a managed repository failed: per repository under
+`managed:` the newest job `Sync · <repo>` of the workflow `sync.yml` on the
+branch `main` of the control repository that succeeded or failed counts
+(cancelled and skipped jobs are passed over, the older job counts); the
+detail links the job (`last sync of this repository failed: <url>`). A sync
+of one repository (`-f repo=…`) thus never hides a failure of another one.
+🔴 Without a repository: a job of the newest run that is not a repository
+job (`Managed repositories`) did not succeed (`sync run failed before the
+repositories: <url>`). Checked once per monitor run (in the Lists job), only
+when `managed:` has entries; reads the 20 newest completed runs and stops
+once every managed repository has a result. A repository without a job in
+these runs (new entry) and no run yet are no finding. ⚪ Skipped in a local
+run, where there is no control repository.
 
-A run also fails when the sync stopped a ref because upstream rewrote it:
+The job of a repository also fails when the sync stopped a ref because upstream rewrote it:
 `error: <ref>: upstream rewritten (…)` or `upstream moved tag (…)`, with the
 command to accept it. Such a ref stays as it was (the other refs are synced)
 until the rewrite is accepted.
 
-**Fix:** read the log of the run, fix the cause, run the sync again. For a
+**Fix:** read the log of the job or run, fix the cause, run the sync again
+(`gh workflow run sync.yml -f repo=<repo>`). For a
 stopped ref: check upstream, then in the control repository run
 `gh workflow run sync.yml -f repo=<repo> -f accept=<branch|tags/name|*>`
 (the old tip is kept in `refs/backup/<branch>` or `refs/backup-tags/<tag>`).

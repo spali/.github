@@ -283,11 +283,40 @@ GHEND
 
 # --- sync-failed (runs once, here) --------------------------------------
 
-SYNC='*repos/ctl/x/actions/workflows/sync.yml/runs?per_page=1&status=completed'
+RUNS='repos/ctl/x/actions/workflows/sync.yml/runs?per_page=20&status=completed&branch=main'
 
+# managed [REPO...]: managed entries for REPO... (default spali/f).
 managed() {
-  jq '.managed = [{repo: "spali/f", upstream: "https://github.com/up/f"}]' "$CONFIG" >"$CONFIG.new" &&
-    mv "$CONFIG.new" "$CONFIG"
+  local repos
+  repos=$(jq -nc '$ARGS.positional' --args "${@:-spali/f}")
+  jq --argjson r "$repos" '.managed = ($r | map({repo: ., upstream: "https://github.com/up/x"}))' \
+    "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+}
+
+# sync_runs ID...: completed sync runs on main, newest first.
+sync_runs() {
+  jq -nc --args '{total_count: ($ARGS.positional | length), workflow_runs: ($ARGS.positional
+    | map({id: tonumber, conclusion: "success", html_url: "https://github.com/ctl/x/actions/runs/\(.)"}))}' "$@" |
+    gh_respond "*$RUNS" -
+}
+
+# sync_jobs RUN_ID 'NAME=CONCLUSION'...: the jobs of one run; job n (from 1)
+# has the URL .../runs/RUN_ID/job/RUN_IDn.
+sync_jobs() {
+  local id=$1
+  shift
+  jq -nc --arg id "$id" --args '{total_count: ($ARGS.positional | length), jobs: ($ARGS.positional
+    | to_entries | map((.value | capture("^(?<name>.*)=(?<c>[a-z_]*)$")) as $j
+    | {name: $j.name, status: "completed", conclusion: $j.c, run_id: ($id | tonumber),
+       html_url: "https://github.com/ctl/x/actions/runs/\($id)/job/\($id)\(.key + 1)"}))}' "$@" |
+    gh_respond "*repos/ctl/x/actions/runs/$id/jobs?per_page=100" -
+}
+
+PLAN='sync / Managed repositories'
+
+# sync_findings prints the sync-failed findings as "level repo message" lines.
+sync_findings() {
+  jq -rs 'map(select(.check == "sync-failed"))[] | "\(.level) \(.repo // "-") \(.message)"' "$FINDINGS"
 }
 
 @test "no managed entries: no sync check" {
@@ -311,31 +340,186 @@ managed() {
 @test "failed sync run is sync-failed" {
   managed
   export GITHUB_REPOSITORY=ctl/x
-  jq -nc '{workflow_runs: [{conclusion: "failure", html_url: "https://github.com/ctl/x/actions/runs/9"}]}' |
-    gh_respond "$SYNC" -
+  sync_runs 9
+  sync_jobs 9 "$PLAN=success" 'sync / Sync · spali/f=failure'
   all_lists '.'
   run_script
-  [ "$(count sync-failed)" -eq 1 ]
-  [ "$(level sync-failed)" = red ]
-  [ "$(jq -rs 'map(select(.check == "sync-failed")) | .[0].repo' "$FINDINGS")" = null ]
-  [ "$(message sync-failed)" = "last sync run failed: https://github.com/ctl/x/actions/runs/9" ]
+  [ "$(sync_findings)" = "red spali/f last sync of this repository failed: https://github.com/ctl/x/actions/runs/9/job/92" ]
 }
 
 @test "successful sync run is no finding" {
   managed
   export GITHUB_REPOSITORY=ctl/x
-  jq -nc '{workflow_runs: [{conclusion: "success", html_url: "u"}]}' | gh_respond "$SYNC" -
+  sync_runs 9
+  sync_jobs 9 "$PLAN=success" 'sync / Sync · spali/f=success'
   all_lists '.'
   run_script
   [ "$(count sync-failed)" -eq 0 ]
-  grep -qF 'sync.yml' "$GH_LOG"
+  grep -qF 'runs/9/jobs' "$GH_LOG"
 }
 
 @test "no sync run yet is no finding" {
   managed
   export GITHUB_REPOSITORY=ctl/x
-  jq -nc '{total_count: 0, workflow_runs: []}' | gh_respond "$SYNC" -
+  jq -nc '{total_count: 0, workflow_runs: []}' | gh_respond "*$RUNS" -
   all_lists '.'
   run_script
   [ "$(count sync-failed)" -eq 0 ]
+  grep -qF 'sync.yml/runs' "$GH_LOG"
+  run ! grep -F '/jobs' "$GH_LOG"
+}
+
+@test "red nightly run and green dispatch for another repo: only the failed repo is red" {
+  managed spali/f spali/g spali/h
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 11 10
+  sync_jobs 11 "$PLAN=success" 'sync / Sync · spali/g=success'
+  sync_jobs 10 "$PLAN=success" 'sync / Sync · spali/f=failure' 'sync / Sync · spali/g=failure' \
+    'sync / Sync · spali/h=success'
+  all_lists '.'
+  run_script
+  [ "$(sync_findings)" = "red spali/f last sync of this repository failed: https://github.com/ctl/x/actions/runs/10/job/102" ]
+}
+
+@test "a later green job of the same repo clears it" {
+  managed spali/f
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 11 10
+  sync_jobs 11 "$PLAN=success" 'sync / Sync · spali/f=success'
+  sync_jobs 10 "$PLAN=success" 'sync / Sync · spali/f=failure'
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 0 ]
+}
+
+@test "cancelled newest job keeps the older failure" {
+  managed spali/f
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 12 11 10
+  sync_jobs 12 "$PLAN=success" 'sync / Sync · spali/f=cancelled'
+  sync_jobs 11 "$PLAN=success" 'sync / Sync · spali/f=skipped'
+  sync_jobs 10 "$PLAN=success" 'sync / Sync · spali/f=failure'
+  all_lists '.'
+  run_script
+  [ "$(sync_findings)" = "red spali/f last sync of this repository failed: https://github.com/ctl/x/actions/runs/10/job/102" ]
+}
+
+@test "failed plan job of the newest run is the general finding" {
+  managed spali/f
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 11 10
+  sync_jobs 11 "$PLAN=failure" 'sync / Sync · spali/f=skipped'
+  sync_jobs 10 "$PLAN=success" 'sync / Sync · spali/f=success'
+  all_lists '.'
+  run_script
+  [ "$(sync_findings)" = "red - sync run failed before the repositories: https://github.com/ctl/x/actions/runs/11" ]
+}
+
+@test "failed plan job of an older run is no finding" {
+  managed spali/f
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 11 10 9
+  sync_jobs 11 "$PLAN=success" 'sync / Sync · spali/g=success'
+  sync_jobs 10 "$PLAN=failure"
+  sync_jobs 9 "$PLAN=success" 'sync / Sync · spali/f=success'
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 0 ]
+}
+
+@test "job names with any caller prefix and dotted repo names match exactly" {
+  managed spali/knx.js spali/a-b_c spali/n spali/ok
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 9
+  sync_jobs 9 'Managed repositories=success' 'Sync · spali/knx.jsx=failure' \
+    'maint / Sync · spali/knx.js=failure' 'Sync · spali/a-b_c=failure' \
+    'outer / inner / Sync · spali/n=failure' 'x / Sync · spali/ok=success' \
+    'Sync · spali/knxXjs=failure' 'Sync · spali/a-b_c2=failure'
+  all_lists '.'
+  run_script
+  [ "$(sync_findings | sort)" = "$(printf '%s\n' \
+    "red spali/a-b_c last sync of this repository failed: https://github.com/ctl/x/actions/runs/9/job/94" \
+    "red spali/knx.js last sync of this repository failed: https://github.com/ctl/x/actions/runs/9/job/93" \
+    "red spali/n last sync of this repository failed: https://github.com/ctl/x/actions/runs/9/job/95")" ]
+}
+
+@test "a job name merely containing the repo does not match" {
+  managed spali/knx.js
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 9
+  sync_jobs 9 "$PLAN=success" 'sync / Sync · spali/knx.js extra=failure' 'sync / Sync · xspali/knx.js=failure' \
+    'sync / Sync · spali/knx.js/x=failure'
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 0 ]
+}
+
+@test "unmanaged repo jobs are ignored" {
+  managed spali/f
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 9
+  sync_jobs 9 "$PLAN=success" 'sync / Sync · spali/f=success' 'sync / Sync · spali/gone=failure'
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 0 ]
+}
+
+@test "runs are read only from main" {
+  managed spali/f
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 9
+  sync_jobs 9 "$PLAN=success" 'sync / Sync · spali/f=success'
+  all_lists '.'
+  run_script
+  [ "$(grep -c 'sync.yml/runs' "$GH_LOG")" -eq 1 ]
+  grep -F 'sync.yml/runs' "$GH_LOG" | grep -qF 'branch=main'
+}
+
+@test "reading stops once every repo has a result" {
+  managed spali/f spali/g
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 12 11 10
+  sync_jobs 12 "$PLAN=success" 'sync / Sync · spali/f=failure'
+  sync_jobs 11 "$PLAN=success" 'sync / Sync · spali/g=success' 'sync / Sync · spali/f=success'
+  sync_jobs 10 "$PLAN=success" 'sync / Sync · spali/g=failure'
+  all_lists '.'
+  run_script
+  [ "$(sync_findings)" = "red spali/f last sync of this repository failed: https://github.com/ctl/x/actions/runs/12/job/122" ]
+  grep -qF 'runs/11/jobs' "$GH_LOG"
+  run ! grep -F 'runs/10/jobs' "$GH_LOG"
+}
+
+@test "a repo without a job in any run is no finding" {
+  managed spali/f spali/new
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 10 9
+  sync_jobs 10 "$PLAN=success" 'sync / Sync · spali/f=failure'
+  sync_jobs 9 "$PLAN=success"
+  all_lists '.'
+  run_script
+  [ "$(sync_findings)" = "red spali/f last sync of this repository failed: https://github.com/ctl/x/actions/runs/10/job/102" ]
+  grep -qF 'runs/9/jobs' "$GH_LOG"
+}
+
+@test "runs API error is check-failed" {
+  managed spali/f
+  export GITHUB_REPOSITORY=ctl/x
+  gh_fail "*$RUNS" 'HTTP 500: boom (https://api.github.com/x) (HTTP 500)'
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 0 ]
+  [ "$(count check-failed)" -eq 1 ]
+  [[ $(message check-failed) == "sync-failed: "* ]]
+}
+
+@test "jobs API error is check-failed" {
+  managed spali/f
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 9
+  gh_fail '*repos/ctl/x/actions/runs/9/jobs*' 'HTTP 502: bad (HTTP 502)'
+  all_lists '.'
+  run_script
+  [ "$(count sync-failed)" -eq 0 ]
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(message check-failed)" = "sync-failed: HTTP 502: bad (HTTP 502)" ]
 }
