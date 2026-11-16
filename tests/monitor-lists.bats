@@ -208,17 +208,18 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(count adoption)" -eq 1 ]
 }
 
-@test "adoption is one line with public names sorted" {
+@test "adoption is one info finding per repository" {
   jq -n '[{name: "spali/z", private: false, fork: false, central: false},
     {name: "spali/b", private: false, fork: false, central: false},
     {name: "spali/c", private: false, fork: false, central: true},
     {name: "spali/f", private: false, fork: true, central: false}]' >"$INVENTORY"
   all_lists '(.[0].items = [["spali/z", false], ["spali/b", false], ["spali/c", false]]) | (.[3].items = [["spali/f", false]])'
   run_script
-  [ "$(count adoption)" -eq 1 ]
+  [ "$(count adoption)" -eq 2 ]
   [ "$(level adoption)" = info ]
-  [ "$(repo adoption)" = null ]
-  [ "$(message adoption)" = "2 own repositories without the shared release flow: spali/b, spali/z" ]
+  [ "$(repo adoption)" = spali/b ]
+  [ "$(message adoption)" = "no central release flow" ]
+  [ "$(jq -sr '[.[] | select(.check == "adoption") | .repo] | join(",")' "$FINDINGS")" = "spali/b,spali/z" ]
 }
 
 @test "adoption names private repos too" {
@@ -227,7 +228,8 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
     {name: "spali/q", private: true, fork: false, central: false}]' >"$INVENTORY"
   all_lists '(.[0].items = [["spali/b", false], ["spali/p", false], ["spali/q", false]])'
   run_script
-  [ "$(message adoption)" = "3 own repositories without the shared release flow: spali/b, spali/p, spali/q" ]
+  [ "$(count adoption)" -eq 3 ]
+  [ "$(jq -sr '[.[] | select(.check == "adoption") | .repo] | join(",")' "$FINDINGS")" = "spali/b,spali/p,spali/q" ]
 }
 
 @test "repos that pin any shared workflow are not adoption candidates" {
@@ -237,7 +239,7 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
     {name: "spali/c", private: false, fork: false, central: false}]' >"$INVENTORY"
   all_lists '(.[0].items = [["spali/ctl", false], ["spali/b", false], ["spali/c", false]])'
   run_script
-  [ "$(message adoption)" = "2 own repositories without the shared release flow: spali/b, spali/c" ]
+  [ "$(jq -sr '[.[] | select(.check == "adoption") | .repo] | join(",")' "$FINDINGS")" = "spali/b,spali/c" ]
 }
 
 @test "list query failure is check-failed, adoption still emitted" {

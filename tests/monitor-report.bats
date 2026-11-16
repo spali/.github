@@ -259,17 +259,17 @@ J
 {"level":"info","check":"list-none","repo":"o/b","message":"x"}
 {"level":"skip","check":"settings-pvr","repo":"o/c","message":"private repository"}
 {"level":"red","check":"settings-merge","repo":"o/d","message":"x"}
-{"level":"info","check":"adoption","repo":null,"message":"1 own repositories without the shared release flow: o/f"}
+{"level":"info","check":"adoption","repo":"o/f","message":"no central release flow"}
 J
   config <<'J'
 {"ignores":[{"repo":"o/d","check":"settings-merge","reason":"ok"},{"repo":"o/e","check":"adoption","reason":"stale"}]}
 J
   run "$REPORT"
   [ "$status" -eq 1 ]
-  # o/e only has an unused ignore, o/f is only named in a finding without repo
-  [[ $output == *"**[1 red](#user-content-red)** · [3 info](#user-content-info) · [4 clean](#user-content-clean) · [1 not checked](#user-content-not-checked)"* ]]
+  # o/e only has an unused ignore, o/f has an info finding, so it is not clean
+  [[ $output == *"**[1 red](#user-content-red)** · [3 info](#user-content-info) · [3 clean](#user-content-clean) · [1 not checked](#user-content-not-checked)"* ]]
   clean=$(section "✅ Clean")
-  [[ $clean == *"<details>"*"4 repositories"*$'\n[o/c](https://github.com/o/c), [o/d](https://github.com/o/d), [o/e](https://github.com/o/e), [o/f](https://github.com/o/f)\n'*"</details>"* ]]
+  [[ $clean == *"<details>"*"3 repositories"*$'\n[o/c](https://github.com/o/c), [o/d](https://github.com/o/d), [o/e](https://github.com/o/e)\n'*"</details>"* ]]
 }
 
 @test "the section anchors stay the same whatever the counts" {
@@ -319,12 +319,13 @@ J
   [[ $output == *"PR [#7](https://github.com/o/r/issues/7) is not open"* ]]
 }
 
-@test "repositories named in an adoption message are links" {
+@test "adoption findings are rendered like any other: message not linkified" {
   findings <<'J'
-{"level":"info","check":"adoption","repo":null,"message":"2 own repositories without the shared release flow: o/a, o/b.c"}
+{"level":"info","check":"adoption","repo":"o/a","message":"no central release flow in o/x"}
 J
   run "$REPORT"
-  [[ $output == *"| - | 2 own repositories without the shared release flow: [o/a](https://github.com/o/a), [o/b.c](https://github.com/o/b.c) |"* ]]
+  [[ $output == *"| no central release flow in o/x |"* ]]
+  [[ $output != *"[o/x]"* ]]
 }
 
 @test "control file findings link the control file when its URL is known" {

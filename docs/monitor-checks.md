@@ -225,8 +225,8 @@ The GitHub Lists of the owner (stars), named in `lists` of `repos.yml`.
 
 ## adoption
 
-🔵 Own repositories (not forks, not mirrors) that do not use the shared
-release flow.
+🔵 An own repository (not a fork, not a mirror) that does not use the shared
+release flow ("no central release flow"). One finding per repository.
 
 **Fix:** adopt the flow (README "Set up a new repository"), or ignore the
 finding with a reason.

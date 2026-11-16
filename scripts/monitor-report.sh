@@ -51,14 +51,12 @@ $cfg[0] as $cfg | . as $f
       elif $c == "mirror-behind" then ["Mirror", ($r | gh)]
       elif ($c | startswith("list-")) then ["Lists", "\($r | split("/")[0] | gh)?tab=stars"]
       else null end;
-  # The message as Markdown: URLs, issue numbers and (in adoption) repository
-  # names become links.
+  # The message as Markdown: URLs, and issue numbers become links.
   def details:
-    .repo as $r | .check as $c
+    .repo as $r
     | (.message // "" | cell)
     | gsub("(?<u>https://[^\\s|)\\]]+)"; "[\(if (.u | test("/actions/runs/[0-9]+/job/")) then "job" elif (.u | test("/actions/runs")) then "run" else "link" end)](\(.u))")
-    | if $r != null then gsub("(?<![\\w/&\\[])#(?<n>[0-9]+)"; "[#\(.n)](\($r | gh)/issues/\(.n))") else . end
-    | if $c == "adoption" then gsub("(?<![\\w/.\\[-])(?<o>[A-Za-z0-9-]+)/(?<n>[A-Za-z0-9._-]*[A-Za-z0-9_-])"; "[\(.o)/\(.n)](https://github.com/\(.o)/\(.n))") else . end;
+    | if $r != null then gsub("(?<![\\w/&\\[])#(?<n>[0-9]+)"; "[#\(.n)](\($r | gh)/issues/\(.n))") else . end;
   def row: "| \(if .repo then (.repo | repo_link) else "-" end) | \(details) | \(fix | if . then "[\(.[0])](\(.[1]))" else "" end) |";
   def matches($i): .repo == $i.repo and .check == $i.check;
 
