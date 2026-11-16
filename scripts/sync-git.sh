@@ -8,9 +8,16 @@
 #                     $WORK/repo, rebases the declared branches there and
 #                     writes $WORK/plan.tsv
 #                     (<ref> <old sha> <new sha> <reason>, tab separated;
-#                     reasons ff, rebase, mirror, delete, backup) and
+#                     reasons ff, rebase, mirror, delete, backup, record) and
 #                     $WORK/skipped.txt (<ref> <why>). Fails without a plan on
 #                     a conflict, a missing onto or an empty source.
+#                     A record (${RECORD_PREFIX}<branch>) holds the upstream
+#                     sha a synced branch sits on: the upstream sha of a
+#                     fast-forwarded, mirrored or already equal default or
+#                     followed branch, the onto sha of a rebased or created
+#                     declared branch (also when the rebase changed nothing);
+#                     it is deleted with its branch. A manual branch that is
+#                     not rebased keeps its record.
 #   sync-git.sh push  pushes $WORK/plan.tsv to TARGET_URL in one atomic push
 #                     with a lease on the old sha of every ref, then checks the
 #                     target with ls-remote. On a mismatch it restores the old
@@ -20,16 +27,24 @@
 #
 # env: plan: ENTRY (the object of managed_entry), TARGET_URL, UPSTREAM_URL,
 #      WORK, optional SYNC_BRANCH (a branch name or *: also rebase manual
-#      branches; a missing manual branch is always created from its onto), optional BACKUP_PREFIX (default refs/backup/), optional
-#      $WORK/contrib.txt (contribution branches, one per line),
+#      branches; a missing manual branch is always created from its onto),
+#      optional $WORK/contrib.txt (contribution branches, one per line),
 #      GIT_COMMITTER_NAME/EMAIL.
-#      push: TARGET_URL (without credentials), WORK, optional BACKUP_PREFIX.
+#      push: TARGET_URL (without credentials), WORK.
+#      both: optional BACKUP_PREFIX (branch backups, default refs/backup/),
+#      TAG_BACKUP_PREFIX (tag backups, default refs/backup-tags/),
+#      RECORD_PREFIX (records, default refs/sync/upstream/); each under
+#      refs/, not refs/heads/..., not refs/tags/ itself, and none inside
+#      another. Upstream refs under them are skipped as invalid, target refs
+#      under them are no branches or tags.
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 source "$(dirname "$0")/lib.sh"
 
 ZERO=0000000000000000000000000000000000000000
 BACKUP_PREFIX=${BACKUP_PREFIX:-refs/backup/}
+TAG_BACKUP_PREFIX=${TAG_BACKUP_PREFIX:-refs/backup-tags/}
+RECORD_PREFIX=${RECORD_PREFIX:-refs/sync/upstream/}
 
 # Keep system and global config and prompts out; pin the settings that
 # change what a rebase does. GIT_CONFIG_COUNT/KEY/VALUE (credentials) stay
@@ -82,6 +97,12 @@ is_ancestor() {
   esac
 }
 
+# own_ref REF succeeds when REF is under a prefix the sync writes itself
+# (backups, tag backups, records).
+own_ref() {
+  [[ $1 == "$BACKUP_PREFIX"* || $1 == "$TAG_BACKUP_PREFIX"* || $1 == "$RECORD_PREFIX"* ]]
+}
+
 # load NAMESPACE ARRAY fills ARRAY (heads/x or tags/x -> sha) from
 # refs/NAMESPACE/{heads,tags}/; refs with an invalid name are deleted and
 # skipped.
@@ -90,13 +111,13 @@ load() {
   local -n arr=$2
   while IFS=$'\t' read -r sha name; do
     orig=refs/${name#"refs/$ns/"}
-    if ! valid_ref "$orig" || [[ $ns == up && $orig == "$BACKUP_PREFIX"* ]]; then
+    if ! valid_ref "$orig" || { [[ $ns == up ]] && own_ref "$orig"; }; then
       skip "$orig" "invalid ref name"
       g update-ref -d "$name"
       continue
     fi
-    # backups under refs/tags/ are no target tags
-    [[ $ns == tg && $orig == "$BACKUP_PREFIX"* ]] && continue
+    # backups and records under refs/tags/ are no target tags
+    [[ $ns == tg ]] && own_ref "$orig" && continue
     # shellcheck disable=SC2034 # nameref to the caller's array
     arr[${orig#refs/}]=$sha
   done < <(g for-each-ref --format=$'%(objectname)\t%(refname)' "refs/$ns/heads/" "refs/$ns/tags/")
@@ -116,8 +137,15 @@ wants_rebase() {
   [[ $1 == auto || ${SYNC_BRANCH:-} == "$2" || ${SYNC_BRANCH:-} == '*' ]]
 }
 
+# record_line BRANCH NEW plans the record of BRANCH at NEW (zero: delete)
+# unless it is there already.
+record_line() {
+  local old=${RECR[$1]:-$ZERO}
+  [[ $old == "$2" ]] || add "$RECORD_PREFIX$1" "$old" "$2" record
+}
+
 # rebase_branch BRANCH ONTO rebases the target branch onto the upstream
-# branch and plans it with a backup of the old tip.
+# branch and plans it with a backup of the old tip and its record.
 rebase_branch() {
   local b=$1 onto=$2 old new bk
   [[ -n ${UPR[heads/$onto]:-} ]] || die "branch $b: onto $onto missing upstream"
@@ -134,11 +162,13 @@ rebase_branch() {
     new=$(g rev-parse --verify "refs/heads/$b")
     g switch -q --detach
   fi
-  [[ $new != "$old" ]] || return 0
-  add "refs/heads/$b" "$old" "$new" rebase
-  [[ $old != "$ZERO" ]] || return 0
-  bk=${BKR[$b]:-$ZERO}
-  [[ $bk == "$old" ]] || add "$BACKUP_PREFIX$b" "$bk" "$old" backup
+  if [[ $new != "$old" ]]; then
+    add "refs/heads/$b" "$old" "$new" rebase
+    bk=${BKR[$b]:-$ZERO}
+    [[ $old == "$ZERO" || $bk == "$old" ]] || add "$BACKUP_PREFIX$b" "$bk" "$old" backup
+  fi
+  # also when the rebase changed nothing: the branch sits on onto now
+  record_line "$b" "${UPR[heads/$onto]}"
 }
 
 # contained SHA succeeds when the commit of SHA is in a current upstream ref.
@@ -161,12 +191,22 @@ contained_tag() {
   contained "$1"
 }
 
-# backups must not land in a namespace that is synced (refs/heads/, refs/tags/)
-check_backup_prefix() {
-  if [[ $BACKUP_PREFIX != refs/?*/ || $BACKUP_PREFIX == refs/heads/* ||
-    $BACKUP_PREFIX == refs/tags/ ]] || ! git check-ref-format "${BACKUP_PREFIX}x"; then
-    die "invalid BACKUP_PREFIX $BACKUP_PREFIX"
-  fi
+# backups and records must not land in a namespace that is synced
+# (refs/heads/, refs/tags/) nor inside each other
+check_prefixes() {
+  local v w p
+  for v in BACKUP_PREFIX TAG_BACKUP_PREFIX RECORD_PREFIX; do
+    p=${!v}
+    if [[ $p != refs/?*/ || $p == refs/heads/* || $p == refs/tags/ ]] ||
+      ! git check-ref-format "${p}x"; then
+      die "invalid $v $p"
+    fi
+  done
+  for v in BACKUP_PREFIX TAG_BACKUP_PREFIX RECORD_PREFIX; do
+    for w in BACKUP_PREFIX TAG_BACKUP_PREFIX RECORD_PREFIX; do
+      [[ $v == "$w" || ${!w} != "${!v}"* ]] || die "$w ${!w} overlaps $v ${!v}"
+    done
+  done
 }
 
 # follow_match prints the names (one per line on stdin) that match a follow
@@ -239,7 +279,7 @@ plan() {
   need_env ENTRY TARGET_URL UPSTREAM_URL WORK GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
   [[ -d $WORK ]] || die "WORK $WORK is not a directory"
   [[ $UPSTREAM_URL != -* && $TARGET_URL != -* ]] || die "invalid URL"
-  check_backup_prefix
+  check_prefixes
   # shellcheck disable=SC2153 # ENTRY comes from the environment
   TAGS=$(jq -r '.tags != false' <<<"$ENTRY")
 
@@ -251,7 +291,7 @@ plan() {
   : >"$WORK/skipped.txt"
   git init -q "$REPO"
 
-  declare -gA UPR=() TGR=() BKR=() DECL=() CONTRIB=() FOL=() SCOPE=()
+  declare -gA UPR=() TGR=() BKR=() RECR=() DECL=() CONTRIB=() FOL=() SCOPE=()
   EXTRA=
   FOLLOW=$(jq -c '.follow // []' <<<"$ENTRY")
   udef=$(default_branch "$UPSTREAM_URL" upstream)
@@ -260,7 +300,8 @@ plan() {
   local -a tgspecs=('+refs/heads/*:refs/tg/heads/*')
   [[ $TAGS != true ]] || tgspecs+=('+refs/tags/*:refs/tg/tags/*')
   g fetch -q --no-tags --no-write-fetch-head -- "$TARGET_URL" \
-    "${tgspecs[@]}" "+${BACKUP_PREFIX}*:refs/tg/backup/*" ||
+    "${tgspecs[@]}" "+${BACKUP_PREFIX}*:refs/tg/backup/*" \
+    "+${RECORD_PREFIX}*:refs/tg/record/*" ||
     die "cannot fetch target"
 
   load up UPR
@@ -268,6 +309,9 @@ plan() {
   while IFS=$'\t' read -r sha name; do
     BKR[${name#refs/tg/backup/}]=$sha
   done < <(g for-each-ref --format=$'%(objectname)\t%(refname)' refs/tg/backup/)
+  while IFS=$'\t' read -r sha name; do
+    RECR[${name#refs/tg/record/}]=$sha
+  done < <(g for-each-ref --format=$'%(objectname)\t%(refname)' refs/tg/record/)
   if [[ -f $WORK/contrib.txt ]]; then
     while IFS= read -r name || [[ -n $name ]]; do
       [[ -z $name ]] || CONTRIB[$name]=1
@@ -327,8 +371,11 @@ plan() {
     tg=${TGR[heads/$tdef]:-$ZERO}
     if [[ $tg == "$ZERO" ]] || { [[ $tg != "$up" ]] && is_ancestor "$tg" "$up"; }; then
       add "refs/heads/$tdef" "$tg" "$up" ff
+      record_line "$tdef" "$up"
     elif [[ $tg != "$up" ]]; then
       skip "refs/heads/$tdef" undeclared
+    else
+      record_line "$tdef" "$up"
     fi
   fi
   # followed branches: fast-forward or create by name
@@ -337,13 +384,16 @@ plan() {
     [[ $name != "$tdef" && -z ${DECL[$name]:-} ]] || continue
     up=${UPR[heads/$name]:-}
     tg=${TGR[heads/$name]:-$ZERO}
-    [[ -n $up && $tg != "$up" ]] || continue
+    [[ -n $up ]] || continue
     if [[ -n ${CONTRIB[$name]:-} ]]; then
-      skip "refs/heads/$name" contribution
+      [[ $tg == "$up" ]] || skip "refs/heads/$name" contribution
+    elif [[ $tg == "$up" ]]; then
+      record_line "$name" "$up"
     elif [[ $tg != "$ZERO" ]] && ! is_ancestor "$tg" "$up"; then
       skip "refs/heads/$name" undeclared
     else
       add "refs/heads/$name" "$tg" "$up" mirror
+      record_line "$name" "$up"
     fi
   done
   # followed target branches gone upstream (the default branch never)
@@ -354,6 +404,7 @@ plan() {
       skip "refs/heads/$name" contribution
     elif contained "${TGR[heads/$name]}"; then
       add "refs/heads/$name" "${TGR[heads/$name]}" "$ZERO" delete
+      record_line "$name" "$ZERO"
     else
       skip "refs/heads/$name" "unique commits"
     fi
@@ -398,21 +449,31 @@ has_credentials() {
   [[ $auth == *@* ]]
 }
 
+# plan_ref_ok REF REASON succeeds when plan writes REASON only for refs like
+# REF: records under RECORD_PREFIX, backups under BACKUP_PREFIX or
+# TAG_BACKUP_PREFIX, the rest under refs/heads/ or refs/tags/ outside them.
+plan_ref_ok() {
+  case $2 in
+    record) [[ $1 == "$RECORD_PREFIX"* ]] ;;
+    backup) [[ $1 == "$BACKUP_PREFIX"* || $1 == "$TAG_BACKUP_PREFIX"* ]] ;;
+    *) ! own_ref "$1" && [[ $1 =~ ^refs/(heads|tags)/ ]] ;;
+  esac
+}
+
 # read_plan fills P_REF, P_OLD, P_NEW, P_WHY from $WORK/plan.tsv and fails
 # on the first line that plan would never write.
 read_plan() {
   local line n=0 r o nw why t=$'\t'
   local -A seen=()
-  local re="^([^$t]+)$t([0-9a-f]{40})$t([0-9a-f]{40})$t(ff|rebase|mirror|delete|backup)\$"
+  local re="^([^$t]+)$t([0-9a-f]{40})$t([0-9a-f]{40})$t(ff|rebase|mirror|delete|backup|record)\$"
   P_REF=() P_OLD=() P_NEW=() P_WHY=()
   while IFS= read -r line || [[ -n $line ]]; do
     n=$((n + 1))
     [[ $line =~ $re ]] || die "invalid plan line $n"
     r=${BASH_REMATCH[1]} o=${BASH_REMATCH[2]} nw=${BASH_REMATCH[3]} why=${BASH_REMATCH[4]}
-    if [[ $o == "$nw" || -n ${seen[$r]:-} ]] || ! valid_ref "$r" ||
-      { [[ $why == backup ]] && [[ $r != "$BACKUP_PREFIX"* ]]; } ||
-      { [[ $why != backup ]] && [[ $r == "$BACKUP_PREFIX"* || ! $r =~ ^refs/(heads|tags)/ ]]; } ||
-      [[ $why == delete && $nw != "$ZERO" || $why != delete && $nw == "$ZERO" ]]; then
+    if [[ $o == "$nw" || -n ${seen[$r]:-} ]] || ! valid_ref "$r" || ! plan_ref_ok "$r" "$why" ||
+      [[ $why == delete && $nw != "$ZERO" ]] ||
+      [[ $why != delete && $why != record && $nw == "$ZERO" ]]; then
       die "invalid plan line $n"
     fi
     seen[$r]=1
@@ -462,7 +523,8 @@ state() {
 
 # rollback WHAT restores the refs that the target shows at their new sha to
 # the old sha (leases on the new sha) in one atomic push and fails. A ref
-# that somebody else moved is never touched; then the backups stay too.
+# that somebody else moved is never touched; then the backups (branch and
+# tag) stay too. Records go back with the other refs.
 rollback() {
   local what=$1 i s
   local -a restore=() failed=()
@@ -473,7 +535,7 @@ rollback() {
   done
   for i in "${!P_REF[@]}"; do
     [[ $(state "$i") == "${P_NEW[i]}" ]] || continue
-    ((${#foreign[@]} == 0)) || [[ ${P_REF[i]} != "$BACKUP_PREFIX"* ]] || continue
+    ((${#foreign[@]} == 0)) || [[ ${P_REF[i]} != "$BACKUP_PREFIX"* && ${P_REF[i]} != "$TAG_BACKUP_PREFIX"* ]] || continue
     restore+=("$i")
   done
   if ((${#restore[@]})) && ! push_refs P_NEW P_OLD "${restore[@]}"; then
@@ -501,7 +563,7 @@ push() {
   need_env TARGET_URL WORK
   [[ $TARGET_URL != -* ]] || die "invalid URL"
   ! has_credentials "$TARGET_URL" || die "TARGET_URL must not contain credentials"
-  check_backup_prefix
+  check_prefixes
   [[ -f $WORK/plan.tsv ]] || die "no plan in $WORK"
   read_plan
   if ((${#P_REF[@]} == 0)); then
