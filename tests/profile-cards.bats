@@ -6,7 +6,7 @@ setup() {
   load helpers/git-repos
   repos_init
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/profile-cards.sh"
-  unset GH_TOKEN PROFILE_BRANCH PROFILE_APP_SLUG
+  unset GH_TOKEN PROFILE_BRANCH
   export PROFILE_CARDS='[{"card":"stats","options":"a=b","path":"profile/stats.svg"},{"card":"top-langs","options":"","path":"profile/top-langs.svg"}]'
   SRC="$BATS_TEST_TMPDIR/src"
   mkdir -p "$SRC/profile"
@@ -94,11 +94,18 @@ card() {
   [ "$(git -C "$TG" show test:profile/stats.svg)" = '<svg>stats</svg>' ]
 }
 
-@test "commit uses the app bot as committer" {
+@test "commit without committer fails before cloning" {
   unset GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
-  PROFILE_APP_SLUG=my-app run --separate-stderr "$SCRIPT" commit "$SRC"
+  run --separate-stderr "$SCRIPT" commit "$SRC"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *GIT_COMMITTER_NAME* ]]
+  [ -z "$(ls -A "$WORK")" ]
+}
+
+@test "commit authors as the committer" {
+  run --separate-stderr "$SCRIPT" commit "$SRC"
   [ "$status" -eq 0 ]
-  [ "$(git -C "$TG" log -1 --format='%cn <%ce>' main)" = 'my-app[bot] <my-app[bot]@users.noreply.github.com>' ]
+  [ "$(git -C "$TG" log -1 --format='%an <%ae>' main)" = 'sync <sync@example.com>' ]
 }
 
 @test "commit fails on a missing card file and pushes nothing" {
@@ -156,6 +163,13 @@ wf() {
   [ "$(wf '.jobs.commit.if // ""')" = "" ]
 }
 
+@test "workflow commits as the app bot with its user id" {
+  run wf '.jobs.commit.steps[] | select(.id == "committer") | .run'
+  [[ $output == *'users/${APP_SLUG}[bot]'* ]]
+  [[ $output == *'+${APP_SLUG}[bot]@users.noreply.github.com'* ]]
+  [ "$(wf '.jobs.commit.steps[] | select(.id == "commit") | .env.GIT_COMMITTER_EMAIL')" = '${{ steps.committer.outputs.email }}' ]
+}
+
 @test "workflow scopes the app token to the profile repository" {
   run wf '.jobs.commit.steps[] | select(.id == "app-token") | .with | keys | .[]'
   [ "$output" = $'client-id\nprivate-key\nowner\nrepositories\npermission-contents\npermission-metadata' ]
@@ -169,4 +183,16 @@ wf() {
   [ "$output" = false ]
   ! grep -E 'run:.*\$\{\{' "$BATS_TEST_DIRNAME/../.github/workflows/profile-cards.yml"
   [ "$(wf '.permissions.contents')" = read ]
+}
+
+@test "check reports the first of several problems" {
+  many=$(jq -nc '[range(2000) | {card: "foo", path: "../x\(.).svg"}]')
+  PROFILE_CARDS=$many run --separate-stderr "$SCRIPT" check
+  [ "$status" -eq 1 ]
+  [[ $stderr == 'error: unknown card: "foo"' ]]
+}
+
+@test "check refuses a non-object entry" {
+  refused '["stats"]'
+  [[ $stderr == *'unknown card: "stats"'* ]]
 }

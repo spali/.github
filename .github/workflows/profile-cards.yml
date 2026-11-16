@@ -145,10 +145,24 @@ jobs:
           repositories: ${{ steps.target.outputs.name }}
           permission-contents: write
           permission-metadata: read
-      - name: Commit cards
+      - name: Committer
+        id: committer
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          PROFILE_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          id=$(gh api "users/${APP_SLUG}[bot]" --jq .id)
+          [[ $id =~ ^[0-9]+$ ]] || { echo "::error::no user id for ${APP_SLUG}[bot]"; exit 1; }
+          {
+            echo "name=${APP_SLUG}[bot]"
+            echo "email=$id+${APP_SLUG}[bot]@users.noreply.github.com"
+          } >>"$GITHUB_OUTPUT"
+      - name: Commit cards
+        id: commit
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GIT_COMMITTER_NAME: ${{ steps.committer.outputs.name }}
+          GIT_COMMITTER_EMAIL: ${{ steps.committer.outputs.email }}
           PROFILE_CARDS: ${{ inputs.cards }}
           PROFILE_BRANCH: ${{ inputs.branch }}
           TARGET_URL: https://github.com/${{ steps.target.outputs.repo }}.git

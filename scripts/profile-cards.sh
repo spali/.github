@@ -19,8 +19,8 @@
 #
 # env: PROFILE_CARDS; commit: TARGET_URL, WORK, optional PROFILE_BRANCH
 #      (default: the default branch of the target), GH_TOKEN (none: no
-#      extraheader), PROFILE_APP_SLUG (committer <slug>[bot]) unless
-#      GIT_COMMITTER_NAME and GIT_COMMITTER_EMAIL are set.
+#      extraheader), GIT_COMMITTER_NAME and GIT_COMMITTER_EMAIL (also the
+#      author).
 # Exit status: 0 ok, 1 refused or failed, 2 usage error.
 set -euo pipefail
 
@@ -45,13 +45,14 @@ check() {
       or test("^\\.git(/|$)") or (test("\\.svg$") | not);
     if type != "array" then "the card list is not a JSON array"
     elif length == 0 then "the card list is empty"
-    else (map(select(type != "object" or (.card | IN("stats", "top-langs", "pin", "wakatime", "gist") | not)))
-           | if length > 0 then "unknown card: \(.[0].card // .[0] | tojson)" else empty end),
-         (map(select((.path | type) != "string" or (.path | bad_path)))
+    elif any(.[]; type != "object") then "unknown card: \(first(.[] | select(type != "object")) | tojson)"
+    else [(map(select(.card | IN("stats", "top-langs", "pin", "wakatime", "gist") | not))
+           | if length > 0 then "unknown card: \(.[0].card | tojson)" else empty end),
+          (map(select((.path | type) != "string" or (.path | bad_path)))
            | if length > 0 then "invalid path: \(.[0].path | tojson)" else empty end),
-         (map(.path) | group_by(.) | map(select(length > 1)[0])
-           | if length > 0 then "duplicate path: \(.[0])" else empty end)
-    end' <<<"$PROFILE_CARDS" 2>/dev/null | head -n1) || fail "the card list is not valid JSON"
+          (map(.path) | group_by(.) | map(select(length > 1)[0])
+           | if length > 0 then "duplicate path: \(.[0])" else empty end)] | first // empty
+    end' <<<"$PROFILE_CARDS" 2>/dev/null) || fail "the card list is not valid JSON"
   [[ -z $problem ]] || fail "$problem"
   jq -c . <<<"$PROFILE_CARDS"
 }
@@ -81,11 +82,8 @@ commit() {
   for path in "${paths[@]}"; do
     [[ -f $src/$path ]] || fail "card file missing: $path"
   done
-  if [[ -z ${GIT_COMMITTER_NAME:-} || -z ${GIT_COMMITTER_EMAIL:-} ]]; then
-    [[ -n ${PROFILE_APP_SLUG:-} ]] || fail "no committer: set PROFILE_APP_SLUG"
-    export GIT_COMMITTER_NAME="${PROFILE_APP_SLUG}[bot]"
-    export GIT_COMMITTER_EMAIL="${PROFILE_APP_SLUG}[bot]@users.noreply.github.com"
-  fi
+  [[ -n ${GIT_COMMITTER_NAME:-} && -n ${GIT_COMMITTER_EMAIL:-} ]] ||
+    fail "no committer: set GIT_COMMITTER_NAME and GIT_COMMITTER_EMAIL"
   export GIT_AUTHOR_NAME=$GIT_COMMITTER_NAME GIT_AUTHOR_EMAIL=$GIT_COMMITTER_EMAIL
   export GIT_TERMINAL_PROMPT=0
   [[ -z ${GH_TOKEN:-} ]] || git_auth
