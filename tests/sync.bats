@@ -295,20 +295,59 @@ fi'
   grep -qF 'error: 1 refs kept with own commits: refs/heads/x' "$GITHUB_STEP_SUMMARY"
 }
 
+# target_branches NAME...: the branches of spali/tool (two pages)
+target_branches() {
+  jq -n '$ARGS.positional[:1] | map({name: .})' --args "$@"
+  jq -n '$ARGS.positional[1:] | map({name: .})' --args "$@"
+}
+
+# open_on BRANCH: the open upstream pulls with head spali:BRANCH (encoded),
+# JSON on stdin
+open_on() {
+  gh_respond "api --paginate repos/Up/Tool/pulls?state=open&head=spali:$1&per_page=100" -
+}
+
 @test "contrib.txt holds open PR heads of this repo only" {
-  jq -n '[
-    {head: {ref: "fix-a", repo: {full_name: "spali/tool"}}},
-    {head: {ref: "other", repo: {full_name: "someone/tool"}}},
-    {head: {ref: "gone", repo: null}}]' >"$BATS_TEST_TMPDIR/p1.json"
-  jq -n '[{head: {ref: "fix-b", repo: {full_name: "Spali/Tool"}}}]' >"$BATS_TEST_TMPDIR/p2.json"
-  cat "$BATS_TEST_TMPDIR/p1.json" "$BATS_TEST_TMPDIR/p2.json" |
-    gh_respond 'api --paginate repos/Up/Tool/pulls?state=open&per_page=100' -
+  target_branches main fix-a fix-b other |
+    gh_respond 'api --paginate repos/spali/tool/branches?per_page=100' -
+  jq -n '[{head: {ref: "fix-a", repo: {full_name: "spali/tool"}}},
+    {head: {ref: "fix-a", repo: {full_name: "someone/tool"}}},
+    {head: {ref: "fix-a", repo: null}}]' | open_on fix-a
+  jq -n '[{head: {ref: "fix-b", repo: {full_name: "Spali/Tool"}}}]' | open_on fix-b
+  jq -n '[{head: {ref: "other", repo: {full_name: "someone/tool"}}}]' | open_on other
   run "$SYNC" repo spali/tool
   [ "$status" -eq 0 ]
   [ "$(grep '^  contrib=' "$CALLS" | sort -u)" = "$(printf '%s\n' '  contrib=fix-a' '  contrib=fix-b')" ]
+  [ "$(grep -c 'pulls?state=open' "$GH_LOG")" -eq 4 ]
+}
+
+@test "upstream pulls are never listed without a head filter" {
+  target_branches main fix-a | gh_respond 'api --paginate repos/spali/tool/branches?per_page=100' -
+  run "$SYNC" repo spali/tool
+  [ "$status" -eq 0 ]
+  grep -q 'pulls?' "$GH_LOG"
+  run ! grep -v 'head=spali:' <(grep 'pulls?' "$GH_LOG")
+}
+
+@test "branch names are URL-encoded in the head filter" {
+  target_branches main 'fix/a#1' | gh_respond 'api --paginate repos/spali/tool/branches?per_page=100' -
+  jq -n '[{head: {ref: "fix/a#1", repo: {full_name: "spali/tool"}}}]' | open_on 'fix%2Fa%231'
+  run "$SYNC" repo spali/tool
+  [ "$status" -eq 0 ]
+  grep -qF 'api --paginate repos/Up/Tool/pulls?state=open&head=spali:fix%2Fa%231&per_page=100' "$GH_LOG"
+  [ "$(grep '^  contrib=' "$CALLS" | sort -u)" = '  contrib=fix/a#1' ]
+}
+
+@test "target branches lookup failure skips git" {
+  gh_fail_first 'api --paginate repos/spali/tool/branches*' 'gh: Server Error (HTTP 502)'
+  run "$SYNC" repo spali/tool
+  [ "$status" -eq 1 ]
+  [ "$(steps)" = "$(printf '%s\n' 'sync-create.sh ' 'sync-settings.sh ')" ]
+  grep -q 'HTTP 502' "$GITHUB_STEP_SUMMARY"
 }
 
 @test "contribution lookup failure skips git" {
+  target_branches main | gh_respond 'api --paginate repos/spali/tool/branches?per_page=100' -
   gh_fail_first 'api --paginate repos/Up/Tool/pulls*' 'gh: Server Error (HTTP 502)'
   run "$SYNC" repo spali/tool
   [ "$status" -eq 1 ]
