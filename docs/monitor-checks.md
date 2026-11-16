@@ -278,8 +278,9 @@ the sync never writes it.
 🔴 A branch of a managed fork has own commits but is not declared in
 `branches:` and is not the head of an open pull request from the fork to
 upstream. Own commits of the default branch are counted against the upstream
-default branch (never against an upstream branch of the same name), those of
-any other branch against the upstream branch of the same name, else the
+default branch (never against an upstream branch of the same name; with
+`refs: all`, which mirrors branches by name, like any other branch), those
+of any other branch against the upstream branch of the same name, else the
 upstream default branch. The default branch counts too unless it is
 declared. The sync does not touch such a branch and its run fails. (🔵 for
 an unmanaged fork, where no sync manages anything.)
