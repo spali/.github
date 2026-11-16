@@ -18,6 +18,15 @@
 #                     declared branch (also when the rebase changed nothing);
 #                     it is deleted with its branch. A manual branch that is
 #                     not rebased keeps its record.
+#                     Nothing is lost or followed without a decision: a
+#                     default or followed branch that is no ancestor of
+#                     upstream is skipped as "upstream rewritten (...)" when
+#                     its record is no ancestor of upstream (else as
+#                     undeclared); a declared branch that contains its record
+#                     is not rebased when the record is no ancestor of onto
+#                     (same reason, the plan goes on); a target tag that
+#                     differs from upstream is skipped as "upstream moved tag
+#                     (...)". These skips write no record.
 #   sync-git.sh push  pushes $WORK/plan.tsv to TARGET_URL in one atomic push
 #                     with a lease on the old sha of every ref, then checks the
 #                     target with ls-remote. On a mismatch it restores the old
@@ -144,12 +153,46 @@ record_line() {
   [[ $old == "$2" ]] || add "$RECORD_PREFIX$1" "$old" "$2" record
 }
 
+# rewritten BRANCH UP succeeds when BRANCH has a record that is not an
+# ancestor of the upstream sha UP: upstream dropped commits that were synced.
+rewritten() {
+  [[ -n ${RECR[$1]:-} ]] && ! is_ancestor "${RECR[$1]}" "$2"
+}
+
+# rewrite_reason BRANCH UP TG prints the skip reason of a rewritten BRANCH
+# (record of BRANCH, upstream sha UP, target sha TG).
+rewrite_reason() {
+  local rec=${RECR[$1]} gone own
+  gone=$(g rev-list --count "$2..$rec") || die "cannot compare $rec and $2"
+  own=$(g rev-list --count "$rec..$3") || die "cannot compare $rec and $3"
+  if ((own == 0)); then
+    own="no own commits"
+  else
+    own="$own own commits"
+  fi
+  printf 'upstream rewritten (synced %s, upstream now %s, %s synced commits gone upstream; target has %s)\n' \
+    "${rec:0:7}" "${2:0:7}" "$gone" "$own"
+}
+
+# skip_rewrite BRANCH UP TG skips BRANCH with its rewrite_reason.
+skip_rewrite() {
+  local why
+  why=$(rewrite_reason "$@")
+  skip "refs/heads/$1" "$why"
+}
+
 # rebase_branch BRANCH ONTO rebases the target branch onto the upstream
-# branch and plans it with a backup of the old tip and its record.
+# branch and plans it with a backup of the old tip and its record. A branch
+# whose record is in it but no longer in onto is skipped (upstream rewritten).
 rebase_branch() {
   local b=$1 onto=$2 old new bk
   [[ -n ${UPR[heads/$onto]:-} ]] || die "branch $b: onto $onto missing upstream"
   old=${TGR[heads/$b]:-$ZERO}
+  if [[ $old != "$ZERO" && -n ${RECR[$b]:-} ]] && is_ancestor "${RECR[$b]}" "$old" &&
+    rewritten "$b" "${UPR[heads/$onto]}"; then
+    skip_rewrite "$b" "${UPR[heads/$onto]}" "$old"
+    return 0
+  fi
   if [[ $old == "$ZERO" ]]; then
     new=${UPR[heads/$onto]}
     g update-ref "refs/heads/$b" "$new"
@@ -372,6 +415,8 @@ plan() {
     if [[ $tg == "$ZERO" ]] || { [[ $tg != "$up" ]] && is_ancestor "$tg" "$up"; }; then
       add "refs/heads/$tdef" "$tg" "$up" ff
       record_line "$tdef" "$up"
+    elif [[ $tg != "$up" ]] && rewritten "$tdef" "$up"; then
+      skip_rewrite "$tdef" "$up" "$tg"
     elif [[ $tg != "$up" ]]; then
       skip "refs/heads/$tdef" undeclared
     else
@@ -390,7 +435,11 @@ plan() {
     elif [[ $tg == "$up" ]]; then
       record_line "$name" "$up"
     elif [[ $tg != "$ZERO" ]] && ! is_ancestor "$tg" "$up"; then
-      skip "refs/heads/$name" undeclared
+      if rewritten "$name" "$up"; then
+        skip_rewrite "$name" "$up" "$tg"
+      else
+        skip "refs/heads/$name" undeclared
+      fi
     else
       add "refs/heads/$name" "$tg" "$up" mirror
       record_line "$name" "$up"
@@ -410,16 +459,16 @@ plan() {
     fi
   done
   # tags (only loaded when TAGS is true): new ones by name (an annotated tag
-  # keeps its tag object), moved and gone upstream ones only when nothing is
-  # lost (the old commit is in an upstream ref)
+  # keeps its tag object); a moved one is never followed; a gone upstream one
+  # is deleted only when nothing is lost (its commit is in an upstream ref)
   mapfile -t keys < <(sorted_keys UPR | grep '^tags/' || true)
   for key in "${keys[@]}"; do
     [[ -n $key && ${TGR[$key]:-$ZERO} != "${UPR[$key]}" ]] || continue
     tg=${TGR[$key]:-$ZERO}
-    if [[ $tg == "$ZERO" ]] || contained_tag "$tg"; then
+    if [[ $tg == "$ZERO" ]]; then
       add "refs/$key" "$tg" "${UPR[$key]}" mirror
     else
-      skip "refs/$key" "unique commits"
+      skip "refs/$key" "upstream moved tag (target ${tg:0:7}, upstream ${UPR[$key]:0:7})"
     fi
   done
   mapfile -t keys < <(sorted_keys TGR | grep '^tags/' || true)
