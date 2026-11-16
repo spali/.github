@@ -240,9 +240,11 @@ plan() {
       '+refs/heads/*:refs/up/heads/*' '+refs/tags/*:refs/up/tags/*' ||
       die "cannot fetch upstream"
   fi
+  # refs default never writes tags: read only the target branches (and backups)
+  local -a tgspecs=('+refs/heads/*:refs/tg/heads/*')
+  [[ $mode == default ]] || tgspecs+=('+refs/tags/*:refs/tg/tags/*')
   g fetch -q --no-tags --no-write-fetch-head -- "$TARGET_URL" \
-    '+refs/heads/*:refs/tg/heads/*' '+refs/tags/*:refs/tg/tags/*' \
-    "+${BACKUP_PREFIX}*:refs/tg/backup/*" ||
+    "${tgspecs[@]}" "+${BACKUP_PREFIX}*:refs/tg/backup/*" ||
     die "cannot fetch target"
 
   load up UPR
