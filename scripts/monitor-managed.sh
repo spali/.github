@@ -204,33 +204,45 @@ check_undeclared() {
   done <<<"$found"
 }
 
-# mirror_undeclared REPO ENTRY DEFAULT UPSTREAM_DEFAULT TB UB: the rule of
-# check_undeclared for a mirror, compared in the mirror itself: own commits of
-# the default branch count against UPSTREAM_DEFAULT, those of any other
-# branch against the upstream branch of the same name, else
-# UPSTREAM_DEFAULT. When the upstream commit is not in the mirror, a branch
-# the sync moves (the default or a followed one) is left to managed-behind;
-# any other branch is reported as differing.
+# mirror_undeclared REPO ENTRY DEFAULT UPSTREAM_DEFAULT TB UB SRC: the rule
+# of check_undeclared for a mirror, compared in the mirror itself. The default
+# branch and the followed branches (the sync moves them) count own commits
+# against UPSTREAM_DEFAULT (default) or the upstream branch of the same name;
+# when the upstream commit is not in the mirror, they are left to
+# managed-behind. Any other branch is not synced, so its copy of an upstream
+# branch may be stale and its commits cannot be told apart from own ones: it
+# is no finding when its tip is the sha of an upstream ref (SRC: the upstream
+# "<ref> <sha>" lines), else it is compared with the mirror's own default
+# branch and is info when it is ahead.
 mirror_undeclared() {
-  local repo=$1 entry=$2 default=$3 updef=$4 tb=$5 ub=$6 list branch sha usha moved body n rc
+  local repo=$1 entry=$2 default=$3 updef=$4 tb=$5 ub=$6 src=$7
+  local list branch sha usha moved uri body n rc
   json_out branch-undeclared "$repo" list -r --argjson e "$entry" --arg def "$default" --arg updef "$updef" \
-    --slurpfile u "$ub" '
+    --slurpfile u "$ub" --rawfile s "$src" '
     ($u[0] | map({key: .name, value: .sha}) | from_entries) as $usha |
+    [$s | split("\n")[] | split(" ") | select(length == 2) | .[1]] as $ushas |
     [$e.branches[].name] as $decl |
     .[] | select(.name | IN($decl[]) | not) | .name as $n |
+    ($n == $def or any($e.follow // [] | .[]; . as $re | $n | test("^(?:" + $re + ")$"))) as $moved |
     (if $n != $def and $usha[$n] then $n else $updef end) as $base |
-    [$n, .sha, ($usha[$base] // "-"),
-     ($n == $def or any($e.follow // [] | .[]; . as $re | $n | test("^(?:" + $re + ")$")))] | @tsv' "$tb" || return 0
-  while IFS=$'\t' read -r branch sha usha moved; do
-    [[ -n $branch && $usha != - && $sha != "$usha" ]] || continue
-    rc=0
-    mirror_compare "$repo" "$usha" "$sha" body branch-undeclared || rc=$?
-    ((rc != 1)) || continue
-    if ((rc == 3)); then
-      [[ $moved == true ]] ||
-        finding red branch-undeclared "$repo" "$branch: differs from upstream, not declared in repos.yml"
+    select($moved or (.sha | IN($ushas[]) | not)) |
+    [$n, .sha, ($usha[$base] // "-"), $moved, ($n | @uri)] | @tsv' "$tb" || return 0
+  while IFS=$'\t' read -r branch sha usha moved uri; do
+    [[ -n $branch ]] || continue
+    if [[ $moved != true ]]; then
+      rc=0
+      mirror_compare "$repo" "$(jq -rn --arg d "$default" '$d | @uri')" "$uri" body branch-undeclared || rc=$?
+      ((rc == 0)) || continue
+      json_out branch-undeclared "$repo" n -r '.ahead_by // 0' <<<"$body" || continue
+      ((n == 0)) ||
+        finding info branch-undeclared "$repo" "$branch: differs from upstream, not followed (own commits or a stale upstream copy)"
       continue
     fi
+    [[ $usha != - && $sha != "$usha" ]] || continue
+    rc=0
+    mirror_compare "$repo" "$usha" "$sha" body branch-undeclared || rc=$?
+    # 3: the upstream commit is not in the mirror yet, left to managed-behind
+    ((rc == 0)) || continue
     json_out branch-undeclared "$repo" n -r '.ahead_by // 0' <<<"$body" || continue
     ((n == 0)) || finding red branch-undeclared "$repo" "$branch: $n own commits, not declared in repos.yml"
   done <<<"$list"
@@ -295,7 +307,7 @@ check_mirror() {
   heads_json "$tmp/tgt" >"$tmp/tb"
   heads_json "$tmp/src" >"$tmp/ub"
   check_branches "$repo" "$entry" "$default" "" "$updef" '[]' "$tmp/tb" "$tmp/ub" "$pushed"
-  mirror_undeclared "$repo" "$entry" "$default" "$updef" "$tmp/tb" "$tmp/ub"
+  mirror_undeclared "$repo" "$entry" "$default" "$updef" "$tmp/tb" "$tmp/ub" "$tmp/src"
 }
 
 # check_repo REPO ENTRY PRS_FILE (a temporary file for the open pulls)

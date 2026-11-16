@@ -216,7 +216,7 @@ api_refs() {
 # check-failed findings of CHECK; the function then returns 1 after printing
 # the branches found so far.
 undeclared_branches() {
-  local check=$1 repo=$2 up=$3 updef=$4 declared=$5 prs=$6 tdef=$7 tb ub list branch base body n
+  local check=$1 repo=$2 up=$3 updef=$4 declared=$5 prs=$6 tdef=$7 tb ub list branch base uri body n
   tb=$(mktemp)
   ub=$(mktemp)
   # shellcheck disable=SC2064 # expand now

@@ -427,10 +427,10 @@ no_commit() { gh_fail "$MCMP$1" 'gh: Not Found (HTTP 404)'; }
   mirror_repo false 2026-11-01T00:00:00Z
   refs refs/heads/main:1 refs/tags/v1:2 refs/heads/dev:3 | git_respond "$SRC" -
   refs refs/heads/main:1 refs/tags/v1:2 refs/heads/extra:7 | git_respond "$TGT" -
-  respond_jq "$MCMP$(sha 1)...$(sha 7)" '{ahead_by: 0}'
+  respond_jq "${MCMP}main...extra" '{ahead_by: 0}'
   run_script
   [ ! -s "$FINDINGS" ]
-  run ! grep -vE '^api repos/spali/m(/actions/permissions|/compare/[0-9]{40}\.\.\.[0-9]{40})?$' "$GH_LOG"
+  run ! grep -vE '^api repos/spali/m(/actions/permissions|/compare/([0-9]{40}\.\.\.[0-9]{40}|main\.\.\.extra))?$' "$GH_LOG"
 }
 
 @test "mirror tags behind is red" {
@@ -518,20 +518,39 @@ behind_mirror() {
   [ "$(message managed-behind)" = "rel/2: missing in the target" ]
 }
 
-@test "mirror undeclared branch is red" {
+@test "mirror unfollowed branch is compared with the mirror default branch" {
   mirror
   mirror_repo false 2026-11-01T00:00:00Z
-  refs refs/heads/main:1 refs/heads/odd:5 | git_respond "$SRC" -
-  refs refs/heads/main:1 refs/heads/extra:7 refs/heads/odd:8 refs/heads/same:1 | git_respond "$TGT" -
-  respond_jq "$MCMP$(sha 1)...$(sha 7)" '{ahead_by: 2}'
-  no_commit "$(sha 5)...$(sha 8)"
+  refs refs/heads/main:1 refs/heads/odd:5 refs/tags/v1:6 | git_respond "$SRC" -
+  refs refs/heads/main:1 refs/heads/extra:7 refs/heads/odd:8 refs/heads/same:1 \
+    refs/heads/copy:5 refs/heads/tagged:6 refs/heads/a/b:4 refs/tags/v1:6 | git_respond "$TGT" -
+  respond_jq "${MCMP}main...extra" '{ahead_by: 2}'
+  respond_jq "${MCMP}main...odd" '{ahead_by: 0}'
+  respond_jq "${MCMP}main...a%2Fb" '{ahead_by: 1}'
+  no_commit '*'
   run_script
   [ "$(count branch-undeclared)" -eq 2 ]
+  [ "$(level branch-undeclared 0)" = info ]
+  [ "$(level branch-undeclared 1)" = info ]
+  [ "$(message branch-undeclared 0)" = "extra: differs from upstream, not followed (own commits or a stale upstream copy)" ]
+  [ "$(message branch-undeclared 1)" = "a/b: differs from upstream, not followed (own commits or a stale upstream copy)" ]
+  [ "$(jq -s 'map(select(.level == "red")) | length' "$FINDINGS")" -eq 0 ]
+  # equal to an upstream branch or tag: no comparison at all
+  run ! grep -E 'compare/main\.\.\.(same|copy|tagged)$' "$GH_LOG"
+  run ! grep -E 'compare/[0-9]{40}\.\.\.' "$GH_LOG"
+}
+
+@test "mirror default branch with own commits stays red" {
+  mirror
+  mirror_repo false 2026-11-01T00:00:00Z
+  refs refs/heads/main:1 | git_respond "$SRC" -
+  refs refs/heads/main:9 | git_respond "$TGT" -
+  respond_jq "$MCMP$(sha 1)...$(sha 9)" '{ahead_by: 2}'
+  respond_jq "$MCMP$(sha 9)...$(sha 1)" '{ahead_by: 0}'
+  run_script
+  [ "$(count branch-undeclared)" -eq 1 ]
   [ "$(level branch-undeclared)" = red ]
-  [ "$(message branch-undeclared 0)" = "extra: 2 own commits, not declared in repos.yml" ]
-  [ "$(message branch-undeclared 1)" = "odd: differs from upstream, not declared in repos.yml" ]
-  [ "$(count managed-behind)" -eq 0 ]
-  run ! grep -F "compare/$(sha 1)...$(sha 1)" "$GH_LOG"
+  [ "$(message branch-undeclared)" = "main: 2 own commits, not declared in repos.yml" ]
 }
 
 @test "mirror without upstream default branch is check-failed" {
