@@ -563,9 +563,9 @@ the first run; the lowest-numbered open issue with it is updated, a new one is
 created if none is open). The title shows the counts. The summary line at the
 top counts red, info, clean, not checked and the TODO entries, each count
 linked to its section, and ends with the time of the update and a link to the
-run. 📝 TODO lists what to do: one collapsible entry per check, 🔴 Fix now for
-red findings (open), 🤔 Decide and 🧹 Clean up for info findings (collapsed),
-each with one sentence of explanation, an ℹ️ link and the rows of that check.
+run. 📝 TODO lists what to do: one collapsible entry per check and
+category, 🔴 Fix now for red findings (open), 🤔 Decide and 🧹 Clean up for
+info findings (collapsed), each with one sentence of explanation, an ℹ️ link and the rows of that check.
 📋 Overview is a matrix of the repositories with a red or info finding (red
 first) and the areas Release, Settings, Health, Fork / Mirror, Sync and Lists:
 one icon per finding that jumps to its row below, ⚪ if a check of that area

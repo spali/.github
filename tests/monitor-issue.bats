@@ -138,6 +138,22 @@ long_report() {
   [ "$(grep '^line ' "$BATS_TEST_TMPDIR/body.md" | tail -n1)" = "$(sed -n "$((kept + 2))p" "$REPORT")" ]
 }
 
+@test "a cut inside an open details block closes it before the note" {
+  issues '[]'
+  { echo '## Maintenance monitor'; echo
+    echo '<details open><summary>s</summary>'; echo
+    echo '| Repository | Details | Fix at |'; echo '| --- | --- | --- |'
+    for i in $(seq 1 1000); do printf '| r%06d | %s | |\n' "$i" "$(head -c 62 /dev/zero | tr '\0' x)"; done
+    echo; echo '</details>'; } >"$REPORT"
+  run "$SCRIPT" "$REPORT" "$TITLE"
+  [ "$status" -eq 0 ]
+  sent 3 | jq -j .body >"$BATS_TEST_TMPDIR/body.md"
+  [ "$(stat -c %s "$BATS_TEST_TMPDIR/body.md")" -le 65536 ]
+  [ "$(grep -c '^<details' "$BATS_TEST_TMPDIR/body.md")" -eq "$(grep -c '^</details>$' "$BATS_TEST_TMPDIR/body.md")" ]
+  # the table ends, the block closes, then the note
+  [ "$(tail -n4 "$BATS_TEST_TMPDIR/body.md")" = $'\n</details>\n\n… truncated, see the run summary.' ]
+}
+
 @test "a complete last line is kept when the cut falls right after a newline" {
   issues '[]'
   tail2=$(printf '\n%s\n' '… truncated, see the run summary.' | wc -c)
