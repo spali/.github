@@ -111,6 +111,31 @@ paged() {
   printf '%s\n' "$trimmed" >"$5"
 }
 
+# head_pulls CHECK REPO UPSTREAM_REPO STATE BRANCHES_JSON FILE writes the
+# pulls of UPSTREAM_REPO in STATE (open or closed) whose head is one of the
+# branches BRANCHES_JSON (JSON array of names) of the owner of REPO to FILE:
+# [{head_repo, head_ref, number, created_at, html_url}]. One query per branch
+# with the head filter (branch URL-encoded), never all pulls of the upstream
+# (thousands for large projects). Callers still filter on head_repo == REPO.
+# API errors are check-failed findings of CHECK; it then returns 1.
+head_pulls() {
+  local check=$1 repo=$2 up=$3 state=$4 branches=$5 out=$6 heads head part all
+  # shellcheck disable=SC2016 # jq program
+  json_out "$check" "$repo" heads -r --arg o "${repo%%/*}" '.[] | "\($o):\(@uri)"' <<<"$branches" || return 1
+  part=$(mktemp)
+  all=$(mktemp)
+  # shellcheck disable=SC2064 # expand now
+  trap "rm -f '$part' '$all'; trap - RETURN" RETURN
+  while IFS= read -r head; do
+    [[ -n $head ]] || continue
+    paged "$check" "$repo" "repos/$up/pulls?state=$state&head=$head&per_page=100" \
+      '{head_repo: (.head.repo.full_name // ""), head_ref: .head.ref, number, created_at, html_url}' "$part" || return 1
+    cat "$part" >>"$all"
+  done <<<"$heads"
+  json_out "$check" "$repo" heads -s 'add // []' "$all" || return 1
+  printf '%s\n' "$heads" >"$out"
+}
+
 # json_out CHECK REPO OUTVAR JQ_ARGS... runs jq, stores its output in OUTVAR.
 # On failure records check-failed and returns 1.
 json_out() {

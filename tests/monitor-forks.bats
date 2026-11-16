@@ -21,13 +21,17 @@ setup() {
 BEHIND='*repos/spali/f/compare/main...up:dev'
 WFS='*repos/spali/f/actions/workflows?per_page=100'
 OWN='*repos/up/f/compare/dev...spali:f:main'
-PRS='*repos/up/f/pulls?state=open&per_page=100 --paginate'
+# pulls are looked up per fork branch: PRS/CLOSED answer every branch,
+# open_on/closed_on BRANCH JSON one branch (the URL-encoded name)
+PRS='*repos/up/f/pulls?state=open&head=spali:*&per_page=100 --paginate'
 FB='*repos/spali/f/branches?per_page=100 --paginate'
 PB='*repos/up/f/branches?per_page=100 --paginate'
 FEATURE='*repos/up/f/compare/dev...spali:f:feature'
-CLOSED='*repos/up/f/pulls?state=closed&per_page=100 --paginate'
+CLOSED='*repos/up/f/pulls?state=closed&head=spali:*&per_page=100 --paginate'
 
 respond_jq() { jq -nc "$2" | gh_respond "$1" -; }
+open_on() { respond_jq "*repos/up/f/pulls?state=open&head=spali:$1&per_page=100 --paginate" "$2"; }
+closed_on() { respond_jq "*repos/up/f/pulls?state=closed&head=spali:$1&per_page=100 --paginate" "$2"; }
 
 # Defaults: in sync, one active workflow, no own commits, a branch feature
 # that upstream does not have (no candidate).
@@ -152,7 +156,8 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
 
 @test "fork with an open upstream PR is not a candidate" {
   respond_jq "$OWN" '{ahead_by: 0}'
-  respond_jq "$PRS" '[{head: {repo: {full_name: "other/x"}}}, {head: {repo: null}}, {head: {repo: {full_name: "spali/f"}}}]'
+  respond_jq "$FB" '[{name: "main"}]'
+  open_on main '[{head: {repo: {full_name: "other/x"}}}, {head: {repo: null}}, {head: {repo: {full_name: "spali/f"}}}]'
   run_script
   [ "$(count fork-delete-candidate)" -eq 0 ]
 }
@@ -160,7 +165,7 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
 @test "open PRs of other forks and deleted head repos do not block" {
   respond_jq "$OWN" '{ahead_by: 0}'
   respond_jq "$FB" '[{name: "main"}]'
-  respond_jq "$PRS" '[{head: {repo: {full_name: "other/x"}}}, {head: {repo: null}}]'
+  open_on main '[{head: {repo: {full_name: "other/x"}}}, {head: {repo: null}}]'
   run_script
   [ "$(count fork-delete-candidate)" -eq 1 ]
 }
@@ -188,7 +193,8 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
   head -c 250000 /dev/zero | tr '\0' x >"$BATS_TEST_TMPDIR/big"
   jq -nc --rawfile big "$BATS_TEST_TMPDIR/big" '{ahead_by: 2, commits: [
     {commit: {message: $big, committer: {date: "2026-11-01T00:00:00Z"}}}]}' | gh_respond "$BEHIND" -
-  jq -nc --rawfile big "$BATS_TEST_TMPDIR/big" '[{head: {repo: {full_name: "o/x"}}, body: $big}]' | gh_respond "$PRS" -
+  jq -nc --rawfile big "$BATS_TEST_TMPDIR/big" '[{head: {repo: {full_name: "o/x"}}, body: $big}]' |
+    gh_respond '*repos/up/f/pulls?state=open&head=spali:main&per_page=100 --paginate' -
   run_script
   [ "$(count fork-sync-stale)" -eq 1 ]
   [ "$(count check-failed)" -eq 0 ]
@@ -231,19 +237,54 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
 @test "a branch that is an open PR head is not undeclared" {
   respond_jq "$FB" '[{name: "main"}, {name: "feat"}]'
   respond_jq '*repos/up/f/compare/dev...spali:f:feat' '{ahead_by: 3}'
-  respond_jq "$PRS" '[{number: 1, created_at: "2026-11-10T00:00:00Z", html_url: "u", head: {ref: "feat", repo: {full_name: "spali/f"}}}]'
+  open_on feat '[{number: 1, created_at: "2026-11-10T00:00:00Z", html_url: "u", head: {ref: "feat", repo: {full_name: "spali/f"}}}]'
   run_script
   [ "$(count branch-undeclared)" -eq 0 ]
 }
 
-@test "the open pulls are fetched once per fork" {
+@test "the open pulls are looked up once per fork branch" {
   respond_jq "$OWN" '{ahead_by: 0}'
   run_script
-  [ "$(grep -c 'pulls?state=open' "$GH_LOG")" -eq 1 ]
+  [ "$(grep -c 'pulls?state=open' "$GH_LOG")" -eq 2 ]
+  grep -qF 'repos/up/f/pulls?state=open&head=spali:main&per_page=100 --paginate' "$GH_LOG"
+  grep -qF 'repos/up/f/pulls?state=open&head=spali:feature&per_page=100 --paginate' "$GH_LOG"
+}
+
+@test "upstream pulls are never listed without a head filter" {
+  respond_jq "$OWN" '{ahead_by: 0}'
+  run_script
+  grep -q 'state=closed' "$GH_LOG"
+  run ! grep -v 'head=spali:' <(grep 'pulls?' "$GH_LOG")
+}
+
+@test "branch names are URL-encoded in the head filter" {
+  respond_jq "$OWN" '{ahead_by: 0}'
+  respond_jq "$FB" '[{name: "main"}, {name: "fix/a#1"}]'
+  open_on 'fix%2Fa%231' '[{number: 4, created_at: "2020-01-01T00:00:00Z", html_url: "u", head: {ref: "fix/a#1", repo: {full_name: "spali/f"}}}]'
+  run_script
+  grep -qF 'repos/up/f/pulls?state=open&head=spali:fix%2Fa%231&per_page=100 --paginate' "$GH_LOG"
+  [ "$(message contribution-stale)" = "PR #4 open for 2509 days: u" ]
+}
+
+@test "a branch missing upstream is looked up in the closed pulls URL-encoded" {
+  respond_jq "$OWN" '{ahead_by: 0}'
+  respond_jq "$FB" '[{name: "main"}, {name: "fix/a#1"}]'
+  closed_on 'fix%2Fa%231' '[{head: {ref: "fix/a#1", repo: {full_name: "spali/f"}}}]'
+  run_script
+  [ "$(grep -c 'state=closed' "$GH_LOG")" -eq 1 ]
+  grep -qF 'repos/up/f/pulls?state=closed&head=spali:fix%2Fa%231&per_page=100 --paginate' "$GH_LOG"
+  [ "$(count fork-delete-candidate)" -eq 1 ]
+}
+
+@test "open pulls API error is check-failed" {
+  gh_fail "$PRS" 'gh: Server Error (HTTP 502)'
+  run_script
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(message check-failed)" = "fork-delete-candidate: gh: Server Error (HTTP 502)" ]
 }
 
 pr_aged() {
-  respond_jq "$PRS" "[{number: 12, created_at: \"$1\", html_url: \"https://github.com/up/f/pull/12\", head: {ref: \"feat\", repo: {full_name: \"spali/f\"}}}]"
+  open_on feature "[{number: 12, created_at: \"$1\", html_url: \"https://github.com/up/f/pull/12\", head: {ref: \"feature\", repo: {full_name: \"spali/f\"}}}]"
 }
 
 @test "PR open 91 days is contribution-stale" {
@@ -261,7 +302,7 @@ pr_aged() {
 }
 
 @test "PR of another fork is not contribution-stale" {
-  respond_jq "$PRS" '[{number: 3, created_at: "2020-01-01T00:00:00Z", html_url: "u", head: {ref: "x", repo: {full_name: "o/f"}}}]'
+  open_on main '[{number: 3, created_at: "2020-01-01T00:00:00Z", html_url: "u", head: {ref: "main", repo: {full_name: "o/f"}}}]'
   run_script
   [ "$(count contribution-stale)" -eq 0 ]
 }
@@ -269,7 +310,7 @@ pr_aged() {
 @test "merged PR branch does not block delete candidate" {
   respond_jq "$OWN" '{ahead_by: 0}'
   respond_jq "$FB" '[{name: "main"}, {name: "feature"}]'
-  respond_jq "$CLOSED" '[{head: {ref: "feature", repo: {full_name: "spali/f"}}}, {head: {ref: "other", repo: null}}]'
+  closed_on feature '[{head: {ref: "feature", repo: {full_name: "spali/f"}}}, {head: {ref: "feature", repo: null}}]'
   run_script
   [ "$(count fork-delete-candidate)" -eq 1 ]
 }
@@ -277,7 +318,7 @@ pr_aged() {
 @test "closed PR of another branch does not unblock delete candidate" {
   respond_jq "$OWN" '{ahead_by: 0}'
   respond_jq "$FB" '[{name: "main"}, {name: "feature"}]'
-  respond_jq "$CLOSED" '[{head: {ref: "feature", repo: {full_name: "o/f"}}}, {head: {ref: "x", repo: {full_name: "spali/f"}}}]'
+  closed_on feature '[{head: {ref: "feature", repo: {full_name: "o/f"}}}, {head: {ref: "x", repo: {full_name: "spali/f"}}}]'
   run_script
   [ "$(count fork-delete-candidate)" -eq 0 ]
 }
@@ -285,8 +326,8 @@ pr_aged() {
 @test "open PR still blocks delete candidate" {
   respond_jq "$OWN" '{ahead_by: 0}'
   respond_jq "$FB" '[{name: "main"}, {name: "feature"}]'
-  respond_jq "$PRS" '[{number: 1, created_at: "2026-11-10T00:00:00Z", html_url: "u", head: {ref: "feature", repo: {full_name: "spali/f"}}}]'
-  respond_jq "$CLOSED" '[{head: {ref: "feature", repo: {full_name: "spali/f"}}}]'
+  open_on feature '[{number: 1, created_at: "2026-11-10T00:00:00Z", html_url: "u", head: {ref: "feature", repo: {full_name: "spali/f"}}}]'
+  closed_on feature '[{head: {ref: "feature", repo: {full_name: "spali/f"}}}]'
   run_script
   [ "$(count fork-delete-candidate)" -eq 0 ]
 }

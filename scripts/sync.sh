@@ -18,7 +18,8 @@
 #                        its kind (sync-create.sh), enforces its settings
 #                        (sync-settings.sh), lists the contribution branches
 #                        of a fork (heads of open upstream pull requests from
-#                        REPO) and syncs its refs (sync-git.sh plan, push).
+#                        REPO, looked up per branch of REPO) and syncs its
+#                        refs (sync-git.sh plan, push).
 #                        The git steps still run after a settings failure;
 #                        they are skipped when the kind check, the
 #                        contribution lookup or the committer lookup failed.
@@ -205,13 +206,30 @@ committer() {
 }
 
 # contributions writes $WORK/contrib.txt: the head branches of the open
-# upstream pull requests whose head repository is REPO.
+# upstream pull requests whose head repository is REPO. Looked up per branch
+# of REPO with the head filter, never all upstream pulls (thousands for large
+# projects).
 contributions() {
-  gh api --paginate "repos/$UPSTREAM_REPO/pulls?state=open&per_page=100" \
-    >"$TMP/pulls.json" 2>"$TMP/err" || {
+  local head
+  gh api --paginate "repos/$REPO/branches?per_page=100" >"$TMP/branches.json" 2>"$TMP/err" || {
     cat "$TMP/err" >&2
     return 1
   }
+  # shellcheck disable=SC2016 # jq program
+  jq -rs --arg o "${REPO%%/*}" 'add // [] | .[].name | "\($o):\(@uri)"' \
+    "$TMP/branches.json" >"$TMP/heads.txt" 2>"$TMP/err" || {
+    echo "error: cannot read the branches of $REPO" >"$TMP/err"
+    cat "$TMP/err" >&2
+    return 1
+  }
+  : >"$TMP/pulls.json"
+  while IFS= read -r head; do
+    gh api --paginate "repos/$UPSTREAM_REPO/pulls?state=open&head=$head&per_page=100" \
+      >>"$TMP/pulls.json" 2>"$TMP/err" || {
+      cat "$TMP/err" >&2
+      return 1
+    }
+  done <"$TMP/heads.txt"
   jq -rs --arg repo "$REPO" '
     add // [] | .[] | select((.head.repo.full_name // "" | ascii_downcase) == ($repo | ascii_downcase))
     | .head.ref' "$TMP/pulls.json" >"$WORK/contrib.txt" 2>"$TMP/err" || {

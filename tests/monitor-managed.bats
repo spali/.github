@@ -31,12 +31,15 @@ ACT='*repos/spali/f/actions/permissions'
 UP='*api repos/up/f'
 TB='*repos/spali/f/branches?per_page=100 --paginate'
 UB='*repos/up/f/branches?per_page=100 --paginate'
-PRS='*repos/up/f/pulls?state=open&per_page=100 --paginate'
+# open pulls are looked up per target branch: PRS answers every branch,
+# open_on BRANCH JSON one branch (the URL-encoded name)
+PRS='*repos/up/f/pulls?state=open&head=spali:*&per_page=100 --paginate'
 MAIN="*repos/up/f/compare/$(sha 1)...dev"
 FEAT="*repos/up/f/compare/$(sha 2)...main"
 WIP="*repos/up/f/compare/$(sha 3)...dev"
 
 respond_jq() { jq -nc "$2" | gh_respond "$1" -; }
+open_on() { respond_jq "*repos/up/f/pulls?state=open&head=spali:$1&per_page=100 --paginate" "$2"; }
 
 # behind N DATE: a compare answer with N commits missing, the oldest from DATE.
 behind() { printf '{ahead_by: %s, commits: [{commit: {committer: {date: "%s"}}}]}' "$1" "$2"; }
@@ -240,7 +243,7 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
 @test "contribution branch is not undeclared" {
   jq -nc --arg a "$(sha 1)" --arg d "$(sha 4)" \
     '[{name: "main", commit: {sha: $a}}, {name: "fix-x", commit: {sha: $d}}]' | gh_respond "$TB" -
-  respond_jq "$PRS" '[{head: {repo: {full_name: "other/f"}, ref: "main"}},
+  open_on fix-x '[{head: {repo: {full_name: "other/f"}, ref: "fix-x"}},
     {head: {repo: null, ref: "fix-x"}}, {head: {repo: {full_name: "Spali/F"}, ref: "fix-x"}}]'
   respond_jq '*repos/up/f/compare/dev...spali:f:fix-x' '{ahead_by: 3}'
   run_script
@@ -250,8 +253,8 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
 
 @test "contribution heads are not managed-behind" {
   # the sync never writes the head of an open upstream PR from the fork
-  respond_jq "$PRS" '[{head: {repo: {full_name: "Spali/F"}, ref: "main"}},
-    {head: {repo: {full_name: "spali/f"}, ref: "feat"}}]'
+  open_on main '[{head: {repo: {full_name: "Spali/F"}, ref: "main"}}]'
+  open_on feat '[{head: {repo: {full_name: "spali/f"}, ref: "feat"}}]'
   respond_jq "$MAIN" "$(behind 3 2026-11-01T00:00:00Z)"
   respond_jq "$FEAT" "$(behind 2 2026-11-01T00:00:00Z)"
   run_script
@@ -260,7 +263,8 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
 }
 
 @test "a PR head of another repository is still managed-behind" {
-  respond_jq "$PRS" '[{head: {repo: {full_name: "other/f"}, ref: "main"}}, {head: {repo: null, ref: "feat"}}]'
+  open_on main '[{head: {repo: {full_name: "other/f"}, ref: "main"}}]'
+  open_on feat '[{head: {repo: null, ref: "feat"}}]'
   respond_jq "$MAIN" "$(behind 3 2026-11-01T00:00:00Z)"
   respond_jq "$FEAT" "$(behind 2 2026-11-01T00:00:00Z)"
   run_script
@@ -273,18 +277,34 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
     git_respond '*ls-remote --heads --tags https://github.com/up/f.git' -
   refs refs/heads/dev:1 refs/heads/main:9 refs/heads/fix:7 |
     git_respond '*ls-remote --heads --tags https://github.com/spali/f.git' -
-  respond_jq "$PRS" '[{head: {repo: {full_name: "spali/f"}, ref: "main"}}]'
+  open_on main '[{head: {repo: {full_name: "spali/f"}, ref: "main"}}]'
   run_script
   [ "$(count managed-behind)" -eq 1 ]
   [ "$(message managed-behind)" = "1 refs differ, last push 2026-11-01T00:00:00Z" ]
 }
 
-@test "open pulls are fetched once per managed fork" {
+@test "open pulls are looked up once per target branch" {
   jq '.managed[0].refs = "all"' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
   refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/up/f.git' -
   refs refs/heads/dev:1 | git_respond '*ls-remote --heads --tags https://github.com/spali/f.git' -
   run_script
-  [ "$(grep -c 'pulls?state=open' "$GH_LOG")" -eq 1 ]
+  [ "$(grep -c 'pulls?state=open' "$GH_LOG")" -eq 3 ]
+  grep -qF 'repos/up/f/pulls?state=open&head=spali:wip&per_page=100 --paginate' "$GH_LOG"
+}
+
+@test "upstream pulls are never listed without a head filter" {
+  run_script
+  grep -q 'pulls?' "$GH_LOG"
+  run ! grep -v 'head=spali:' <(grep 'pulls?' "$GH_LOG")
+}
+
+@test "branch names are URL-encoded in the head filter" {
+  jq -nc --arg a "$(sha 1)" --arg d "$(sha 4)" \
+    '[{name: "main", commit: {sha: $a}}, {name: "fix/a#1", commit: {sha: $d}}]' | gh_respond "$TB" -
+  open_on 'fix%2Fa%231' '[{head: {repo: {full_name: "spali/f"}, ref: "fix/a#1"}}]'
+  run_script
+  grep -qF 'repos/up/f/pulls?state=open&head=spali:fix%2Fa%231&per_page=100 --paginate' "$GH_LOG"
+  [ "$(count branch-undeclared)" -eq 0 ]
 }
 
 @test "open pulls API error is check-failed and still checks behind" {
@@ -486,7 +506,8 @@ mirror_repo() {
   head -c 250000 /dev/zero | tr '\0' x >"$BATS_TEST_TMPDIR/big"
   jq -nc --rawfile big "$BATS_TEST_TMPDIR/big" '{ahead_by: 2, commits: [
     {commit: {message: $big, committer: {date: "2026-11-01T00:00:00Z"}}}]}' | gh_respond "$MAIN" -
-  jq -nc --rawfile big "$BATS_TEST_TMPDIR/big" '[{head: {repo: {full_name: "o/x"}, ref: "main"}, body: $big}]' | gh_respond "$PRS" -
+  jq -nc --rawfile big "$BATS_TEST_TMPDIR/big" '[{head: {repo: {full_name: "o/x"}, ref: "main"}, body: $big}]' |
+    gh_respond '*repos/up/f/pulls?state=open&head=spali:main&per_page=100 --paginate' -
   run_script
   [ "$(count managed-behind)" -eq 1 ]
   [ "$(count check-failed)" -eq 0 ]

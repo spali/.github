@@ -153,14 +153,18 @@ check_undeclared() {
 }
 
 # open_pulls REPO UPSTREAM_REPO PRS_FILE CONTRIB_VAR writes the open upstream
-# pulls ([{head_repo, head_ref}]) to PRS_FILE and stores the head branches of
-# those from REPO (JSON array) in CONTRIB_VAR. On an API error the finding is
-# recorded, CONTRIB_VAR is [] and it returns 1.
+# pulls with a branch of REPO as head ([{head_repo, head_ref, ...}], looked up
+# per branch, never all upstream pulls) to PRS_FILE and stores the head
+# branches of those from REPO (JSON array) in CONTRIB_VAR. On an API error the
+# finding is recorded, CONTRIB_VAR is [] and it returns 1.
 open_pulls() {
-  local repo=$1 up=$2 prs=$3
+  local repo=$1 up=$2 prs=$3 tb
   printf -v "$4" '%s' '[]'
-  paged branch-undeclared "$repo" "repos/$up/pulls?state=open&per_page=100" \
-    '{head_repo: (.head.repo.full_name // ""), head_ref: .head.ref}' "$prs" || return 1
+  tb=$(mktemp)
+  # shellcheck disable=SC2064 # expand now
+  trap "rm -f '$tb'; trap - RETURN" RETURN
+  paged branch-undeclared "$repo" "repos/$repo/branches?per_page=100" '{name}' "$tb" || return 1
+  head_pulls branch-undeclared "$repo" "$up" open "$(jq -c 'map(.name)' "$tb")" "$prs" || return 1
   json_out branch-undeclared "$repo" "$4" -c --arg r "$repo" \
     '[.[] | select((.head_repo // "" | ascii_downcase) == ($r | ascii_downcase)) | .head_ref]' "$prs"
 }

@@ -54,13 +54,14 @@ check_workflows() {
   fi
 }
 
-# check_delete_candidate REPO BRANCH PARENT PARENT_BRANCH PRS_FILE: no own
-# commits on the default branch, no open upstream PR from the fork, and every
-# fork branch also exists upstream or was the head of a closed or merged
+# check_delete_candidate REPO BRANCH PARENT PARENT_BRANCH PRS_FILE FB_FILE: no
+# own commits on the default branch, no open upstream PR from the fork, and
+# every fork branch also exists upstream or was the head of a closed or merged
 # upstream PR from the fork (contribution done). PRS_FILE: the open upstream
-# pulls, [{head_repo, head_ref, number, created_at, html_url}].
+# pulls of the fork branches, [{head_repo, head_ref, number, created_at,
+# html_url}]; FB_FILE: the fork branches, [{name}].
 check_delete_candidate() {
-  local repo=$1 branch=$2 parent=$3 pbranch=$4 prs=$5 body n mine fb pb cl extra
+  local repo=$1 branch=$2 parent=$3 pbranch=$4 prs=$5 fb=$6 body n mine pb cl extra
   body=$(fetch fork-delete-candidate "$repo" \
     "repos/$parent/compare/$pbranch...${repo%%/*}:${repo#*/}:$branch") || return 0
   json_out fork-delete-candidate "$repo" n -r '.ahead_by // "x"' <<<"$body" || return 0
@@ -68,18 +69,15 @@ check_delete_candidate() {
   json_out fork-delete-candidate "$repo" mine --arg r "$repo" \
     '[.[] | select(.head_repo | ascii_downcase == ($r | ascii_downcase))] | length' "$prs" || return 0
   [[ $mine == 0 ]] || return 0
-  fb=$(mktemp)
   pb=$(mktemp)
   cl=$(mktemp)
   # shellcheck disable=SC2064 # expand now
-  trap "rm -f '$fb' '$pb' '$cl'; trap - RETURN" RETURN
-  paged fork-delete-candidate "$repo" "repos/$repo/branches?per_page=100" '{name}' "$fb" || return 0
+  trap "rm -f '$pb' '$cl'; trap - RETURN" RETURN
   paged fork-delete-candidate "$repo" "repos/$parent/branches?per_page=100" '{name}' "$pb" || return 0
   json_out fork-delete-candidate "$repo" extra --slurpfile p "$pb" \
     '([$p[0][].name]) as $pn | [.[] | select(.name as $n | $pn | index($n) | not) | .name]' "$fb" || return 0
   if [[ $extra != '[]' ]]; then
-    paged fork-delete-candidate "$repo" "repos/$parent/pulls?state=closed&per_page=100" \
-      '{head_repo: (.head.repo.full_name // ""), head_ref: .head.ref}' "$cl" || return 0
+    head_pulls fork-delete-candidate "$repo" "$parent" closed "$extra" "$cl" || return 0
     json_out fork-delete-candidate "$repo" extra --arg r "$repo" --argjson e "$extra" \
       '[.[] | select(.head_repo | ascii_downcase == ($r | ascii_downcase)) | .head_ref] as $done |
        [$e[] | select(IN($done[]) | not)] | length' "$cl" || return 0
@@ -113,7 +111,7 @@ check_undeclared() {
 }
 
 main() {
-  local forks repo branch parent pbranch sync prs
+  local forks repo branch parent pbranch sync prs fb
   if ! forks=$(jq -r --slurpfile c "$CONFIG" '
       ([$c[0].mirrors // [] | .[].target]) as $m |
       ([$c[0].managed // [] | .[].repo | ascii_downcase]) as $mg |
@@ -131,13 +129,15 @@ main() {
     check_behind "$repo" "$branch" "$parent" "$pbranch" "$sync"
     check_workflows "$repo" "$sync"
     prs=$(mktemp)
-    if paged fork-delete-candidate "$repo" "repos/$parent/pulls?state=open&per_page=100" \
-      '{head_repo: (.head.repo.full_name // ""), head_ref: .head.ref, number, created_at, html_url}' "$prs"; then
-      check_delete_candidate "$repo" "$branch" "$parent" "$pbranch" "$prs"
+    fb=$(mktemp)
+    # the open upstream pulls of the fork branches (never all upstream pulls)
+    if paged fork-delete-candidate "$repo" "repos/$repo/branches?per_page=100" '{name}' "$fb" &&
+      head_pulls fork-delete-candidate "$repo" "$parent" open "$(jq -c 'map(.name)' "$fb")" "$prs"; then
+      check_delete_candidate "$repo" "$branch" "$parent" "$pbranch" "$prs" "$fb"
       check_contributions "$repo" "$prs"
       check_undeclared "$repo" "$branch" "$parent" "$pbranch" "$prs"
     fi
-    rm -f "$prs"
+    rm -f "$prs" "$fb"
   done <<<"$forks"
 }
 
