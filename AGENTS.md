@@ -477,7 +477,8 @@ and the log of the failed step. Explanations for humans:
   `owner/repo/.github/workflows/file.yml@ref`): its previous run fails after
   every red finding and would otherwise keep the control repository red.
   Without the variable (local runs) nothing is skipped.
-- A repository that only calls `monitor.yml` / `monitor-config.yml` is not
+- A repository that only calls `monitor.yml` / `monitor-config.yml` /
+  `sync.yml` (`MAINTENANCE_WORKFLOWS` in `monitor-repos.sh`) is not
   `central` (not a release-flow repository): no release checks and, because it
   has pins, no `adoption` finding, but `pin-behind` applies.
 - A fork's own sync workflow is disabled after 60 days without repository
