@@ -33,10 +33,9 @@
 #                     record or an ancestor of it; else it stays,
 #                     "; accept refused: own commits on top, ..."); a declared
 #                     branch moves only its own commits (rebase --onto onto
-#                     <record>) when it contains its record (else it stays,
-#                     "; accept refused: record not in branch, ..."); a
-#                     moved tag is set to upstream. Without a stop it does
-#                     nothing.
+#                     <record>); a moved tag is set to upstream. Without a
+#                     stop (also a declared branch without its record,
+#                     which rebases as usual) it does nothing.
 #   sync-git.sh push  pushes $WORK/plan.tsv to TARGET_URL in one atomic push
 #                     with a lease on the old sha of every ref, then checks the
 #                     target with ls-remote. On a mismatch it restores the old
@@ -235,8 +234,8 @@ rewrite_branch() {
 # branch and plans it with a backup of the old tip and its record. When the
 # record is no longer in onto (upstream rewritten), a branch that contains
 # its record is skipped, or with SYNC_ACCEPT rebased with only the commits
-# after its record; a branch without its record is rebased as usual, but
-# refused with SYNC_ACCEPT.
+# after its record; a branch without its record is no stop and is rebased
+# as usual (also with SYNC_ACCEPT).
 rebase_branch() {
   local b=$1 onto=$2 old new
   local -a base=("refs/up/heads/$onto")
@@ -249,9 +248,6 @@ rebase_branch() {
         return 0
       fi
       base=(--onto "refs/up/heads/$onto" "${RECR[$b]}")
-    elif accepts "heads/$b"; then
-      skip_rewrite "$b" "${UPR[heads/$onto]}" "$old" "; accept refused: record not in branch, rebase by hand"
-      return 0
     fi
   fi
   if [[ $old == "$ZERO" ]]; then
