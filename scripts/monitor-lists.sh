@@ -91,7 +91,7 @@ list_findings() {
       row("info"; "list-mirror-missing"; .; "managed mirror not in \"\($m)\"")),
     (select($cl.mirrors != null and ok($cl.mirrors)) | $cl.mirrors as $m |
       [($cfg[0].managed // [])[].repo | ascii_downcase] as $known |
-      [$lists[] | select(.name == $m) | .items[].repo] | unique[] |
+      [$lists[] | select(.name == $m) | .items[] | select(.archived | not) | .repo] | unique[] |
       select(ascii_downcase | IN($known[]) | not) |
       row("info"; "unmanaged"; .; "in the mirrors list but not managed")),
     (select($arch_ok) |

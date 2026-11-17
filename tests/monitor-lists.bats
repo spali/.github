@@ -149,6 +149,12 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(message unmanaged)" = "in the mirrors list but not managed" ]
 }
 
+@test "archived repo in the mirrors list is not unmanaged" {
+  all_lists '(.[2].items = [["spali/old", true]])'
+  run_script
+  [ "$(count unmanaged)" -eq 0 ]
+}
+
 @test "unmanaged needs the mirrors list name" {
   all_lists '(.[2].items = [["spali/other", false]])'
   jq '.lists.mirrors = null' "$CONFIG" >"$CONFIG.n" && mv "$CONFIG.n" "$CONFIG"
