@@ -451,9 +451,9 @@ issue and the log of the failed step. Explanations for humans:
 | `workflow-disabled` | a workflow is disabled (inactivity) | enable it (`gh workflow enable`), push a commit if needed |
 | `dependabot-alert` | open alert; red for critical/high, info for low/medium | update or dismiss with a reason |
 | `code-scanning-alert` | open alert; red for critical/high, info for low/medium | fix or dismiss with a reason |
-| `fork-behind` (info) | a fork is behind its upstream | sync when you care |
+| `fork-behind` (info) | a fork is behind its upstream | sync by hand, add it to `managed:`, or archive it to freeze this state |
 | `fork-workflows-active` (info) | a fork runs its own workflows | disable Actions in the fork's settings if unwanted (disabled Actions = clean) |
-| `fork-delete-candidate` (info) | no own commits on the default branch, no open upstream PR from the fork, and every fork branch also exists upstream or was the head of a closed or merged upstream PR from the fork | consider deleting the fork |
+| `fork-delete-candidate` (info) | no own commits on the default branch, no open upstream PR from the fork, and every fork branch also exists upstream or was the head of a closed or merged upstream PR from the fork | delete the fork, archive it to freeze the state you reference, or add it to `managed:` |
 | `list-none` (info) | a repository is in no list, a fork in none of the fork lists, or an archived repository in none of the archive lists (`lists.archived`; archived forks too) | add it to a list |
 | `list-contradiction` (info) | a repository is in both lists of an exclusive pair | fix the lists |
 | `list-mirror-missing` (info) | a managed mirror (`managed:` entry, upstream not on github.com) is not in the mirrors list | add it to the list |

@@ -230,3 +230,10 @@ gh_fail_raw() {
   [ -z "$stderr" ]
   [ "$(jq -r .check "$FINDINGS")" = check-failed ]
 }
+
+@test "unmanaged fork TODO texts propose managing or archiving" {
+  run jq -r '."fork-behind".text' <<<"$MONITOR_TODO"
+  [ "$output" = 'A fork is behind its upstream: sync it by hand, add it to `managed:` to keep it synced, or archive it to freeze this state.' ]
+  run jq -r '."fork-delete-candidate".text' <<<"$MONITOR_TODO"
+  [ "$output" = 'No own commits and no open pull request upstream: delete it, archive it to freeze the state you reference, or add it to `managed:` to keep it synced.' ]
+}

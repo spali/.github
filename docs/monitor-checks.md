@@ -164,7 +164,9 @@ Forks with an upstream that are not managed.
 
 🔵 A fork is behind its upstream repository.
 
-**Fix:** sync it (button "Sync fork") when you need the changes.
+**Fix:** sync it by hand (button "Sync fork"), add it to `managed:` so the
+central sync keeps it current, or archive it to freeze this state (see
+[Freeze a fork or mirror](#freeze-a-fork-or-mirror)).
 
 ## fork-workflows-active
 
@@ -182,7 +184,9 @@ upstream, and every branch of it also exists upstream or was the head of a
 closed or merged pull request from the fork (contribution done): nothing
 would be lost.
 
-**Fix:** delete the fork if you no longer need it.
+**Fix:** delete the fork, archive it to freeze the state you reference (see
+[Freeze a fork or mirror](#freeze-a-fork-or-mirror)), or add it to `managed:`
+to keep it synced.
 
 # Lists
 
