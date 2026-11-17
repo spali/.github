@@ -284,7 +284,9 @@ Works for any language. Steps 1–4 are files, 5–8 are settings.
    commit takes the pull request title), delete branches after merge,
    Dependabot alerts and private vulnerability reporting on. Actions: workflow
    permissions *Read repository contents*, GitHub Actions may not create or
-   approve pull requests.
+   approve pull requests, fork pull request workflows need approval for all
+   external contributors (a fork pull request chooses its own `runs-on`, so it
+   can pick a self-hosted runner; not for private repositories).
    ```sh
    gh api -X PATCH repos/spali/<repo> -F allow_merge_commit=false \
      -F allow_squash_merge=true -F allow_rebase_merge=true -F delete_branch_on_merge=true \
@@ -293,6 +295,8 @@ Works for any language. Steps 1–4 are files, 5–8 are settings.
    gh api -X PUT repos/spali/<repo>/private-vulnerability-reporting
    gh api -X PUT repos/spali/<repo>/actions/permissions/workflow \
      -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false
+   gh api -X PUT repos/spali/<repo>/actions/permissions/fork-pr-contributor-approval \
+     -f approval_policy=all_external_contributors
    ```
    Turn off what the repository does not use (wiki, projects, discussions).
 7. **Rulesets** (after the workflows ran once, so the check names exist).
