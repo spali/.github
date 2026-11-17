@@ -229,3 +229,8 @@ level() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].level' "$FINDING
   run_script
   [ "$(message check-failed)" = "settings checks: cannot parse inventory" ]
 }
+
+@test "settings checks do not read the fork approval" {
+  run_script
+  run ! grep -q fork-pr-contributor-approval "$GH_LOG"
+}

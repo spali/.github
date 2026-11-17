@@ -21,6 +21,7 @@ setup() {
 BEHIND='*repos/spali/f/compare/main...up:dev'
 WFS='*repos/spali/f/actions/workflows?per_page=100'
 PERMS='*repos/spali/f/actions/permissions'
+APPROVAL='*repos/spali/f/actions/permissions/fork-pr-contributor-approval'
 OWN='*repos/up/f/compare/dev...spali:f:main'
 # pulls are looked up per fork branch: PRS/CLOSED answer every branch,
 # open_on/closed_on BRANCH JSON one branch (the URL-encoded name)
@@ -39,6 +40,7 @@ closed_on() { respond_jq "*repos/up/f/pulls?state=closed&head=spali:$1&per_page=
 run_script() {
   respond_jq "$BEHIND" '{ahead_by: 0, commits: []}'
   respond_jq "$PERMS" '{enabled: true}'
+  respond_jq "$APPROVAL" '{approval_policy: "all_external_contributors"}'
   respond_jq "$WFS" '{workflows: []}'
   respond_jq "$OWN" '{ahead_by: 0}'
   respond_jq "$PRS" '[]'
@@ -87,8 +89,9 @@ level() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) |
 @test "unreadable Actions permissions of a fork fail the check" {
   gh_fail "$PERMS" 'gh: Server Error (HTTP 502)'
   run_script
-  [ "$(count check-failed)" -eq 1 ]
-  [ "$(message check-failed)" = "fork-workflows-active: gh: Server Error (HTTP 502)" ]
+  [ "$(count check-failed)" -eq 2 ]
+  [ "$(message check-failed 0)" = "fork-workflows-active: gh: Server Error (HTTP 502)" ]
+  [ "$(message check-failed 1)" = "settings-fork-approval: gh: Server Error (HTTP 502)" ]
   [ "$(count fork-workflows-active)" -eq 0 ]
 }
 
@@ -317,4 +320,21 @@ pr_aged() {
   grep -qF 'repos/up/f/compare/rel%2Fb%232...spali:f:x%2Fa%231' "$GH_LOG"
   grep -qF 'repos/up/f/compare/rel%2Fb%232...spali:f:feature' "$GH_LOG"
   run ! grep -E 'compare/[^ ]*#' "$GH_LOG"
+}
+
+@test "fork approval red is reported for a fork" {
+  respond_jq "$APPROVAL" '{approval_policy: "first_time_contributors"}'
+  run_script
+  [ "$(count settings-fork-approval)" -eq 1 ]
+  [ "$(level settings-fork-approval)" = red ]
+  [ "$(message settings-fork-approval)" = 'approval_policy: got "first_time_contributors", want "all_external_contributors"' ]
+}
+
+@test "fork with Actions disabled skips fork approval" {
+  respond_jq "$PERMS" '{enabled: false}'
+  run_script
+  [ "$(count settings-fork-approval)" -eq 1 ]
+  [ "$(level settings-fork-approval)" = skip ]
+  [ "$(message settings-fork-approval)" = "Actions disabled" ]
+  run ! grep -q fork-pr-contributor-approval "$GH_LOG"
 }

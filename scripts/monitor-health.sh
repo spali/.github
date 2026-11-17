@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Health checks for owned, non-fork, unmanaged repositories:
 # main-red, renovate-stale, unanswered, workflow-disabled, dependabot-alert,
-# code-scanning-alert.
+# code-scanning-alert, settings-fork-approval.
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
@@ -156,7 +156,7 @@ check_alerts() {
 }
 
 main() {
-  local repos repo branch days
+  local repos repo branch private days
   if ! days=$(jq -er '.unanswered.days // 7 | numbers' "$CONFIG" 2>/dev/null); then
     finding red check-failed - "unanswered: cannot parse the control file"
     days=7
@@ -165,13 +165,14 @@ main() {
       ([$c[0].managed // [] | .[].repo | ascii_downcase]) as $mg |
       .[] | select(.fork == false) |
       select(.name | ascii_downcase | IN($mg[]) | not) |
-      [.name, .default_branch] | @tsv' "$INVENTORY" 2>/dev/null); then
+      [.name, .default_branch, (.private // false)] | @tsv' "$INVENTORY" 2>/dev/null); then
     finding red check-failed - "health checks: cannot parse inventory"
     return 0
   fi
-  while IFS=$'\t' read -r repo branch; do
+  while IFS=$'\t' read -r repo branch private; do
     [[ -n $repo ]] || continue
     checked "$repo"
+    check_fork_approval "$repo" "$private"
     check_main_red "$repo" "$branch"
     check_renovate "$repo"
     check_unanswered "$repo" "$days"

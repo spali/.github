@@ -26,6 +26,8 @@ WFS='*repos/spali/a/actions/workflows?per_page=100'
 DEP='*repos/spali/a/dependabot/alerts?state=open&per_page=100 --paginate'
 CS='*repos/spali/a/code-scanning/alerts?state=open&per_page=100 --paginate'
 ISS='*repos/spali/a/issues?state=open&per_page=100 --paginate'
+APERMS='*repos/spali/a/actions/permissions'
+APPROVAL='*repos/spali/a/actions/permissions/fork-pr-contributor-approval'
 
 # run_json GLOB JQ_EXPRESSION registers a response built by jq -n.
 respond_jq() { jq -nc "$2" | gh_respond "$1" -; }
@@ -37,6 +39,8 @@ run_script() {
   respond_jq "$DEP" '[]'
   respond_jq "$CS" '[]'
   respond_jq "$ISS" '[]'
+  respond_jq "$APERMS" '{enabled: true}'
+  respond_jq "$APPROVAL" '{approval_policy: "all_external_contributors"}'
   run --separate-stderr "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -424,4 +428,22 @@ item_value() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $
   [ "$(count unanswered)" -eq 1 ]
   [ "$(message unanswered)" = "pull request #7 is open (ignored)" ]
   [ "$(item_value unanswered)" = 7 ]
+}
+
+@test "fork approval red is reported for the repository" {
+  respond_jq "$APPROVAL" '{approval_policy: "first_time_contributors"}'
+  run_script
+  [ "$(count settings-fork-approval)" -eq 1 ]
+  [ "$(level settings-fork-approval)" = red ]
+  [ "$(message settings-fork-approval)" = 'approval_policy: got "first_time_contributors", want "all_external_contributors"' ]
+  [ "$(jq -rs 'map(select(.check == "settings-fork-approval")) | .[0].repo' "$FINDINGS")" = spali/a ]
+}
+
+@test "private repository skips fork approval" {
+  jq -n '[{name: "spali/a", fork: false, private: true, default_branch: "main"}]' >"$INVENTORY"
+  run_script
+  [ "$(count settings-fork-approval)" -eq 1 ]
+  [ "$(level settings-fork-approval)" = skip ]
+  [ "$(message settings-fork-approval)" = "private repository" ]
+  run ! grep -q fork-pr-contributor-approval "$GH_LOG"
 }

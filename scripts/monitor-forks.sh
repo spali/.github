@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fork checks: fork-behind (missing upstream commits), fork-workflows-active,
-# fork-delete-candidate, contribution-stale, branch-undeclared (info).
+# fork-delete-candidate, contribution-stale, branch-undeclared (info),
+# settings-fork-approval.
 # Scope: inventory forks with a parent that are not managed (monitor-managed.sh
 # checks those).
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
@@ -94,21 +95,22 @@ check_undeclared() {
 }
 
 main() {
-  local forks repo branch parent pbranch prs fb
+  local forks repo branch parent pbranch private prs fb
   if ! forks=$(jq -r --slurpfile c "$CONFIG" '
       ([$c[0].managed // [] | .[].repo | ascii_downcase]) as $mg |
       .[] | select(.fork == true and .parent != null) |
       select(.name | ascii_downcase | IN($mg[]) | not) |
-      [.name, .default_branch, .parent.name, .parent.default_branch] | @tsv' \
+      [.name, .default_branch, .parent.name, .parent.default_branch, (.private // false)] | @tsv' \
     "$INVENTORY" 2>/dev/null); then
     finding red check-failed - "fork checks: cannot parse inventory"
     return 0
   fi
-  while IFS=$'\t' read -r repo branch parent pbranch; do
+  while IFS=$'\t' read -r repo branch parent pbranch private; do
     [[ -n $repo ]] || continue
     checked "$repo"
     check_behind "$repo" "$branch" "$parent" "$pbranch"
     check_workflows "$repo"
+    check_fork_approval "$repo" "$private"
     prs=$(mktemp)
     fb=$(mktemp)
     # the open upstream pulls of the fork branches (never all upstream pulls)

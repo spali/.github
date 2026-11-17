@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Checks of the repositories under managed: in the control file:
 # managed-missing, managed-settings, managed-behind (branches and, unless
-# tags is false, tags), rebase-pending and branch-undeclared. sync-failed runs once, in monitor-lists.sh.
+# tags is false, tags), rebase-pending, branch-undeclared and
+# settings-fork-approval. sync-failed runs once, in monitor-lists.sh.
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
@@ -320,6 +321,7 @@ check_repo() {
     finding red managed-settings "$repo" 'archived but still under `managed:`: remove the entry'
     return 0
   fi
+  check_fork_approval "$repo" "$PRIVATE"
   check_settings "$repo" "$(jq -c .settings <<<"$entry")" "$info"
   tmp=$(mktemp -d)
   if [[ $(jq -r .kind <<<"$entry") == fork ]]; then
