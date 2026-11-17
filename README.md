@@ -474,9 +474,7 @@ after 48 h.
 |---|---|
 | `version` | must be `1` |
 | `monitor` | optional: `jobs` (`per-group`, the default: one job per check group; `per-repo`: one job per check group and repository) and `runs-on` (a runner label or a list of labels, default `ubuntu-latest`) |
-| `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `archive`, `mirrors`, `forks` (list of lists) |
-| `mirrors` | mirror targets: `target` (`spali/name`), `source` (`https://` URL), `interval_hours`, optional `script` |
-| `forks` | forks with their own sync workflow: `repo`, `sync_interval_hours` |
+| `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `archived` (list of lists), `mirrors`, `forks` (list of lists) |
 | `managed` | forks and mirrors kept in sync by [`sync.yml`](#fork-and-mirror-sync): `repo`, `upstream`, optional `branches`, `follow`, `tags`, `settings`, `private` |
 | `ignores` | accepted findings: `repo`, `check` (an id from the AGENTS.md catalog, not `check-failed`), `reason` (required) |
 
@@ -488,16 +486,9 @@ monitor:
 lists:
   exclusive:
     - ["Active", "Archive"]
-  archive: "Archive"
+  archived: ["Archive"]
   mirrors: "Mirrors"
   forks: ["Contribution forks", "Customization forks"]
-mirrors:
-  - target: spali/example-mirror
-    source: https://example.org/example.git
-    interval_hours: 24
-forks:
-  - repo: spali/example-fork
-    sync_interval_hours: 168
 ignores:
   - {repo: spali/example, check: renovate-stale, reason: waiting for upstream fix}
 ```
