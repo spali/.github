@@ -76,6 +76,9 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
 @test "compliant managed fork has no findings" {
   run_script
   no_findings
+  [ "$(count settings-fork-approval)" -eq 1 ]
+  [ "$(level settings-fork-approval)" = skip ]
+  [ "$(message settings-fork-approval)" = "Actions disabled" ]
 }
 
 @test "records the checked repositories" {
@@ -659,4 +662,16 @@ behind_mirror() {
   [ "$(level settings-fork-approval)" = red ]
   [ "$(message settings-fork-approval)" = 'approval_policy: got "first_time_contributors", want "all_external_contributors"' ]
   [ "$(repo_of settings-fork-approval)" = spali/f ]
+}
+
+@test "private managed repository skips fork approval" {
+  jq '.managed[0].settings = {actions: true}' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  respond_jq "$REPO" '{default_branch: "main", private: true, pushed_at: "2026-11-01T00:00:00Z",
+    has_issues: false, has_pull_requests: false, has_wiki: false, has_discussions: false, has_projects: false}'
+  respond_jq "$ACT" '{enabled: true}'
+  run_script
+  [ "$(count settings-fork-approval)" -eq 1 ]
+  [ "$(level settings-fork-approval)" = skip ]
+  [ "$(message settings-fork-approval)" = "private repository" ]
+  run ! grep -q fork-pr-contributor-approval "$GH_LOG"
 }

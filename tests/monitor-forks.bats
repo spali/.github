@@ -338,3 +338,13 @@ pr_aged() {
   [ "$(message settings-fork-approval)" = "Actions disabled" ]
   run ! grep -q fork-pr-contributor-approval "$GH_LOG"
 }
+
+@test "private fork skips fork approval" {
+  jq -n '[{name: "spali/f", fork: true, private: true, default_branch: "main",
+    parent: {name: "up/f", default_branch: "dev"}}]' >"$INVENTORY"
+  run_script
+  [ "$(count settings-fork-approval)" -eq 1 ]
+  [ "$(level settings-fork-approval)" = skip ]
+  [ "$(message settings-fork-approval)" = "private repository" ]
+  run ! grep -q fork-pr-contributor-approval "$GH_LOG"
+}
