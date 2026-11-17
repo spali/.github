@@ -176,10 +176,12 @@ the sync does not work.
 
 ## fork-workflows-active
 
-🔵 A fork runs its own workflows (usually copied from upstream), which can
-fail or use minutes for nothing.
+🔵 A fork has Actions enabled and active workflows (usually copied from
+upstream), which can fail or use minutes for nothing. A fork with Actions
+disabled in its settings is clean, whatever state its workflows report.
 
-**Fix:** disable the workflows you do not need.
+**Fix:** Settings → Actions → General → "Disable actions" (one switch, also
+covers workflows that later come from upstream).
 
 ## fork-delete-candidate
 

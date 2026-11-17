@@ -453,7 +453,7 @@ issue and the log of the failed step. Explanations for humans:
 | `code-scanning-alert` | open alert; red for critical/high, info for low/medium | fix or dismiss with a reason |
 | `fork-behind` (info) | a fork is behind its upstream | sync when you care |
 | `fork-sync-stale` | a fork with its own sync workflow misses upstream commits beyond `sync_interval_hours` + 24 h | check the sync workflow |
-| `fork-workflows-active` (info) | a fork runs its own workflows | disable them if unwanted |
+| `fork-workflows-active` (info) | a fork runs its own workflows | disable Actions in the fork's settings if unwanted (disabled Actions = clean) |
 | `fork-delete-candidate` (info) | no own commits on the default branch, no open upstream PR from the fork, and every fork branch also exists upstream or was the head of a closed or merged upstream PR from the fork | consider deleting the fork |
 | `mirror-behind` | the mirror target lacks refs of its source beyond `interval_hours` + 24 h | check the mirror job in the mirror repository |
 | `list-none` (info) | a repository is in no list | add it to a list |

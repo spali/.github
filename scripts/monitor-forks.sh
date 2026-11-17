@@ -35,10 +35,16 @@ check_behind() {
   fi
 }
 
-# check_workflows REPO SYNCED: one call for workflow-disabled (forks with
-# their own sync workflow) or fork-workflows-active (all other forks).
+# check_workflows REPO SYNCED: workflow-disabled (forks with their own sync
+# workflow) or fork-workflows-active (all other forks). A fork with Actions
+# disabled in its settings is clean: its workflows still report "active".
 check_workflows() {
   local repo=$1 synced=$2 body found line n
+  if [[ -z $synced ]]; then
+    body=$(fetch fork-workflows-active "$repo" "repos/$repo/actions/permissions") || return 0
+    json_out fork-workflows-active "$repo" n -r '.enabled' <<<"$body" || return 0
+    [[ $n != false ]] || return 0
+  fi
   body=$(fetch workflow-disabled "$repo" "repos/$repo/actions/workflows?per_page=100") || return 0
   if [[ -n $synced ]]; then
     disabled_workflows workflow-disabled "$repo" found <<<"$body" || return 0
