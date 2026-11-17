@@ -51,12 +51,19 @@ if type != "object" then "top level must be a mapping" else
    else empty end),
   (if has("lists") and (.lists | type) != "object" then "lists must be a mapping" else empty end),
   (if (.lists | type) == "object" then
-     (.lists | keys[] | select(IN("exclusive", "archive", "archived", "mirrors", "forks") | not)
+     (.lists | keys[] | select(IN("exclusive", "archive", "archived", "mirrors", "forks", "external") | not)
        | "lists: unknown key \(.)"),
      (.lists | if has("archive") then "`lists.archive` was removed: use `lists.archived`" else empty end),
-     (.lists | to_entries[] | select(.key == "mirrors")
-       | select(.value | type != "string") | "lists.\(.key) must be a string"),
-     (.lists | to_entries[] | select(.key == "forks" or .key == "archived")
+     (.lists | if has("forks") then "`lists.forks` was removed: put the Lists under `lists.mirrors.other`" else empty end),
+     (.lists | if has("mirrors") then
+        (.mirrors | if type == "string" then "`lists.mirrors` is now a mapping: put the List under `lists.mirrors.synced`"
+         elif type != "object" then "lists.mirrors must be a mapping"
+         else (keys[] | select(IN("synced", "other") | not) | "lists.mirrors: unknown key \(.)"),
+              (to_entries[] | select(.key | IN("synced", "other"))
+               | select(.value | type == "array" and all(type == "string") | not)
+               | "lists.mirrors.\(.key) must be a list of strings") end)
+      else empty end),
+     (.lists | to_entries[] | select(.key == "external" or .key == "archived")
        | select(.value | type == "array" and all(type == "string") | not)
        | "lists.\(.key) must be a list of strings"),
      (.lists | if has("exclusive") then

@@ -4,8 +4,10 @@ lists:
     - ["🚀 My stack", "🗃️ My stack Archive"]
     - ["▶️ Constribution forks", "♻️ Customization forks"]
   archived: ["🗃️ My stack Archive"]
-  mirrors: "👀  Mirrors"
-  forks: ["▶️ Constribution forks", "♻️ Customization forks"]
+  mirrors:
+    synced: ["👀  Mirrors"]
+    other: ["▶️ Constribution forks", "♻️ Customization forks"]
+  external: ["🔍 Interesting and related forks"]
 ignores:
   - repo: spali/old-thing
     check: main-red
