@@ -381,3 +381,28 @@ item_value() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $
   [ "$(count check-failed)" -eq 1 ]
   [ "$(count unanswered)" -eq 0 ]
 }
+
+@test "unanswered: a review comment by another user is the newest post" {
+  item 7 spali 2026-10-01T10:00:00Z pr | jq -s . | gh_respond "$ISS" -
+  post spali 2026-11-01T10:00:00Z | jq -s . | comments 7
+  post other 2026-11-03T10:00:00Z | jq -s . |
+    gh_respond '*repos/spali/a/pulls/7/comments?per_page=100 --paginate' -
+  run_script
+  [ "$(count unanswered)" -eq 1 ]
+  [ "$(message unanswered)" = "pull request #7 waits for an answer for 11 days: https://github.com/spali/a/pull/7" ]
+}
+
+@test "unanswered: the owner login is compared without case" {
+  item 5 other 2026-10-01T10:00:00Z | jq -s . | gh_respond "$ISS" -
+  post Spali 2026-11-01T10:00:00Z | jq -s . | comments 5
+  run_script
+  [ "$(count unanswered)" -eq 0 ]
+}
+
+@test "unanswered: an approving review of the owner without body answers" {
+  item 7 other 2026-10-01T10:00:00Z pr | jq -s . | gh_respond "$ISS" -
+  jq -nc '[{submitted_at: "2026-11-10T10:00:00Z", state: "APPROVED", body: "", user: {login: "spali", type: "User"}}]' |
+    gh_respond '*repos/spali/a/pulls/7/reviews?per_page=100 --paginate' -
+  run_script
+  [ "$(count unanswered)" -eq 0 ]
+}
