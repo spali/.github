@@ -297,3 +297,34 @@ YML
   [ "$(jq length <<<"$output")" -eq 30 ]
   [ -z "$stderr" ]
 }
+
+@test "archived repos go to MONITOR_ARCHIVED only" {
+  user_repos "$(repo spali/b)" "$(repo spali/a false false true)"
+  MONITOR_ARCHIVED="$BATS_TEST_TMPDIR/archived.json" run --separate-stderr "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c 'map(.name)' <<<"$output")" = '["spali/b"]' ]
+  [ "$(jq -c . "$BATS_TEST_TMPDIR/archived.json")" = '["spali/a"]' ]
+  [[ "$(gh_calls)" != *spali/a* ]]
+}
+
+@test "MONITOR_ARCHIVED is an empty array without archived repos" {
+  user_repos "$(repo spali/b)"
+  MONITOR_ARCHIVED="$BATS_TEST_TMPDIR/archived.json" run --separate-stderr "$SCRIPT"
+  [ "$(jq -c . "$BATS_TEST_TMPDIR/archived.json")" = '[]' ]
+}
+
+@test "MONITOR_ARCHIVED is an empty array when the listing fails" {
+  gh_fail '*user/repos*' 'gh: Server Error (HTTP 500)'
+  MONITOR_ARCHIVED="$BATS_TEST_TMPDIR/archived.json" run --separate-stderr "$SCRIPT"
+  [ "$output" = '[]' ]
+  [ "$(jq -c . "$BATS_TEST_TMPDIR/archived.json")" = '[]' ]
+}
+
+@test "without MONITOR_ARCHIVED archived repos are dropped" {
+  user_repos "$(repo spali/b)" "$(repo spali/a false false true)"
+  unset MONITOR_ARCHIVED
+  run --separate-stderr "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c 'map(.name)' <<<"$output")" = '["spali/b"]' ]
+  [[ "$(gh_calls)" != *spali/a* ]]
+}

@@ -260,7 +260,20 @@ check_stub() {
   phase config
   phase inventory
   [ "$status" -eq 0 ]
-  [ "$output" = "✓ $(jq length "$FIX/inventory.json") repositories, $(jq 'map(select(.central)) | length' "$FIX/inventory.json") central, $(jq 'map(select(.fork)) | length' "$FIX/inventory.json") forks" ]
+  [ "$output" = "✓ $(jq length "$FIX/inventory.json") repositories, $(jq 'map(select(.central)) | length' "$FIX/inventory.json") central, $(jq 'map(select(.fork)) | length' "$FIX/inventory.json") forks, 0 archived" ]
+}
+
+@test "inventory phase keeps the archived repositories apart" {
+  cat >"$MONITOR_SCRIPTS_DIR/monitor-repos.sh" <<EOS
+#!/usr/bin/env bash
+echo '["spali/old","spali/older"]' >"\$MONITOR_ARCHIVED"
+cat "$BATS_TEST_TMPDIR/inventory.json"
+EOS
+  phase config
+  phase inventory
+  [ "$status" -eq 0 ]
+  [[ $output == *", $(jq 'map(select(.fork)) | length' "$FIX/inventory.json") forks, 2 archived" ]]
+  [ "$(jq -c . "$BATS_TEST_TMPDIR/work/archived.json")" = '["spali/old","spali/older"]' ]
 }
 
 @test "inventory phase fails when the script crashes" {
@@ -270,6 +283,7 @@ check_stub() {
   [ "$status" -eq 1 ]
   [[ $output == *"::error title=check-failed::monitor-repos.sh crashed"* ]]
   [ "$(cat "$BATS_TEST_TMPDIR/work/inventory.json")" = "[]" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/work/archived.json")" = "[]" ]
 }
 
 @test "a check phase lists clean repos and groups repos with findings" {

@@ -6,6 +6,8 @@
 # Usage: monitor.sh            all phases, prints only the report (local run)
 #        monitor.sh PHASE      one phase, prints its log (one workflow step
 #                              each); the phases share the dir $MONITOR_WORK
+# The inventory phase also writes archived.json (names of the archived
+# repositories, kept apart: only the lists check looks at them).
 # Phases, in order: config inventory release settings health forks
 # managed lists report issue. A check phase lists every repository it looked at
 # (clean ones with ✓, the others as a log group with their findings) and
@@ -68,13 +70,18 @@ phase_config() {
 }
 
 phase_inventory() {
-  if ! "$DIR/monitor-repos.sh" >"$INVENTORY"; then
+  local archived="$WORK/archived.json"
+  rm -f "$archived"
+  if ! MONITOR_ARCHIVED="$archived" "$DIR/monitor-repos.sh" >"$INVENTORY"; then
     finding red check-failed - "monitor-repos.sh crashed"
     echo '[]' >"$INVENTORY"
+    echo '[]' >"$archived"
     tail -n1 "$FINDINGS" | jq -r "$ANNOTATE_JQ"
     return 1
   fi
-  jq -r '"✓ \(length) repositories, \(map(select(.central)) | length) central, \(map(select(.fork)) | length) forks"' "$INVENTORY"
+  [[ -s $archived ]] || echo '[]' >"$archived"
+  jq -r --argjson archived "$(jq length "$archived")" \
+    '"✓ \(length) repositories, \(map(select(.central)) | length) central, \(map(select(.fork)) | length) forks, \($archived) archived"' "$INVENTORY"
 }
 
 # The jobs of each check group: with monitor.jobs per-repo one per repository,
