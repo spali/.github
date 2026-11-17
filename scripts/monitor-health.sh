@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Health checks for owned, non-fork, unmanaged repositories:
-# main-red, renovate-stale, workflow-disabled, dependabot-alert,
+# main-red, renovate-stale, unanswered, workflow-disabled, dependabot-alert,
 # code-scanning-alert.
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
@@ -9,6 +9,10 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 
 need_env FINDINGS INVENTORY CONFIG
+
+OWNER=spali
+# jq definition: bot is true for a user object of a bot account.
+BOT_JQ='def bot: .type == "Bot" or ((.login // "") | endswith("[bot]"));'
 
 # check_main_red REPO BRANCH: the latest completed run per workflow on the
 # default branch (pull request events ignored) must not have failed. The
@@ -59,6 +63,55 @@ check_renovate() {
   rm -f "$tmp"
 }
 
+# check_unanswered REPO DAYS: red finding (item = number) for each open issue
+# or pull request whose newest human post is not by the owner and older than
+# DAYS. Posts: the opening, issue comments and, for pull requests, reviews
+# (not pending, not an empty COMMENTED) and review comments. Bots are ignored;
+# items opened by a bot or not older than DAYS need no further call.
+check_unanswered() {
+  local repo=$1 days=$2 tmp posts part list n created url pr last login at d kind
+  tmp=$(mktemp)
+  posts=$(mktemp)
+  part=$(mktemp)
+  # shellcheck disable=SC2064 # expand now
+  trap "rm -f '$tmp' '$posts' '$part'; trap - RETURN" RETURN
+  paged unanswered "$repo" "repos/$repo/issues?state=open&per_page=100" \
+    '{number, created_at, html_url, pr: has("pull_request"), user: {login: .user.login, type: .user.type}}' \
+    "$tmp" || return 0
+  json_out unanswered "$repo" list -r "$BOT_JQ"'
+    .[] | select(.user | bot | not) | [.number, .created_at, .html_url, .pr] | @tsv' "$tmp" || return 0
+  while IFS=$'\t' read -r n created url pr; do
+    [[ -n $n ]] || continue
+    d=$(days_since "$created")
+    ((d > days)) || continue
+    jq -c '.[] | select(.number == ($n | tonumber)) | [{at: .created_at, user}]' \
+      --arg n "$n" "$tmp" >"$posts"
+    paged unanswered "$repo" "repos/$repo/issues/$n/comments?per_page=100" \
+      '{at: .created_at, user: {login: .user.login, type: .user.type}}' "$part" || continue
+    cat "$part" >>"$posts"
+    if [[ $pr == true ]]; then
+      paged unanswered "$repo" "repos/$repo/pulls/$n/reviews?per_page=100" \
+        'select(.state != "PENDING" and (.state != "COMMENTED" or (.body // "") != "")) |
+         {at: .submitted_at, user: {login: .user.login, type: .user.type}}' "$part" || continue
+      cat "$part" >>"$posts"
+      paged unanswered "$repo" "repos/$repo/pulls/$n/comments?per_page=100" \
+        '{at: .created_at, user: {login: .user.login, type: .user.type}}' "$part" || continue
+      cat "$part" >>"$posts"
+    fi
+    json_out unanswered "$repo" last -rs "$BOT_JQ"'
+      [add[] | select(.at != null and (.user | bot | not))] | max_by(.at) // empty |
+      [.user.login, .at] | @tsv' "$posts" || continue
+    [[ -n $last ]] || continue
+    IFS=$'\t' read -r login at <<<"$last"
+    [[ ${login,,} != "${OWNER,,}" ]] || continue
+    d=$(days_since "$at")
+    ((d > days)) || continue
+    kind=issue
+    [[ $pr != true ]] || kind='pull request'
+    finding red unanswered "$repo" "$kind #$n waits for an answer for $d days: $url" "$n"
+  done <<<"$list"
+}
+
 check_workflows() {
   local repo=$1 body found line
   body=$(fetch workflow-disabled "$repo" "repos/$repo/actions/workflows?per_page=100") || return 0
@@ -91,7 +144,11 @@ check_alerts() {
 }
 
 main() {
-  local repos repo branch
+  local repos repo branch days
+  if ! days=$(jq -er '.unanswered.days // 7 | numbers' "$CONFIG" 2>/dev/null); then
+    finding red check-failed - "unanswered: cannot parse the control file"
+    days=7
+  fi
   if ! repos=$(jq -r --slurpfile c "$CONFIG" '
       ([$c[0].managed // [] | .[].repo | ascii_downcase]) as $mg |
       .[] | select(.fork == false) |
@@ -105,6 +162,7 @@ main() {
     checked "$repo"
     check_main_red "$repo" "$branch"
     check_renovate "$repo"
+    check_unanswered "$repo" "$days"
     check_workflows "$repo"
     check_alerts dependabot-alert "$repo" \
       "repos/$repo/dependabot/alerts?state=open&per_page=100" \
