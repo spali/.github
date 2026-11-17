@@ -406,7 +406,7 @@ It checks five groups (archived repositories only by the Lists check):
 | Health | all non-fork, unmanaged repositories | red `main`, open Renovate pull requests, disabled workflows, Dependabot and code scanning alerts |
 | Forks | unmanaged forks | upstream commits missing, active workflows, delete candidates, old pull requests, branches with own commits |
 | Managed | forks and mirrors listed under `managed` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, undeclared branches with own commits, manual rebases pending |
-| Lists | all repositories, archived ones too | GitHub Lists that contradict the archive state, forks or mirrors (an archived repository belongs in an archive list of `lists.archived`, see [freeze a fork or mirror](docs/monitor-checks.md#freeze-a-fork-or-mirror)); repositories without the release flow; the last run of the control repository's sync failed |
+| Lists | all repositories, archived ones too | GitHub Lists that contradict the archive state, forks or mirrors (an archived repository belongs in an archive list of `lists.archived`, see [freeze a fork or mirror](docs/monitor-checks.md#freeze-a-fork-or-mirror); forks and managed repositories in a mirrors list, every repository in a `synced` mirrors list under `managed`; no own repositories in `lists.external`); repositories without the release flow; the last run of the control repository's sync failed |
 
 The pin check also covers the control repository's own pin of `monitor.yml`.
 A repository that only calls the maintenance workflows (monitor, sync,
@@ -489,7 +489,7 @@ lists:
   mirrors:
     synced: ["Mirrors"]
     other: ["Contribution forks", "Customization forks"]
-  external: ["Interesting and related forks"]
+  external: ["Interesting and related"]
 ignores:
   - {repo: spali/example, check: renovate-stale, reason: waiting for upstream fix}
 ```
