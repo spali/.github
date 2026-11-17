@@ -403,7 +403,7 @@ It checks five groups (archived repositories only by the Lists check):
 | Group | Repositories | Checks |
 |---|---|---|
 | Release flow and settings | central repositories (those that use this flow) | stale dev builds and `-next` pre-releases, orphan tags, several drafts, pin behind the latest release, merge/alert/PVR/Actions settings, rulesets |
-| Health | all non-fork, unmanaged repositories | red `main`, open Renovate pull requests, disabled workflows, Dependabot and code scanning alerts |
+| Health | all non-fork, unmanaged repositories | red `main`, open Renovate pull requests, unanswered pull requests and issues, disabled workflows, Dependabot and code scanning alerts |
 | Forks | unmanaged forks | upstream commits missing, active workflows, delete candidates, old pull requests, branches with own commits |
 | Managed | forks and mirrors listed under `managed` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, undeclared branches with own commits, manual rebases pending |
 | Lists | all repositories, archived ones too | GitHub Lists that contradict the archive state, forks or mirrors (an archived repository belongs in an archive list of `lists.archived`, see [freeze a fork or mirror](docs/monitor-checks.md#freeze-a-fork-or-mirror); forks and managed repositories in a mirrors list, every repository in a `synced` mirrors list under `managed`; no own repositories in `lists.external`); repositories without the release flow; the last run of the control repository's sync failed |

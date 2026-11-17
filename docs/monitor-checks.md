@@ -158,9 +158,26 @@ should keep running.
 
 ## unanswered
 
-🔴 Someone waits for an answer in an open pull request or issue.
+🔴 Someone waits for an answer in an open pull request or issue: the newest
+post by a human is not by the owner and older than `unanswered.days` days
+(default 7). Posts are the opening, comments and, for pull requests, reviews
+and review comments; a follow-up after the owner's answer counts again. Posts
+of bots are ignored, items opened by a bot are not checked (Renovate pull
+requests are `renovate-stale`). The finding names the days since that post
+and links the item.
 
-**Fix:** answer it, close it, or ignore the item with a reason.
+```yaml
+unanswered:
+  days: 14
+```
+
+**Fix:** answer it or close it. To accept one item, ignore it by its number;
+once the item is closed, the ignore is reported as `ignore-unused`: remove it.
+
+```yaml
+ignores:
+  - {repo: spali/example, check: unanswered, item: 70, reason: reviewed separately}
+```
 
 # Forks
 

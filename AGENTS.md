@@ -451,7 +451,7 @@ issue and the log of the failed step. Explanations for humans:
 | `workflow-disabled` | a workflow is disabled (inactivity) | enable it (`gh workflow enable`), push a commit if needed |
 | `dependabot-alert` | open alert; red for critical/high, info for low/medium | update or dismiss with a reason |
 | `code-scanning-alert` | open alert; red for critical/high, info for low/medium | fix or dismiss with a reason |
-| `unanswered` | an open pull request or issue waits for an answer for more than `unanswered.days` days (default 7); ignorable per item with `item` | answer it, close it, or ignore the item with a reason |
+| `unanswered` | in an open pull request or issue the newest human post (opening, comment, review, review comment; bots ignored, items opened by a bot skipped) is not by the owner and older than `unanswered.days` days (default 7); the finding carries the number as `item` | answer it or close it, or ignore the item (`item: <number>`) with a reason; remove the ignore when `ignore-unused` reports it |
 | `fork-behind` (info) | a fork is behind its upstream | sync by hand, add it to `managed:`, or archive it to freeze this state |
 | `fork-workflows-active` (info) | a fork runs its own workflows | disable Actions in the fork's settings if unwanted (disabled Actions = clean) |
 | `fork-delete-candidate` (info) | no own commits on the default branch, no open upstream PR from the fork, and every fork branch also exists upstream or was the head of a closed or merged upstream PR from the fork | delete the fork, archive it to freeze the state you reference, or add it to `managed:` |

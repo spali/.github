@@ -25,6 +25,7 @@ PRS='*repos/spali/a/pulls?state=open&per_page=100 --paginate'
 WFS='*repos/spali/a/actions/workflows?per_page=100'
 DEP='*repos/spali/a/dependabot/alerts?state=open&per_page=100 --paginate'
 CS='*repos/spali/a/code-scanning/alerts?state=open&per_page=100 --paginate'
+ISS='*repos/spali/a/issues?state=open&per_page=100 --paginate'
 
 # run_json GLOB JQ_EXPRESSION registers a response built by jq -n.
 respond_jq() { jq -nc "$2" | gh_respond "$1" -; }
@@ -35,6 +36,7 @@ run_script() {
   respond_jq "$WFS" '{workflows: []}'
   respond_jq "$DEP" '[]'
   respond_jq "$CS" '[]'
+  respond_jq "$ISS" '[]'
   run --separate-stderr "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -253,4 +255,129 @@ run_entry() {
   run_script
   run ! grep -qi 'spali/managed' "$GH_LOG"
   grep -q 'spali/a/' "$GH_LOG"
+}
+
+# item NUMBER LOGIN CREATED [pr]: one entry of the open issues list.
+item() {
+  jq -nc --argjson n "$1" --arg u "$2" --arg t "$3" --arg pr "${4:-}" '
+    {number: $n, created_at: $t, user: {login: $u, type: (if ($u | endswith("[bot]")) then "Bot" else "User" end)},
+     html_url: "https://github.com/spali/a/\(if $pr == "" then "issues" else "pull" end)/\($n)"}
+    + (if $pr == "" then {} else {pull_request: {url: "x"}} end)'
+}
+
+# post LOGIN TIME [TYPE]: one issue or review comment.
+post() {
+  jq -nc --arg u "$1" --arg t "$2" --arg ty "${3:-User}" '{created_at: $t, user: {login: $u, type: $ty}}'
+}
+
+comments() { gh_respond "*repos/spali/a/issues/$1/comments?per_page=100 --paginate" -; }
+
+item_value() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | .[$i].item' "$FINDINGS"; }
+
+@test "unanswered: issue of another user without answer is red with its item" {
+  item 5 other 2026-11-04T10:00:00Z | jq -s . | gh_respond "$ISS" -
+  run_script
+  [ "$(count unanswered)" -eq 1 ]
+  [ "$(level unanswered)" = red ]
+  [ "$(message unanswered)" = "issue #5 waits for an answer for 10 days: https://github.com/spali/a/issues/5" ]
+  [ "$(item_value unanswered)" = 5 ]
+  [ "$(jq -s length "$FINDINGS")" -eq 1 ]
+}
+
+@test "unanswered: a young item is skipped without further calls" {
+  item 5 other 2026-11-11T10:00:00Z | jq -s . | gh_respond "$ISS" -
+  run_script
+  [ "$(count unanswered)" -eq 0 ]
+  run ! grep -q 'issues/5/' "$GH_LOG"
+}
+
+@test "unanswered: an item opened by the owner without other posts is fine" {
+  item 5 spali 2026-10-01T10:00:00Z | jq -s . | gh_respond "$ISS" -
+  run_script
+  [ "$(count unanswered)" -eq 0 ]
+}
+
+@test "unanswered: a follow-up after the owner answered counts again" {
+  item 5 other 2026-10-01T10:00:00Z | jq -s . | gh_respond "$ISS" -
+  { post spali 2026-11-05T10:00:00Z; post other 2026-11-06T10:00:00Z; } | jq -s . | comments 5
+  run_script
+  [ "$(count unanswered)" -eq 1 ]
+  [ "$(message unanswered)" = "issue #5 waits for an answer for 8 days: https://github.com/spali/a/issues/5" ]
+}
+
+@test "unanswered: the owner having the last word is fine even when old" {
+  item 5 other 2026-09-01T10:00:00Z | jq -s . | gh_respond "$ISS" -
+  { post other 2026-09-02T10:00:00Z; post spali 2026-09-03T10:00:00Z; } | jq -s . | comments 5
+  run_script
+  [ "$(count unanswered)" -eq 0 ]
+}
+
+@test "unanswered: bot comments are ignored" {
+  item 5 other 2026-11-04T10:00:00Z | jq -s . | gh_respond "$ISS" -
+  { post helper 2026-11-12T10:00:00Z Bot; post 'x[bot]' 2026-11-13T10:00:00Z; } | jq -s . | comments 5
+  run_script
+  [ "$(count unanswered)" -eq 1 ]
+  [ "$(message unanswered)" = "issue #5 waits for an answer for 10 days: https://github.com/spali/a/issues/5" ]
+}
+
+@test "unanswered: an item opened by a bot is skipped without further calls" {
+  { item 5 'renovate[bot]' 2026-10-01T10:00:00Z pr
+    item 6 helper 2026-10-01T10:00:00Z | jq -c '.user.type = "Bot"'; } | jq -s . | gh_respond "$ISS" -
+  run_script
+  [ "$(count unanswered)" -eq 0 ]
+  run ! grep -Eq 'issues/[56]/|pulls/[56]/' "$GH_LOG"
+}
+
+@test "unanswered: a review by another user is the newest post of a pull request" {
+  item 7 spali 2026-10-01T10:00:00Z pr | jq -s . | gh_respond "$ISS" -
+  post spali 2026-11-01T10:00:00Z | jq -s . | comments 7
+  jq -nc '[
+    {submitted_at: "2026-11-05T10:00:00Z", state: "COMMENTED", body: "why?", user: {login: "other", type: "User"}},
+    {submitted_at: "2026-11-06T10:00:00Z", state: "COMMENTED", body: "", user: {login: "empty", type: "User"}},
+    {submitted_at: "2026-11-07T10:00:00Z", state: "PENDING", body: "draft", user: {login: "late", type: "User"}}]' |
+    gh_respond '*repos/spali/a/pulls/7/reviews?per_page=100 --paginate' -
+  post spali 2026-11-02T10:00:00Z | jq -s . |
+    gh_respond '*repos/spali/a/pulls/7/comments?per_page=100 --paginate' -
+  run_script
+  [ "$(count unanswered)" -eq 1 ]
+  [ "$(message unanswered)" = "pull request #7 waits for an answer for 9 days: https://github.com/spali/a/pull/7" ]
+  [ "$(item_value unanswered)" = 7 ]
+}
+
+@test "unanswered: an issue needs no pull request calls" {
+  item 5 other 2026-11-04T10:00:00Z | jq -s . | gh_respond "$ISS" -
+  run_script
+  grep -q 'repos/spali/a/issues/5/comments' "$GH_LOG"
+  run ! grep -q 'pulls/5/' "$GH_LOG"
+}
+
+@test "unanswered: a newer review comment of the owner answers a pull request" {
+  item 7 other 2026-10-01T10:00:00Z pr | jq -s . | gh_respond "$ISS" -
+  post spali 2026-11-10T10:00:00Z | jq -s . |
+    gh_respond '*repos/spali/a/pulls/7/comments?per_page=100 --paginate' -
+  run_script
+  [ "$(count unanswered)" -eq 0 ]
+}
+
+@test "unanswered: the days come from the config" {
+  echo '{"managed":[],"unanswered":{"days":14}}' >"$CONFIG"
+  item 5 other 2026-11-04T10:00:00Z | jq -s . | gh_respond "$ISS" -
+  run_script
+  [ "$(count unanswered)" -eq 0 ]
+  run ! grep -q 'issues/5/' "$GH_LOG"
+}
+
+@test "unanswered: an API error on the issues list is check-failed" {
+  gh_fail "$ISS" 'gh: Server Error (HTTP 502)'
+  run_script
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(message check-failed)" = "unanswered: gh: Server Error (HTTP 502)" ]
+}
+
+@test "unanswered: an API error on the comments is check-failed" {
+  item 5 other 2026-11-04T10:00:00Z | jq -s . | gh_respond "$ISS" -
+  gh_fail '*repos/spali/a/issues/5/comments*' 'gh: Server Error (HTTP 502)'
+  run_script
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(count unanswered)" -eq 0 ]
 }
