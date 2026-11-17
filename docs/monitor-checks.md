@@ -156,6 +156,12 @@ should keep running.
 
 **Fix:** fix the code, or dismiss the alert with a reason.
 
+## unanswered
+
+🔴 Someone waits for an answer in an open pull request or issue.
+
+**Fix:** answer it, close it, or ignore the item with a reason.
+
 # Forks
 
 Forks with an upstream that are not managed.

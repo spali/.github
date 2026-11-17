@@ -128,6 +128,21 @@ J
   [[ $output != *"merge commits"* ]]
 }
 
+@test "an item ignore hides only that item and an unmatched one is unused" {
+  config <<'J'
+{"ignores":[{"repo":"spali/pub","check":"unanswered","item":70,"reason":"seen"},{"repo":"spali/pub","check":"unanswered","item":99,"reason":"closed"}]}
+J
+  findings <<'J'
+{"level":"red","check":"unanswered","repo":"spali/pub","message":"pull request #70 waits","item":70}
+{"level":"red","check":"unanswered","repo":"spali/pub","message":"issue #71 waits","item":71}
+J
+  run "$REPORT"
+  [[ $output != *"[#70]"* ]]
+  [[ $output == *"[#71]"* ]]
+  [[ $output == *"unused ignore: closed"* ]]
+  [[ $output != *"unused ignore: seen"* ]]
+}
+
 @test "unused ignore becomes info" {
   config <<'J'
 {"ignores":[{"repo":"spali/pub","check":"adoption","reason":"typo?"}]}
@@ -506,7 +521,7 @@ J
   # shellcheck source=../scripts/monitor-lib.sh
   source "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
   for c in "${MONITOR_CHECKS[@]}"; do
-    jq -e --arg c "$c" '.[$c] | (.category == "decide" or .category == "cleanup")
+    jq -e --arg c "$c" '.[$c] | (.category == "decide" or .category == "cleanup" or .category == "fix")
       and (.title | type == "string" and length > 0)
       and (.text | type == "string" and length > 0 and endswith("."))
       and (.areas | type == "array" and all(.[]; IN("release", "settings", "health", "forks", "managed", "lists")))' \

@@ -35,7 +35,7 @@ def need($e; $k; $path; test_):
 
 if type != "object" then "top level must be a mapping" else
   (if .version != 1 then "version must be 1" else empty end),
-  (keys[] | select(IN("version", "monitor", "lists", "managed", "ignores", "mirrors", "forks") | not)
+  (keys[] | select(IN("version", "monitor", "lists", "managed", "ignores", "mirrors", "forks", "unanswered") | not)
     | "unknown key \(.)"),
   (if has("forks") then "`forks:` was removed: move the entry to `managed:`" else empty end),
   (if has("mirrors") then "`mirrors:` was removed: move the entry to `managed:`" else empty end),
@@ -48,6 +48,12 @@ if type != "object" then "top level must be a mapping" else
          (type == "string" and length > 0) or
          (type == "array" and length > 0 and all(type == "string" and length > 0)) | not)
        then "monitor.runs-on must be a label or a list of labels" else empty end)
+   else empty end),
+  (if has("unanswered") and (.unanswered | type) != "object" then "unanswered must be a mapping" else empty end),
+  (if (.unanswered | type) == "object" then
+     (.unanswered | keys[] | select(. != "days") | "unanswered: unknown key \(.)"),
+     (.unanswered | if has("days") and (.days | posint | not)
+       then "unanswered.days must be a positive integer" else empty end)
    else empty end),
   (if has("lists") and (.lists | type) != "object" then "lists must be a mapping" else empty end),
   (if (.lists | type) == "object" then
@@ -127,11 +133,12 @@ if type != "object" then "top level must be a mapping" else
          elif .check == "check-failed" then "\($p).check: check-failed cannot be ignored"
          elif (.check as $c | $checks | any(. == $c)) | not then "\($p).check: unknown check \(.check | tostring)"
          else empty end),
+        (if has("item") and (.item | posint | not) then "\($p).item must be a positive integer" else empty end),
         (if (.reason | type) == "string" and (.reason | test("\\S")) then empty
          else "\($p).reason must not be empty" end)
       end),
   ([list_of("ignores")[] | select(type == "object" and has("repo") and has("check"))
-    | "\(.repo) \(.check)"] | group_by(.)[] | select(length > 1) | "duplicate ignore \(.[0])")
+    | "\(.repo) \(.check)\(if has("item") then " \(.item)" else "" end)"] | group_by(.)[] | select(length > 1) | "duplicate ignore \(.[0])")
 end'
 
 cmd_validate() {

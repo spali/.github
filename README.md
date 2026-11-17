@@ -475,7 +475,8 @@ after 48 h.
 | `monitor` | optional: `jobs` (`per-group`, the default: one job per check group; `per-repo`: one job per check group and repository) and `runs-on` (a runner label or a list of labels, default `ubuntu-latest`) |
 | `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `archived` (list of lists), `mirrors` (mapping: `synced` and `other`, each a list of lists), `external` (list of lists) |
 | `managed` | forks and mirrors kept in sync by [`sync.yml`](#fork-and-mirror-sync): `repo`, `upstream`, optional `branches`, `follow`, `tags`, `settings`, `private` |
-| `ignores` | accepted findings: `repo`, `check` (an id from the AGENTS.md catalog, not `check-failed`), `reason` (required) |
+| `unanswered` | optional: `days` (positive integer, default 7): how long someone may wait for an answer in an open pull request or issue |
+| `ignores` | accepted findings: `repo`, `check` (an id from the AGENTS.md catalog, not `check-failed`), optional `item` (a pull request or issue number: ignores only that item), `reason` (required) |
 
 ```yaml
 version: 1

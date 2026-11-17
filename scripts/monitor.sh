@@ -48,7 +48,7 @@ new_findings() {
   tail -n "+$(($1 + 1))" "$FINDINGS" |
     jq -c --slurpfile cfg "$CONFIG" '
       . as $f | ($cfg[0].ignores // []) as $ign |
-      . + {ignored: ([$ign[] | select(.repo == $f.repo and .check == $f.check) | .reason] | first)}'
+      . + {ignored: ([$ign[] | select(.repo == $f.repo and .check == $f.check and ((.item // null) == null or .item == $f.item)) | .reason] | first)}'
 }
 
 # --- phases ------------------------------------------------------------
