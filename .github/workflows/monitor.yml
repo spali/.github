@@ -126,6 +126,7 @@ jobs:
           path: |
             .monitor-work/config.json
             .monitor-work/inventory.json
+            .monitor-work/archived.json
           retention-days: 1
           include-hidden-files: true
       - &upload-findings

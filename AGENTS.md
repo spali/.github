@@ -521,7 +521,7 @@ issue and the log of the failed step. Explanations for humans:
   (`MONITOR_REPO` empty = all repositories of the group), so job names use
   `matrix.repo || 'all repositories'`. An empty group gives `[]` and the job is
   skipped by its `if` (an empty matrix would be an error). Findings travel as
-  artifacts `findings-<job>-<index>` plus `monitor-base` (config, inventory);
+  artifacts `findings-<job>-<index>` plus `monitor-base` (config, inventory, archived);
   Report concatenates them. Inventory cannot use `monitor.runs-on`: the value
   comes from its own output.
 - `git ls-remote` on mirror targets only compares the refs of the source; extra
