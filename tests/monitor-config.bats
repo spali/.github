@@ -111,8 +111,7 @@ lists:
   mirror: x
   exclusiv: []
   archived: x
-  mirrors: 3
-  forks: x
+  external: x
   exclusive: [[a, b], [c], [d, 1], x]
 YAML
   )
@@ -121,8 +120,7 @@ YAML
   [[ $stderr == *"error: $f: lists: unknown key mirror"* ]]
   [[ $stderr == *"lists: unknown key exclusiv"* ]]
   [[ $stderr == *"lists.archived must be a list of strings"* ]]
-  [[ $stderr == *"lists.mirrors must be a string"* ]]
-  [[ $stderr == *"lists.forks must be a list of strings"* ]]
+  [[ $stderr == *"lists.external must be a list of strings"* ]]
   [[ $stderr == *"lists.exclusive[1] must be a pair of strings"* ]]
   [[ $stderr == *"lists.exclusive[2] must be a pair of strings"* ]]
   [[ $stderr == *"lists.exclusive[3] must be a pair of strings"* ]]
@@ -371,4 +369,43 @@ YAML
   f=$(printf 'version: 1\nlists: {archived: ["a", "b"]}\n' | mk ok.yml)
   run "$CONFIG" validate "$f"
   [ "$status" -eq 0 ]
+}
+
+@test "lists.mirrors as a string is rejected" {
+  f=$(printf 'version: 1\nlists: {mirrors: x}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *'`lists.mirrors` is now a mapping: put the List under `lists.mirrors.synced`'* ]]
+}
+
+@test "lists.forks was removed" {
+  f=$(printf 'version: 1\nlists: {forks: [a]}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *'`lists.forks` was removed: put the Lists under `lists.mirrors.other`'* ]]
+}
+
+@test "lists.mirrors mapping with synced and other is valid" {
+  f=$(printf 'version: 1\nlists:\n  mirrors: {synced: [a], other: [b]}\n  external: [c]\n' | mk ok.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+}
+
+@test "lists.mirrors mapping is checked" {
+  f=$(printf 'version: 1\nlists: {mirrors: {foo: []}}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"lists.mirrors: unknown key foo"* ]]
+  f=$(printf 'version: 1\nlists: {mirrors: {synced: x, other: [1]}}\n' | mk bad2.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"lists.mirrors.synced must be a list of strings"* ]]
+  [[ $stderr == *"lists.mirrors.other must be a list of strings"* ]]
+}
+
+@test "lists.external must be a list of strings" {
+  f=$(printf 'version: 1\nlists: {external: "x"}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"lists.external must be a list of strings"* ]]
 }
