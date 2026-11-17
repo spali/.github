@@ -502,8 +502,12 @@ when the cause is gone.
 
 1. Create a GitHub App with a name of your choice, no webhook, installable
    only on this account. Repository permissions, all read-only: Metadata,
-   Contents, Actions, Administration, Pull requests, Dependabot alerts, Code
-   scanning alerts.
+   Contents, Actions, Administration, Issues, Pull requests, Dependabot
+   alerts, Code scanning alerts. When a release adds a permission (Issues
+   came with the `unanswered` check), grant it in the app settings and accept
+   it for the installation before updating the pin: the workflow requests
+   every permission listed here, and the token cannot be created while the
+   installation lacks one.
 2. Install it on all repositories, generate a private key.
 3. In the control repository set the variable `MONITOR_APP_CLIENT_ID` (client
    id of the app) and the secret `MONITOR_APP_KEY` (the private key).
