@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Builds the monitor's repository inventory: prints a JSON array to stdout.
-# Env: FINDINGS, MONITOR_ARCHIVED (optional file path: when set, the sorted JSON
-# array of the owned archived repository names is written there, `[]` if there
-# are none or the listing failed; archived repositories get no further calls and
-# are not part of the printed inventory). In Actions (GITHUB_ACTIONS=true) the app's installation is
-# listed; locally the user token lists all owned repositories. A repository is
-# central when it pins a shared workflow other than the maintenance ones
-# (monitor, its config check and the fork/mirror sync).
+# Env: FINDINGS, MONITOR_ARCHIVED (optional file path: when set, the sorted
+# JSON array of the owned archived repository names is written there, `[]` if
+# there are none or the listing failed; archived repositories get no further
+# calls and are not part of the printed inventory). In Actions
+# (GITHUB_ACTIONS=true) the app's installation is listed; locally the user
+# token lists all owned repositories. A repository is central when it pins a
+# shared workflow other than the maintenance ones (monitor, its config check
+# and the fork/mirror sync).
 set -euo pipefail
 # shellcheck source=scripts/monitor-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
