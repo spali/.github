@@ -107,6 +107,9 @@ phase_matrix() {
 # MONITOR_REPO the script sees only that repository (and that managed entry).
 phase_check() {
   local name=$1 script=monitor-$1.sh from checked_file rows inv=$INVENTORY cfg=$CONFIG
+  local archived=
+  # only the lists check looks at the archived repositories
+  [[ $name != lists ]] || archived="$WORK/archived.json"
   checked_file="$WORK/checked-$name"
   : >"$checked_file"
   from=$(wc -l <"$FINDINGS")
@@ -118,7 +121,7 @@ phase_check() {
       "$CONFIG" >"$cfg"
   fi
   if ! MONITOR_CHECKED=$checked_file LISTS_TOKEN=${LISTS_TOKEN:-${GH_TOKEN:-}} \
-    INVENTORY=$inv CONFIG=$cfg "$DIR/$script" >/dev/null 2>&1; then
+    ARCHIVED=$archived INVENTORY=$inv CONFIG=$cfg "$DIR/$script" >/dev/null 2>&1; then
     finding red check-failed - "$script crashed"
   fi
   rows=$(new_findings "$from")

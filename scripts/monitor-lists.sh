@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # GitHub Lists drift (list-none, list-contradiction, list-mirror-missing,
-# list-archived, config-invalid for unknown list names) and release-flow
-# adoption, and sync-failed (managed-lib.sh; here because it runs once).
-# Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths),
-# optional LISTS_TOKEN (used as GH_TOKEN for the GraphQL call only),
-# GITHUB_REPOSITORY (the control repository, for sync-failed).
+# list-archived, unmanaged, config-invalid for unknown list names) and
+# release-flow adoption, and sync-failed (managed-lib.sh; here because it runs
+# once). Archived repositories are judged only by the archive Lists
+# (lists.archived). Writes findings only. Env: FINDINGS INVENTORY CONFIG (file
+# paths), optional ARCHIVED (JSON array of the archived repository names;
+# missing, empty or unreadable: none), LISTS_TOKEN (used as GH_TOKEN for the
+# GraphQL call only), GITHUB_REPOSITORY (the control repository, for
+# sync-failed).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
 # shellcheck source=scripts/managed-lib.sh
@@ -35,16 +38,35 @@ fetch_lists() {
   printf '%s\n' "$trimmed" >"$1"
 }
 
+# archived_names prints the names in $ARCHIVED as one JSON array, [] when the
+# file is unset, missing, empty or not a JSON array.
+archived_names() {
+  local names
+  if [[ -n ${ARCHIVED:-} && -r $ARCHIVED ]] &&
+    names=$(jq -ce 'select(type == "array") | map(strings)' "$ARCHIVED" 2>/dev/null); then
+    printf '%s\n' "$names"
+  else
+    echo '[]'
+  fi
+}
+
 # Prints TSV lines "level check repo message" for every list finding.
 list_findings() {
-  jq -r --slurpfile inv "$INVENTORY" --slurpfile cfg "$CONFIG" '
+  local arch mirrors
+  arch=$(archived_names)
+  # mirrors: managed entries whose upstream is not on github.com
+  mirrors=$(managed_entries "$CONFIG" | jq -sc '[.[] | select(.kind == "mirror") | .repo]') || return 1
+  jq -r --slurpfile inv "$INVENTORY" --slurpfile cfg "$CONFIG" \
+    --argjson arch "$arch" --argjson mirrors "$mirrors" '
     ($cfg[0].lists // {}) as $cl |
+    ($cl.archived // []) as $al |
     . as $lists |
     ([$lists[].name]) as $have |
-    ([($cl.exclusive // [])[][], $cl.archive, $cl.mirrors, ($cl.forks // [])[]] |
+    ([($cl.exclusive // [])[][], $al[], $cl.mirrors, ($cl.forks // [])[]] |
       map(select(. != null)) | unique) as $used |
     ($used - $have) as $missing |
     def ok($n): ($missing | index($n)) == null;
+    (($al | length) > 0 and ($al | all(.[]; ok(.)))) as $arch_ok |
     def inlists($r): [$lists[] | select(any(.items[]; .repo == $r)) | .name];
     def row($l; $c; $r; $m): [$l, $c, $r, $m] | @tsv;
     ($missing[] | row("red"; "config-invalid"; "-"; "list \"\(.)\" not found on GitHub")),
@@ -56,21 +78,24 @@ list_findings() {
         then row("info"; "list-none"; $i.name; "fork in none of the fork lists") else empty end
       elif ($in | length) == 0 then row("info"; "list-none"; $i.name; "in no list")
       else empty end),
+    (select($arch_ok) | $arch[] | . as $r |
+      select(inlists($r) | any(.[]; IN($al[])) | not) |
+      row("info"; "list-none"; $r; "archived, in none of the archive lists")),
     (($cl.exclusive // [])[] | select(ok(.[0]) and ok(.[1])) | . as [$a, $b] |
       $inv[0][] | .name as $r | inlists($r) as $in |
       select(($in | index($a)) != null and ($in | index($b)) != null) |
       row("info"; "list-contradiction"; $r; "in \"\($a)\" and \"\($b)\"")),
     (select($cl.mirrors != null and ok($cl.mirrors)) | $cl.mirrors as $m |
-      ($cfg[0].mirrors // [])[] | .target as $t |
-      select(inlists($t) | index($m) == null) |
-      row("info"; "list-mirror-missing"; $t; "mirror target not in \"\($m)\"")),
+      [$lists[] | select(.name == $m) | .items[].repo | ascii_downcase] as $inm |
+      $mirrors[] | select(ascii_downcase | IN($inm[]) | not) |
+      row("info"; "list-mirror-missing"; .; "managed mirror not in \"\($m)\"")),
     (select($cl.mirrors != null and ok($cl.mirrors)) | $cl.mirrors as $m |
-      ([($cfg[0].managed // [])[].repo, ($cfg[0].mirrors // [])[].target] | map(ascii_downcase)) as $known |
+      [($cfg[0].managed // [])[].repo | ascii_downcase] as $known |
       [$lists[] | select(.name == $m) | .items[].repo] | unique[] |
       select(ascii_downcase | IN($known[]) | not) |
       row("info"; "unmanaged"; .; "in the mirrors list but not managed")),
-    (select($cl.archive != null and ok($cl.archive)) |
-      [$lists[] | select(.name != $cl.archive) | .name as $n |
+    (select($arch_ok) |
+      [$lists[] | select(.name | IN($al[]) | not) | .name as $n |
         .items[] | select(.archived) | {repo, n: $n}] |
       group_by(.repo)[] |
       row("info"; "list-archived"; .[0].repo;
@@ -81,8 +106,8 @@ list_findings() {
 check_adoption() {
   local out repo
   if ! out=$(jq -r --slurpfile cfg "$CONFIG" '
-      ([$cfg[0].mirrors // [] | .[].target]) as $m |
-      [.[] | select(.name != "spali/.github" and .fork == false and .central == false and ((.pins // []) | length == 0) and ([.name] | inside($m) | not)) | .name] |
+      [$cfg[0].managed // [] | .[].repo | ascii_downcase] as $m |
+      [.[] | select(.name != "spali/.github" and .fork == false and .central == false and ((.pins // []) | length == 0) and (.name | ascii_downcase | IN($m[]) | not)) | .name] |
       sort[]' "$INVENTORY" 2>/dev/null); then
     finding red check-failed - "adoption: cannot parse inventory"
     return 0

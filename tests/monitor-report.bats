@@ -560,6 +560,15 @@ J
   [[ "$(section "📋 Overview")" == *'| [o/plain](https://github.com/o/plain) | [🔵](#user-content-f-adoption-o-plain) | – | ✅ | [🔵](#user-content-f-fork-behind-o-plain) | – | ✅ |'* ]]
 }
 
+@test "overview: an archived repo (not in the inventory) shows only its Lists finding" {
+  layout
+  findings <<'J'
+{"level":"info","check":"list-none","repo":"o/old","message":"archived, in none of the archive lists"}
+J
+  run "$REPORT"
+  [[ "$(section "📋 Overview")" == *'| [o/old](https://github.com/o/old) | – | – | – | – | – | [🔵](#user-content-f-list-none-o-old) |'* ]]
+}
+
 @test "overview: 🔴 before 🔵 in one cell" {
   layout
   findings <<'J'
