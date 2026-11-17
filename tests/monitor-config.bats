@@ -54,34 +54,6 @@ mk() {
   [[ $stderr == *"duplicate ignore spali/x main-red"* ]]
 }
 
-@test "bad repo names and intervals fail" {
-  f=$(
-    mk bad.yml <<'YAML'
-version: 1
-mirrors:
-  - {target: other/x, source: "http://a", interval_hours: 0}
-forks:
-  - {repo: spali/ok, sync_interval_hours: 1.5}
-YAML
-  )
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 1 ]
-  [[ $stderr == *"mirrors[0].target: other/x is not a spali repository"* ]]
-  [[ $stderr == *"mirrors[0].source must start with https://"* ]]
-  [[ $stderr == *"mirrors[0].interval_hours must be a positive integer"* ]]
-  [[ $stderr == *"forks[0].sync_interval_hours must be a positive integer"* ]]
-}
-
-@test "missing mirror fields and non-string script fail" {
-  f=$(printf 'version: 1\nmirrors:\n  - {script: 3}\n' | mk bad.yml)
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 1 ]
-  [[ $stderr == *"mirrors[0].target is required"* ]]
-  [[ $stderr == *"mirrors[0].source is required"* ]]
-  [[ $stderr == *"mirrors[0].interval_hours is required"* ]]
-  [[ $stderr == *"mirrors[0].script must be a string"* ]]
-}
-
 @test "all problems are reported, not only the first" {
   f=$(printf 'version: 3\nfoo: 1\nbar: 2\n' | mk bad.yml)
   run --separate-stderr "$CONFIG" validate "$f"
@@ -102,7 +74,7 @@ YAML
 }
 
 @test "lists are allowed" {
-  f=$(printf 'version: 1\nlists: {archive: a}\n' | mk ok.yml)
+  f=$(printf 'version: 1\nlists: {archived: [a]}\n' | mk ok.yml)
   run "$CONFIG" validate "$f"
   [ "$status" -eq 0 ]
 }
@@ -138,7 +110,7 @@ version: 1
 lists:
   mirror: x
   exclusiv: []
-  archive: [a]
+  archived: x
   mirrors: 3
   forks: x
   exclusive: [[a, b], [c], [d, 1], x]
@@ -148,7 +120,7 @@ YAML
   [ "$status" -eq 1 ]
   [[ $stderr == *"error: $f: lists: unknown key mirror"* ]]
   [[ $stderr == *"lists: unknown key exclusiv"* ]]
-  [[ $stderr == *"lists.archive must be a string"* ]]
+  [[ $stderr == *"lists.archived must be a list of strings"* ]]
   [[ $stderr == *"lists.mirrors must be a string"* ]]
   [[ $stderr == *"lists.forks must be a list of strings"* ]]
   [[ $stderr == *"lists.exclusive[1] must be a pair of strings"* ]]
@@ -297,20 +269,6 @@ YAML
   - {repo: spali/x, upstream: "https://github.com/o/b"}' "duplicate managed spali/x"
 }
 
-@test "managed: repo in mirrors fails" {
-  f=$(printf 'version: 1\nmanaged:\n  - {repo: spali/x, upstream: "https://github.com/o/a"}\nmirrors:\n  - {target: spali/x, source: "https://example.org/a", interval_hours: 24}\n' | mk bad.yml)
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 1 ]
-  [[ $stderr == *"spali/x is in managed and in mirrors"* ]]
-}
-
-@test "managed: repo in forks fails" {
-  f=$(printf 'version: 1\nmanaged:\n  - {repo: spali/x, upstream: "https://github.com/o/a"}\nforks:\n  - {repo: spali/x, sync_interval_hours: 24}\n' | mk bad.yml)
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 1 ]
-  [[ $stderr == *"spali/x is in managed and in forks"* ]]
-}
-
 @test "managed: onto must be a valid branch name" {
   managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: "--x", rebase: auto}}}' 'managed[0].branches.main.onto: "--x" is not a valid branch name'
   managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: "a b", rebase: auto}}}' 'managed[0].branches.main.onto: "a b" is not a valid branch name'
@@ -330,11 +288,6 @@ YAML
 @test "managed: duplicate and overlap checks ignore case" {
   managed_bad '  - {repo: spali/X, upstream: "https://github.com/o/a"}
   - {repo: spali/x, upstream: "https://github.com/o/b"}' "duplicate managed spali/x"
-  f=$(printf 'version: 1\nmanaged:\n  - {repo: spali/X, upstream: "https://github.com/o/a"}\nmirrors:\n  - {target: spali/x, source: "https://example.org/a", interval_hours: 24}\nforks:\n  - {repo: spali/x, sync_interval_hours: 24}\n' | mk bad.yml)
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 1 ]
-  [[ $stderr == *"spali/x is in managed and in mirrors"* ]]
-  [[ $stderr == *"spali/x is in managed and in forks"* ]]
 }
 
 @test "managed: unknown entry key fails" {
@@ -387,4 +340,35 @@ YAML
   run --separate-stderr "$CONFIG" validate "$f"
   [ "$status" -eq 0 ]
   [ -z "$stderr" ]
+}
+
+@test "forks key was removed" {
+  f=$(printf 'version: 1\nforks: []\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *'`forks:` was removed: move the entry to `managed:`'* ]]
+}
+
+@test "mirrors key was removed" {
+  f=$(printf 'version: 1\nmirrors: []\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *'`mirrors:` was removed: move the entry to `managed:`'* ]]
+}
+
+@test "lists.archive was removed" {
+  f=$(printf 'version: 1\nlists: {archive: a}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *'`lists.archive` was removed: use `lists.archived`'* ]]
+}
+
+@test "lists.archived must be a list of strings" {
+  f=$(printf 'version: 1\nlists: {archived: "x"}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"lists.archived must be a list of strings"* ]]
+  f=$(printf 'version: 1\nlists: {archived: ["a", "b"]}\n' | mk ok.yml)
+  run "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
 }
