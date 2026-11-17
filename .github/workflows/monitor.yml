@@ -83,6 +83,7 @@ jobs:
           permission-contents: read
           permission-actions: read
           permission-administration: read
+          permission-issues: read
           permission-pull-requests: read
           permission-vulnerability-alerts: read
           permission-security-events: read
