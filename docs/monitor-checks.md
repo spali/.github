@@ -190,9 +190,14 @@ The GitHub Lists of the owner (stars), named in `lists` of `repos.yml`.
 
 ## list-none
 
-🔵 A repository is in no list, or a fork is in none of the fork lists.
+🔵 A repository is in no list (`in no list`), a fork is in none of the fork
+lists (`fork in none of the fork lists`), or an archived repository is in
+none of the archive lists of `lists.archived` (`archived, in none of the
+archive lists`). Archived repositories, forks too, are judged only by the
+archive lists. Not reported while a configured list is missing (that is
+`config-invalid`).
 
-**Fix:** add it to a list.
+**Fix:** add it to a list (an archived repository to an archive list).
 
 ## list-contradiction
 
@@ -202,19 +207,30 @@ The GitHub Lists of the owner (stars), named in `lists` of `repos.yml`.
 
 ## list-mirror-missing
 
-🔵 A mirror target is not in the mirrors list.
+🔵 A managed mirror (an entry under `managed:` whose `upstream` is not a
+github.com URL) is not in the mirrors list `lists.mirrors`
+(`managed mirror not in "<list>"`).
 
 **Fix:** add it to the list.
 
 ## list-archived
 
-🔵 An archived repository is still in a list other than the archive list.
+🔵 An archived repository is still in a list that is not one of the archive
+lists of `lists.archived` (`archived, still in "<list>"`).
 
-**Fix:** move it to the archive list.
+**Fix:** move it to an archive list.
+
+### Freeze a fork or mirror
+
+To keep a fork or mirror at its current state, without syncs or checks:
+archive it on GitHub and put it in an archive list, such as
+"📌 Pinned snapshots" (named in `lists.archived`). The monitor then checks it
+only for its lists. To move it to a newer state, unarchive it, sync it, and
+archive it again.
 
 ## adoption
 
-🔵 An own repository (not a fork, not a mirror) that does not use the shared
+🔵 An own repository (not a fork, not under `managed:`) that does not use the shared
 release flow ("no central release flow"). One finding per repository.
 
 **Fix:** adopt the flow (README "Set up a new repository"), or ignore the
@@ -368,9 +384,8 @@ stopped ref: check upstream, then in the control repository run
 
 ## unmanaged
 
-🔵 A repository is in the mirrors list (`lists.mirrors`) but is neither
-listed under `managed:` nor a mirror target under `mirrors:`
-(`in the mirrors list but not managed`).
+🔵 A repository is in the mirrors list (`lists.mirrors`) but is not listed
+under `managed:` (`in the mirrors list but not managed`).
 
 **Fix:** add it to `managed:`, or ignore the finding with a reason.
 

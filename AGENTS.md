@@ -454,10 +454,10 @@ issue and the log of the failed step. Explanations for humans:
 | `fork-behind` (info) | a fork is behind its upstream | sync when you care |
 | `fork-workflows-active` (info) | a fork runs its own workflows | disable Actions in the fork's settings if unwanted (disabled Actions = clean) |
 | `fork-delete-candidate` (info) | no own commits on the default branch, no open upstream PR from the fork, and every fork branch also exists upstream or was the head of a closed or merged upstream PR from the fork | consider deleting the fork |
-| `list-none` (info) | a repository is in no list | add it to a list |
+| `list-none` (info) | a repository is in no list, a fork in none of the fork lists, or an archived repository in none of the archive lists (`lists.archived`; archived forks too) | add it to a list |
 | `list-contradiction` (info) | a repository is in both lists of an exclusive pair | fix the lists |
-| `list-mirror-missing` (info) | a mirror target is not in the mirrors list | add it to the list |
-| `list-archived` (info) | an archived own repository is in a list other than the archive list | move it |
+| `list-mirror-missing` (info) | a managed mirror (`managed:` entry, upstream not on github.com) is not in the mirrors list | add it to the list |
+| `list-archived` (info) | an archived own repository is in a list that is not an archive list (`lists.archived`) | move it |
 | `managed-missing` | a repository under `managed:` does not exist (no other check runs for it) | let the sync create it (a mirror: run the `gh repo create` command from the failed sync job once, 4.11), or fix the entry |
 | `managed-settings` | a managed repository's issues/pull requests/wiki/discussions/projects/Actions differ from its `settings:` (default all off) | correct the setting (owner approval) or the `settings:` entry |
 | `managed-behind` | a managed repository's default branch, `rebase: auto` branch or followed branch (`follow:`) misses upstream commits older than 48 h (a mirror branch lacking the upstream commit: `differs from upstream` and no push for 48 h), or a declared or followed branch is missing in the target; tags (unless `tags: false`) differ from upstream and no push for 48 h; heads of open upstream PRs from the fork excepted; a ref the sync stopped on an upstream rewrite may also show (once the last push is older than 48 h; `sync-failed` is the reliable signal) | read the sync run (a stopped ref: accept it, 4.11) |
@@ -465,8 +465,8 @@ issue and the log of the failed step. Explanations for humans:
 | `rebase-pending` (info) | a `rebase: manual` branch is behind its `onto` upstream | `gh workflow run sync.yml -f repo=<repo> -f branch=<branch>` in the control repository (4.11) |
 | `sync-failed` | per managed repository, its newest job `Sync · <repo>` with a result (cancelled, skipped or no conclusion passed over) of `sync.yml` on `main` of the control repository did not succeed (`failure`, `timed_out`, …); without repository: a non-repository job did not succeed in the newest run where it has a result (same rule); more jobs than one page is check-failed (checked in Lists when `managed:` has entries; not checked in a local run), also when it stopped a ref on an upstream rewrite (`upstream rewritten`, `upstream moved tag`) | read the sync log; a stopped ref: check upstream, then accept it (4.11) |
 | `contribution-stale` (info) | an open upstream pull request from a fork is older than 90 days (unmanaged forks) | follow up or close it |
-| `unmanaged` (info) | a repository in the mirrors list is neither under `managed:` nor a `mirrors:` target | add it to `managed:` or ignore |
-| `adoption` (info) | a repository does not use the release flow (one finding per repository) | adopt it (4.6) or ignore |
+| `unmanaged` (info) | a repository in the mirrors list is not under `managed:` | add it to `managed:` or ignore |
+| `adoption` (info) | a repository (not a fork, not under `managed:`) does not use the release flow (one finding per repository) | adopt it (4.6) or ignore |
 | `check-failed` | a check could not run (API error, rate limit, bad response, empty inventory) | read the detail, fix access or the script; never ignore |
 | `config-invalid` | the control file is missing or invalid, or names an unknown list/check | fix the file |
 | `ignore-unused` (info) | an ignore matched no finding | remove it, or fix the typo |

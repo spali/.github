@@ -276,6 +276,20 @@ EOS
   [ "$(jq -c . "$BATS_TEST_TMPDIR/work/archived.json")" = '["spali/old","spali/older"]' ]
 }
 
+@test "lists phase gets the archived repositories" {
+  cat >"$MONITOR_SCRIPTS_DIR/monitor-repos.sh" <<EOS
+#!/usr/bin/env bash
+echo '["spali/old"]' >"\$MONITOR_ARCHIVED"
+cat "$BATS_TEST_TMPDIR/inventory.json"
+EOS
+  printf '#!/usr/bin/env bash\ncp "$ARCHIVED" "%s/archived.seen"\n' "$BATS_TEST_TMPDIR" >"$MONITOR_SCRIPTS_DIR/monitor-lists.sh"
+  phase config
+  phase inventory
+  phase lists
+  [ "$status" -eq 0 ]
+  [ "$(jq -c . "$BATS_TEST_TMPDIR/archived.seen")" = '["spali/old"]' ]
+}
+
 @test "inventory phase fails when the script crashes" {
   printf '#!/usr/bin/env bash\nexit 2\n' >"$MONITOR_SCRIPTS_DIR/monitor-repos.sh"
   phase config

@@ -398,7 +398,7 @@ provides the scripts and the reusable workflows `monitor.yml` and
 only thing it writes is the overview issue (with its monitor comment and its
 label) in the control repository, with that repository's `GITHUB_TOKEN`.
 
-It checks five groups (archived repositories are never checked):
+It checks five groups (archived repositories only by the Lists check):
 
 | Group | Repositories | Checks |
 |---|---|---|
@@ -406,7 +406,7 @@ It checks five groups (archived repositories are never checked):
 | Health | all non-fork, unmanaged repositories | red `main`, open Renovate pull requests, disabled workflows, Dependabot and code scanning alerts |
 | Forks | unmanaged forks | upstream commits missing, active workflows, delete candidates, old pull requests, branches with own commits |
 | Managed | forks and mirrors listed under `managed` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, undeclared branches with own commits, manual rebases pending |
-| Lists | all repositories | GitHub Lists that contradict the archive state, forks or mirrors; repositories without the release flow; the last run of the control repository's sync failed |
+| Lists | all repositories, archived ones too | GitHub Lists that contradict the archive state, forks or mirrors (an archived repository belongs in an archive list of `lists.archived`, see [freeze a fork or mirror](docs/monitor-checks.md#freeze-a-fork-or-mirror)); repositories without the release flow; the last run of the control repository's sync failed |
 
 The pin check also covers the control repository's own pin of `monitor.yml`.
 A repository that only calls the maintenance workflows (monitor, sync,
