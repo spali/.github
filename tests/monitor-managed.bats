@@ -94,6 +94,18 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   run ! grep -E 'repos/(spali|up)/f/' "$GH_LOG"
 }
 
+@test "archived managed repo is one managed-settings finding and no further checks" {
+  respond_jq "$REPO" '{archived: true, default_branch: "main", private: false, pushed_at: "2026-11-01T00:00:00Z",
+    has_issues: true, has_pull_requests: false, has_wiki: true, has_discussions: false, has_projects: false}'
+  run_script
+  [ "$(jq -s length "$FINDINGS")" -eq 1 ]
+  [ "$(count managed-settings)" -eq 1 ]
+  [ "$(level managed-settings)" = red ]
+  [ "$(message managed-settings)" = 'archived but still under `managed:`: remove the entry' ]
+  [ "$(repo_of managed-settings)" = spali/f ]
+  run ! grep -E 'repos/(spali|up)/f/' "$GH_LOG"
+}
+
 @test "settings that differ are managed-settings" {
   respond_jq "$REPO" '{default_branch: "main", private: false, pushed_at: "2026-11-01T00:00:00Z",
     has_issues: true, has_pull_requests: false, has_wiki: true, has_discussions: false, has_projects: false}'
