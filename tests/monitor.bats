@@ -119,6 +119,27 @@ EOS
   [[ $output == *"0 red"* ]]
 }
 
+@test "an item ignore hides only its item" {
+  cat >"$MONITOR_CONFIG" <<'EOS'
+version: 1
+ignores:
+  - repo: spali/some-repo
+    check: unanswered
+    item: 70
+    reason: reviewed elsewhere
+EOS
+  printf '#!/usr/bin/env bash\nsource "$(dirname "$0")/monitor-lib.sh"\nfinding red unanswered spali/some-repo x 70\n' \
+    >"$MONITOR_SCRIPTS_DIR/monitor-lists.sh"
+  run "$MONITOR"
+  [ "$status" -eq 0 ]
+  [[ $output == *"0 red"* ]]
+  printf '#!/usr/bin/env bash\nsource "$(dirname "$0")/monitor-lib.sh"\nfinding red unanswered spali/some-repo x 71\n' \
+    >"$MONITOR_SCRIPTS_DIR/monitor-lists.sh"
+  run "$MONITOR"
+  [ "$status" -eq 1 ]
+  [[ $output == *"1 red"* ]]
+}
+
 @test "the report goes to GITHUB_STEP_SUMMARY when set" {
   export GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary.md"
   run --separate-stderr "$MONITOR"

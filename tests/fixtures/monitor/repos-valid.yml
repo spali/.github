@@ -8,6 +8,8 @@ lists:
     synced: ["👀  Mirrors"]
     other: ["▶️ Contribution forks", "♻️ Customization forks"]
   external: ["🔍 Interesting and related"]
+unanswered:
+  days: 14
 ignores:
   - repo: spali/old-thing
     check: main-red

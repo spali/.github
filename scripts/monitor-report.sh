@@ -71,7 +71,7 @@ $cfg[0] as $cfg | . as $f
   # A table row; with .anchor its first cell starts with that row anchor.
   def row: "| \(if .anchor then "<a name=\"\(.anchor)\"></a>" else "" end)\(if .repo then (.repo | repo_link) else "-" end) | \(details) | \(fix | if . then "[\(.[0])](\(.[1]))" else "" end) |";
   def table: "| Repository | Details | Fix at |\n| --- | --- | --- |\n" + (map(row) | join("\n")) + "\n";
-  def matches($i): .repo == $i.repo and .check == $i.check;
+  def matches($i): .repo == $i.repo and .check == $i.check and (($i.item // null) == null or $i.item == .item);
   def count($n; $one; $more): "\($n) \(if $n == 1 then $one else $more end)";
 
   ($cfg.ignores // []) as $ign

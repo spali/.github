@@ -27,6 +27,11 @@ gh_fail_raw() {
   [ "$(jq -c . "$FINDINGS")" = '{"level":"red","check":"main-red","repo":"spali/x","message":"m"}' ]
 }
 
+@test "finding with an item carries it as a number" {
+  finding red unanswered spali/r "m" 70
+  [ "$(jq -c . "$FINDINGS")" = '{"level":"red","check":"unanswered","repo":"spali/r","message":"m","item":70}' ]
+}
+
 @test "checked appends the repo to MONITOR_CHECKED" {
   export MONITOR_CHECKED="$BATS_TEST_TMPDIR/checked"
   checked spali/x

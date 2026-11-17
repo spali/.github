@@ -416,3 +416,48 @@ YAML
   [ "$status" -eq 1 ]
   [[ $stderr == *"lists.external must be a list of strings"* ]]
 }
+
+@test "unanswered days is accepted" {
+  f=$(printf 'version: 1\nunanswered:\n  days: 14\n' | mk ok.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+}
+
+@test "unanswered: unknown key fails" {
+  f=$(printf 'version: 1\nunanswered:\n  day: 3\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"error: $f: unanswered: unknown key day"* ]]
+}
+
+@test "unanswered.days must be a positive integer" {
+  for v in 0 -1 1.5 abc; do
+    f=$(printf 'version: 1\nunanswered:\n  days: %s\n' "$v" | mk bad.yml)
+    run --separate-stderr "$CONFIG" validate "$f"
+    [ "$status" -eq 1 ]
+    [[ $stderr == *"error: $f: unanswered.days must be a positive integer"* ]]
+  done
+}
+
+@test "ignores item must be a positive integer" {
+  for v in 0 -2 1.5 abc; do
+    f=$(printf 'version: 1\nignores:\n  - {repo: spali/x, check: unanswered, item: %s, reason: r}\n' "$v" | mk bad.yml)
+    run --separate-stderr "$CONFIG" validate "$f"
+    [ "$status" -eq 1 ]
+    [[ $stderr == *"error: $f: ignores[0].item must be a positive integer"* ]]
+  done
+}
+
+@test "ignores with different items are not duplicates" {
+  f=$(printf 'version: 1\nignores:\n  - {repo: spali/x, check: unanswered, item: 1, reason: a}\n  - {repo: spali/x, check: unanswered, item: 2, reason: b}\n' | mk ok.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+}
+
+@test "the same item ignore twice is a duplicate" {
+  f=$(printf 'version: 1\nignores:\n  - {repo: spali/x, check: unanswered, item: 1, reason: a}\n  - {repo: spali/x, check: unanswered, item: 1, reason: b}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"duplicate ignore spali/x unanswered 1"* ]]
+}

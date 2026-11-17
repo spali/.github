@@ -7,7 +7,7 @@ MONITOR_CHECKS=(
   devbuild-closed-pr orphan-tag several-drafts next-stale pin-behind
   settings-merge settings-alerts settings-pvr settings-actions
   ruleset-main ruleset-tags main-red renovate-stale workflow-disabled
-  dependabot-alert code-scanning-alert
+  dependabot-alert code-scanning-alert unanswered
   fork-behind fork-workflows-active fork-delete-candidate
   list-none list-contradiction list-archived list-external-own
   managed-missing managed-settings managed-behind branch-undeclared
@@ -56,6 +56,8 @@ MONITOR_TODO='{
     "text": "A dependency has a known vulnerability: update it, or dismiss the alert with a reason."},
   "code-scanning-alert": {"category": "cleanup", "areas": ["health"], "title": "Handle code scanning alerts",
     "text": "Code scanning found a problem in the code: fix it, or dismiss the alert with a reason."},
+  "unanswered": {"category": "fix", "areas": ["health"], "title": "Answer waiting pull requests and issues",
+    "text": "Someone waits for an answer in an open pull request or issue: answer it, close it, or ignore the item with a reason."},
   "fork-behind": {"category": "cleanup", "areas": ["forks"], "title": "Bring forks up to date",
     "text": "A fork is behind its upstream: sync it by hand, add it to `managed:` to keep it synced, or archive it to freeze this state."},
   "fork-workflows-active": {"category": "cleanup", "areas": ["forks"], "title": "Turn off Actions in forks",
@@ -132,7 +134,7 @@ NA_PATTERNS=(
 # finding LEVEL CHECK REPO MESSAGE appends one JSON line to $FINDINGS.
 # REPO is - for none.
 finding() {
-  local level=$1 check=$2 repo=$3 message=$4 c known=
+  local level=$1 check=$2 repo=$3 message=$4 item=${5:-} c known=
   need_env FINDINGS
   case $level in
     red | info | skip) ;;
@@ -143,9 +145,11 @@ finding() {
   done
   [[ -n $known ]] || die "unknown check $check"
   [[ $repo != - ]] || repo=
+  [[ -z $item || $item =~ ^[0-9]+$ ]] || die "item $item is not a number"
   jq -cn --arg level "$level" --arg check "$check" --arg repo "$repo" \
-    --arg message "$message" \
-    '{level: $level, check: $check, repo: (if $repo == "" then null else $repo end), message: $message}' \
+    --arg message "$message" --arg item "$item" \
+    '{level: $level, check: $check, repo: (if $repo == "" then null else $repo end), message: $message}
+      + (if $item == "" then {} else {item: ($item | tonumber)} end)' \
     >>"$FINDINGS"
 }
 
