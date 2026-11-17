@@ -9,7 +9,7 @@ MONITOR_CHECKS=(
   ruleset-main ruleset-tags main-red renovate-stale workflow-disabled
   dependabot-alert code-scanning-alert
   fork-behind fork-workflows-active fork-delete-candidate
-  list-none list-contradiction list-mirror-missing list-archived
+  list-none list-contradiction list-archived list-external-own
   managed-missing managed-settings managed-behind branch-undeclared
   rebase-pending sync-failed contribution-stale unmanaged
   adoption check-failed config-invalid ignore-unused
@@ -63,13 +63,13 @@ MONITOR_TODO='{
   "fork-delete-candidate": {"category": "decide", "areas": ["forks"], "title": "Delete forks without own work?",
     "text": "No own commits and no open pull request upstream: delete it, archive it to freeze the state you reference, or add it to `managed:` to keep it synced."},
   "list-none": {"category": "cleanup", "areas": ["lists"], "title": "Add repositories to a List",
-    "text": "The repository is in no List, a fork is in none of the fork Lists, or an archived repository is in none of the archive Lists: add it to the right List."},
+    "text": "The repository is in no List, a fork or managed repository is in none of the mirrors Lists, or an archived repository is in none of the archive Lists: add it to the right List."},
   "list-contradiction": {"category": "decide", "areas": ["lists"], "title": "Choose one of two exclusive Lists",
     "text": "The repository is in both Lists of an exclusive pair: decide which one fits and remove it from the other."},
-  "list-mirror-missing": {"category": "cleanup", "areas": ["lists"], "title": "Add mirrors to the mirrors List",
-    "text": "A managed mirror is not in the mirrors List: add it."},
   "list-archived": {"category": "cleanup", "areas": ["lists"], "title": "Move archived repositories to an archive List",
     "text": "An archived repository is still in a List that is not an archive List: move it to an archive List."},
+  "list-external-own": {"category": "cleanup", "areas": ["lists"], "title": "Move own repositories out of external Lists",
+    "text": "Lists in lists.external are for repositories of others: move own work to your stack List and own forks to a mirrors List."},
   "managed-missing": {"category": "cleanup", "areas": ["managed"], "title": "Create missing managed repositories",
     "text": "A repository under `managed:` does not exist: let the sync create it, or fix the entry."},
   "managed-settings": {"category": "cleanup", "areas": ["managed"], "title": "Fix the settings of managed repositories",
@@ -84,8 +84,8 @@ MONITOR_TODO='{
     "text": "The last sync of a managed repository, or the sync run itself, did not succeed: read the sync log."},
   "contribution-stale": {"category": "decide", "areas": ["forks"], "title": "Follow up old pull requests upstream",
     "text": "An own pull request upstream is open for more than 90 days: ping, close or keep it."},
-  "unmanaged": {"category": "decide", "areas": ["lists"], "title": "Manage repositories in the mirrors List?",
-    "text": "A repository in the mirrors List is not under `managed:`: add it to `managed:`, or ignore it."},
+  "unmanaged": {"category": "decide", "areas": ["lists"], "title": "Manage repositories in the synced mirrors Lists?",
+    "text": "A repository in a synced mirrors List is not under `managed:`: add it to `managed:`, or ignore it."},
   "adoption": {"category": "decide", "areas": ["release"], "title": "Adopt the release flow?",
     "text": "An own repository does not use the central release flow: adopt it, or ignore the finding."},
   "check-failed": {"category": "cleanup", "areas": ["release", "settings", "health", "forks", "managed", "lists"], "title": "Fix checks that could not run",

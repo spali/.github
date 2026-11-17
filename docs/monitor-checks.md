@@ -194,15 +194,20 @@ The GitHub Lists of the owner (stars), named in `lists` of `repos.yml`.
 
 ## list-none
 
-🔵 A repository is in no list (`in no list`), a fork is in none of the fork
-lists (`fork in none of the fork lists`), or an archived repository is in
-none of the archive lists of `lists.archived` (`archived, in none of the
-archive lists`). Archived repositories, forks too, are judged only by the
-archive lists. The fork and archive variants are not reported while one of
-their configured Lists is missing (that is `config-invalid`); "in no list" is
-still reported.
+🔵 A repository is in no list (`in no list`), a fork or a repository under
+`managed:` (such as a mirror of a repository outside GitHub) is in none of the
+mirrors lists of `lists.mirrors` (`synced` and `other`, for example
+"👀  Mirrors", "▶️ Constribution forks", "♻️ Customization forks"; message
+`in none of the mirrors lists`), or an archived repository is in none of the
+archive lists of `lists.archived` (`archived, in none of the archive lists`).
+Archived repositories, forks too, are judged only by the archive lists. The
+mirrors and archive variants are not reported while one of their configured
+Lists is missing (that is `config-invalid`); "in no list" is still reported.
+Without mirrors lists, forks and managed repositories get the plain
+`in no list` rule.
 
-**Fix:** add it to a list (an archived repository to an archive list).
+**Fix:** add it to a list (a fork or managed repository to a mirrors list, an
+archived repository to an archive list).
 
 ## list-contradiction
 
@@ -210,20 +215,21 @@ still reported.
 
 **Fix:** remove it from one of them.
 
-## list-mirror-missing
-
-🔵 A managed mirror (an entry under `managed:` whose `upstream` is not a
-github.com URL) is not in the mirrors list `lists.mirrors`
-(`managed mirror not in "<list>"`).
-
-**Fix:** add it to the list.
-
 ## list-archived
 
 🔵 An archived repository is still in a list that is not one of the archive
 lists of `lists.archived` (`archived, still in "<list>"`).
 
 **Fix:** move it to an archive list.
+
+## list-external-own
+
+🔵 An own repository (not archived) is in a list of `lists.external`, such as
+"🔍 Interesting and related", which is for repositories of others
+(`own repository in "<list>"`). An archived one is `list-archived` instead.
+
+**Fix:** move own work to your stack list and own forks to a mirrors list
+(`lists.mirrors`).
 
 ### Freeze a fork or mirror
 
@@ -397,8 +403,10 @@ stopped ref: check upstream, then in the control repository run
 
 ## unmanaged
 
-🔵 A repository is in the mirrors list (`lists.mirrors`) but is not listed
-under `managed:` (`in the mirrors list but not managed`).
+🔵 A repository (not archived) is in a synced mirrors list
+(`lists.mirrors.synced`, for example "👀  Mirrors") but is not listed under
+`managed:` (`in "<list>" but not managed`). The `other` mirrors lists may
+hold unsynced forks.
 
 **Fix:** add it to `managed:`, or ignore the finding with a reason.
 

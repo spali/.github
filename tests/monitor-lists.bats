@@ -18,10 +18,12 @@ setup() {
   F1="▶️ Constribution forks"
   F2="♻️ Customization forks"
   PIN="📌 Pinned snapshots"
+  EXT="🔍 Interesting and related"
   jq -n '{lists: {exclusive: [["🚀 My stack", "🗃️ My stack Archive"],
       ["▶️ Constribution forks", "♻️ Customization forks"]],
-      archived: ["🗃️ My stack Archive", "📌 Pinned snapshots"], mirrors: "👀  Mirrors",
-      forks: ["▶️ Constribution forks", "♻️ Customization forks"]}}' >"$CONFIG"
+      archived: ["🗃️ My stack Archive", "📌 Pinned snapshots"],
+      mirrors: {synced: ["👀  Mirrors"], other: ["▶️ Constribution forks", "♻️ Customization forks"]},
+      external: ["🔍 Interesting and related"]}}' >"$CONFIG"
   inv spali/a false false true
 }
 
@@ -37,10 +39,16 @@ lists() {
     (.items | map({nameWithOwner: .[0], isArchived: .[1]}))}})}}}}" | gh_respond '*graphql*' -
 }
 
-# all_lists JQ_ITEMS: all six lists (0 stack, 1 archive, 2 mirrors, 3 and 4
-# fork lists, 5 pinned snapshots), JQ_ITEMS sets the items of some.
+# all_lists JQ_ITEMS: all seven lists (0 stack, 1 archive, 2 synced mirrors,
+# 3 and 4 other mirrors lists, 5 pinned snapshots, 6 external), JQ_ITEMS sets
+# the items of some.
 all_lists() {
-  lists "[\"$STACK\", \"$ARCH\", \"$MIRR\", \"$F1\", \"$F2\", \"$PIN\"] | map({name: ., items: []}) | $1"
+  lists "[\"$STACK\", \"$ARCH\", \"$MIRR\", \"$F1\", \"$F2\", \"$PIN\", \"$EXT\"] | map({name: ., items: []}) | $1"
+}
+
+# config JQ: change the control file with JQ.
+config() {
+  jq "$1" "$CONFIG" >"$CONFIG.n" && mv "$CONFIG.n" "$CONFIG"
 }
 
 # archived JSON_ARRAY: the archived repositories of the inventory phase.
@@ -83,15 +91,33 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(message list-none)" = "in no list" ]
 }
 
-@test "list-none: fork in none of the fork lists" {
+@test "list-none: fork in none of the mirrors lists" {
   inv spali/f false true true
   all_lists '(.[0].items = [["spali/f", false]])'
   run_script
   [ "$(count list-none)" -eq 1 ]
-  [ "$(message list-none)" = "fork in none of the fork lists" ]
+  [ "$(level list-none)" = info ]
+  [ "$(repo list-none)" = spali/f ]
+  [ "$(message list-none)" = "in none of the mirrors lists" ]
 }
 
-@test "fork in a fork list is fine" {
+@test "list-none: fork in no list at all is in none of the mirrors lists" {
+  inv spali/f false true true
+  all_lists '.'
+  run_script
+  [ "$(count list-none)" -eq 1 ]
+  [ "$(message list-none)" = "in none of the mirrors lists" ]
+}
+
+@test "fork in the synced mirrors list is fine when managed" {
+  inv spali/f false true true
+  config '.managed = [{repo: "spali/f", upstream: "https://github.com/up/f"}]'
+  all_lists '(.[2].items = [["spali/f", false]])'
+  run_script
+  [ "$(jq -sc 'map(.check) - ["sync-failed"]' "$FINDINGS")" = '[]' ]
+}
+
+@test "fork in an other mirrors list is fine" {
   inv spali/f false true true
   all_lists '(.[3].items = [["spali/f", false]])'
   run_script
@@ -107,20 +133,28 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(message list-contradiction)" = 'in "🚀 My stack" and "🗃️ My stack Archive"' ]
 }
 
-@test "managed mirror not in the mirrors list is list-mirror-missing" {
-  echo '{"lists": {"mirrors": "👀  Mirrors"}, "managed": [{"repo": "spali/m", "upstream": "https://salsa.example/x.git"},
-    {"repo": "spali/f", "upstream": "https://github.com/up/f"}, {"repo": "spali/f2", "upstream": "https://GitHub.com/up/f2"}]}' >"$CONFIG"
-  inv spali/m false false false
-  all_lists '(.[0].items = [["spali/m", false], ["spali/f", false], ["spali/f2", false]])'
+@test "managed non-fork mirror in no mirrors list is list-none, not list-mirror-missing" {
+  config '.managed = [{repo: "spali/knx.js", upstream: "https://bitbucket.example/x.git"}]'
+  inv spali/knx.js false false false
+  all_lists '(.[0].items = [["spali/knx.js", false]])'
   run_script
-  [ "$(count list-mirror-missing)" -eq 1 ]
-  [ "$(level list-mirror-missing)" = info ]
-  [ "$(repo list-mirror-missing)" = spali/m ]
-  [ "$(message list-mirror-missing)" = 'managed mirror not in "👀  Mirrors"' ]
+  [ "$(count list-mirror-missing)" -eq 0 ]
+  [ "$(count list-none)" -eq 1 ]
+  [ "$(repo list-none)" = spali/knx.js ]
+  [ "$(message list-none)" = "in none of the mirrors lists" ]
 }
 
-@test "managed mirror in the mirrors list is fine, also in other case, and no adoption" {
-  echo '{"lists": {"mirrors": "👀  Mirrors"}, "managed": [{"repo": "spali/M", "upstream": "https://salsa.example/x.git"}]}' >"$CONFIG"
+@test "managed non-fork mirror in no list at all is in none of the mirrors lists" {
+  config '.managed = [{repo: "spali/m", upstream: "https://salsa.example/x.git"}]'
+  inv spali/m false false false
+  all_lists '.'
+  run_script
+  [ "$(count list-none)" -eq 1 ]
+  [ "$(message list-none)" = "in none of the mirrors lists" ]
+}
+
+@test "managed mirror in the synced mirrors list is fine, also in other case, and no adoption" {
+  config '.managed = [{repo: "spali/M", upstream: "https://salsa.example/x.git"}]'
   inv spali/m false false false
   all_lists '(.[2].items = [["spali/m", false]])'
   run_script
@@ -128,17 +162,73 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(jq -sc 'map(.check)' "$FINDINGS")" = '["sync-failed"]' ]
 }
 
-@test "list-mirror-missing needs the mirrors list" {
-  echo '{"lists": {"mirrors": "👀  Mirrors"}, "managed": [{"repo": "spali/m", "upstream": "https://salsa.example/x.git"}]}' >"$CONFIG"
-  inv spali/m false false true
-  lists '[{name: "🚀 My stack", items: [["spali/m", false]]}]'
+@test "managed non-fork repo in an other mirrors list is fine" {
+  config '.managed = [{repo: "spali/m", upstream: "https://github.com/up/m"}]'
+  inv spali/m false false false
+  all_lists '(.[4].items = [["spali/m", false]])'
   run_script
-  [ "$(count config-invalid)" -eq 1 ]
-  [ "$(count list-mirror-missing)" -eq 0 ]
+  [ "$(count list-none)" -eq 0 ]
 }
 
-@test "mirror list entry without managed entry is unmanaged" {
-  echo '{"lists": {"mirrors": "👀  Mirrors"}, "managed": [{"repo": "spali/ok", "upstream": "https://github.com/up/ok"},
+@test "missing other mirrors list is config-invalid and no mirrors list-none" {
+  jq -n '[{name: "spali/f", private: false, fork: true, central: true},
+    {name: "spali/m", private: false, fork: false, central: true}]' >"$INVENTORY"
+  config '.managed = [{repo: "spali/m", upstream: "https://salsa.example/x.git"}]'
+  lists "[\"$STACK\", \"$ARCH\", \"$MIRR\", \"$F1\", \"$PIN\", \"$EXT\"] | map({name: ., items: []})"
+  run_script
+  [ "$(count config-invalid)" -eq 1 ]
+  [ "$(message config-invalid)" = 'list "♻️ Customization forks" not found on GitHub' ]
+  [ "$(count list-none)" -eq 0 ]
+}
+
+@test "missing synced mirrors list is config-invalid, no mirrors list-none and no unmanaged" {
+  inv spali/f false true true
+  lists "[\"$STACK\", \"$ARCH\", \"$F1\", \"$F2\", \"$PIN\", \"$EXT\"] | map({name: ., items: []})"
+  run_script
+  [ "$(count config-invalid)" -eq 1 ]
+  [ "$(message config-invalid)" = 'list "👀  Mirrors" not found on GitHub' ]
+  [ "$(count list-none)" -eq 0 ]
+  [ "$(count unmanaged)" -eq 0 ]
+}
+
+@test "only other mirrors lists: no unmanaged, list-none still works" {
+  config '.lists.mirrors = {other: ["▶️ Constribution forks", "♻️ Customization forks"]}'
+  jq -n '[{name: "spali/f", private: false, fork: true, central: true},
+    {name: "spali/g", private: false, fork: true, central: true}]' >"$INVENTORY"
+  all_lists '(.[2].items = [["spali/f", false], ["spali/x", false]]) | (.[3].items = [["spali/g", false]])'
+  run_script
+  [ "$(count unmanaged)" -eq 0 ]
+  [ "$(count list-none)" -eq 1 ]
+  [ "$(repo list-none)" = spali/f ]
+  [ "$(message list-none)" = "in none of the mirrors lists" ]
+}
+
+@test "repo in a synced and an other mirrors list counts once" {
+  inv spali/f false true true
+  all_lists '(.[2].items = [["spali/f", false]]) | (.[3].items = [["spali/f", false]])'
+  run_script
+  [ "$(count list-none)" -eq 0 ]
+  [ "$(count unmanaged)" -eq 1 ]
+  [ "$(message unmanaged)" = 'in "👀  Mirrors" but not managed' ]
+}
+
+@test "repo listed twice in a synced mirrors list is unmanaged once" {
+  all_lists '(.[2].items = [["spali/x", false], ["spali/x", false]])'
+  run_script
+  [ "$(count unmanaged)" -eq 1 ]
+}
+
+@test "unmanaged is reported per synced list" {
+  config '.lists.mirrors.synced = ["👀  Mirrors", "📌 Pinned snapshots"] | .lists.archived = ["🗃️ My stack Archive"]'
+  all_lists '(.[2].items = [["spali/x", false]]) | (.[5].items = [["spali/x", false]])'
+  run_script
+  [ "$(count unmanaged)" -eq 2 ]
+  [ "$(message unmanaged 0)" = 'in "👀  Mirrors" but not managed' ]
+  [ "$(message unmanaged 1)" = 'in "📌 Pinned snapshots" but not managed' ]
+}
+
+@test "synced mirrors list entry without managed entry is unmanaged" {
+  echo '{"lists": {"mirrors": {"synced": ["👀  Mirrors"]}}, "managed": [{"repo": "spali/ok", "upstream": "https://github.com/up/ok"},
     {"repo": "spali/m", "upstream": "https://salsa.example/m.git"}]}' >"$CONFIG"
   inv spali/m false false false
   all_lists '(.[2].items = [["spali/m", false], ["spali/other", false], ["spali/OK", false], ["spali/m", false]])'
@@ -146,20 +236,63 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(count unmanaged)" -eq 1 ]
   [ "$(level unmanaged)" = info ]
   [ "$(repo unmanaged)" = spali/other ]
-  [ "$(message unmanaged)" = "in the mirrors list but not managed" ]
+  [ "$(message unmanaged)" = 'in "👀  Mirrors" but not managed' ]
 }
 
-@test "archived repo in the mirrors list is not unmanaged" {
+@test "archived repo in the synced mirrors list is not unmanaged" {
   all_lists '(.[2].items = [["spali/old", true]])'
   run_script
   [ "$(count unmanaged)" -eq 0 ]
 }
 
-@test "unmanaged needs the mirrors list name" {
+@test "unmanaged needs synced mirrors lists" {
   all_lists '(.[2].items = [["spali/other", false]])'
-  jq '.lists.mirrors = null' "$CONFIG" >"$CONFIG.n" && mv "$CONFIG.n" "$CONFIG"
+  config '.lists.mirrors |= del(.synced)'
   run_script
   [ "$(count unmanaged)" -eq 0 ]
+}
+
+@test "list-external-own: own repository in an external list" {
+  all_lists '(.[0].items = [["spali/a", false]]) | (.[6].items = [["spali/a", false], ["spali/a", false]])'
+  run_script
+  [ "$(count list-external-own)" -eq 1 ]
+  [ "$(level list-external-own)" = info ]
+  [ "$(repo list-external-own)" = spali/a ]
+  [ "$(message list-external-own)" = 'own repository in "🔍 Interesting and related"' ]
+}
+
+@test "archived own repository in an external list is only list-archived" {
+  archived '["spali/old"]'
+  all_lists '(.[0].items = [["spali/a", false]]) | (.[1].items = [["spali/old", true]]) | (.[6].items = [["spali/old", true]])'
+  run_script
+  [ "$(count list-external-own)" -eq 0 ]
+  [ "$(count list-archived)" -eq 1 ]
+  [ "$(message list-archived)" = 'archived, still in "🔍 Interesting and related"' ]
+  [ "$(jq -sc 'map(.check)' "$FINDINGS")" = '["list-archived"]' ]
+}
+
+@test "missing external list is config-invalid, no list-external-own" {
+  config '.lists.external = ["🔍 Interesting and related", "🔍 Gone"]'
+  all_lists '(.[0].items = [["spali/a", false]]) | (.[6].items = [["spali/a", false]])'
+  run_script
+  [ "$(count config-invalid)" -eq 1 ]
+  [ "$(message config-invalid)" = 'list "🔍 Gone" not found on GitHub' ]
+  [ "$(count list-external-own)" -eq 1 ]
+}
+
+@test "repo only in an external list is not in no list" {
+  all_lists '(.[6].items = [["spali/a", false]])'
+  run_script
+  [ "$(count list-none)" -eq 0 ]
+  [ "$(count list-external-own)" -eq 1 ]
+}
+
+@test "no list-mirror-missing check is registered" {
+  source "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
+  [[ " ${MONITOR_CHECKS[*]} " != *" list-mirror-missing "* ]]
+  [[ " ${MONITOR_CHECKS[*]} " == *" list-external-own "* ]]
+  [ "$(jq -c '."list-external-own" | [.category, .areas, .title, .text]' <<<"$MONITOR_TODO")" = '["cleanup",["lists"],"Move own repositories out of external Lists","Lists in lists.external are for repositories of others: move own work to your stack List and own forks to a mirrors List."]' ]
+  [ "$(jq -c 'has("list-mirror-missing")' <<<"$MONITOR_TODO")" = false ]
 }
 
 @test "list-archived: archived repo outside the archive list" {
@@ -209,7 +342,7 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
 
 @test "unknown archive list is config-invalid and no archived list-none" {
   archived '["spali/old"]'
-  lists "[\"$STACK\", \"$ARCH\", \"$MIRR\", \"$F1\", \"$F2\"] | map({name: ., items: []}) | (.[0].items = [[\"spali/a\", false], [\"spali/old\", true]])"
+  lists "[\"$STACK\", \"$ARCH\", \"$MIRR\", \"$F1\", \"$F2\", \"$EXT\"] | map({name: ., items: []}) | (.[0].items = [[\"spali/a\", false], [\"spali/old\", true]])"
   run_script
   [ "$(count config-invalid)" -eq 1 ]
   [ "$(message config-invalid)" = 'list "📌 Pinned snapshots" not found on GitHub' ]
@@ -249,7 +382,7 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
 @test "missing list name is config-invalid and dependent checks are skipped" {
   lists '[{name: "🚀 My stack", items: [["spali/a", false]]}, {name: "🗃️ My stack Archive", items: [["spali/a", false]]}]'
   run_script
-  [ "$(count config-invalid)" -eq 4 ]
+  [ "$(count config-invalid)" -eq 5 ]
   [ "$(level config-invalid)" = red ]
   [ "$(repo config-invalid)" = null ]
   jq -rs 'map(select(.check == "config-invalid") | .message) | index("list \"👀  Mirrors\" not found on GitHub")' "$FINDINGS" | grep -qx '[0-9]*'
@@ -257,21 +390,26 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(count list-none)" -eq 0 ]
 }
 
-@test "fork gets no list-none while a fork list is missing" {
+@test "fork gets no list-none while a mirrors list is missing" {
   jq -n '[{name: "spali/a", private: false, fork: false, central: true},
     {name: "spali/f", private: false, fork: true, central: true}]' >"$INVENTORY"
-  lists '[{name: "🚀 My stack", items: [["spali/a", false]]}, {name: "🗃️ My stack Archive", items: []}, {name: "👀  Mirrors", items: []}, {name: "▶️ Constribution forks", items: []}, {name: "📌 Pinned snapshots", items: []}]'
+  lists '[{name: "🚀 My stack", items: [["spali/a", false]]}, {name: "🗃️ My stack Archive", items: []}, {name: "👀  Mirrors", items: []}, {name: "▶️ Constribution forks", items: []}, {name: "📌 Pinned snapshots", items: []}, {name: "🔍 Interesting and related", items: []}]'
   run_script
   [ "$(count config-invalid)" -eq 1 ]
   [ "$(count list-none)" -eq 0 ]
 }
 
-@test "without configured fork lists a fork in no list is plain list-none" {
-  echo '{"lists": {"exclusive": []}}' >"$CONFIG"
-  inv spali/f false true true
-  all_lists '.'
-  run_script
-  [ "$(message list-none)" = "in no list" ]
+@test "without configured mirrors lists a fork or managed repo in no list is plain list-none" {
+  local c
+  for c in '{"lists": {"exclusive": []}}' '{"lists": {"mirrors": {}}}' '{"lists": {"mirrors": {"synced": [], "other": []}}}'; do
+    : >"$FINDINGS"
+    jq --argjson c "$c" -n '$c + {managed: [{repo: "spali/m", upstream: "https://salsa.example/x.git"}]}' >"$CONFIG"
+    jq -n '[{name: "spali/f", private: false, fork: true, central: true},
+      {name: "spali/m", private: false, fork: false, central: true}]' >"$INVENTORY"
+    all_lists '.'
+    run_script
+    [ "$(jq -rs 'map(select(.check == "list-none") | "\(.repo) \(.message)") | join(",")' "$FINDINGS")" = "spali/f in no list,spali/m in no list" ]
+  done
 }
 
 @test "adoption skips managed repos" {

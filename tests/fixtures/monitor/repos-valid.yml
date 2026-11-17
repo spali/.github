@@ -7,7 +7,7 @@ lists:
   mirrors:
     synced: ["👀  Mirrors"]
     other: ["▶️ Constribution forks", "♻️ Customization forks"]
-  external: ["🔍 Interesting and related forks"]
+  external: ["🔍 Interesting and related"]
 ignores:
   - repo: spali/old-thing
     check: main-red
