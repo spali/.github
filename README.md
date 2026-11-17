@@ -295,6 +295,7 @@ Works for any language. Steps 1–4 are files, 5–8 are settings.
    gh api -X PUT repos/spali/<repo>/private-vulnerability-reporting
    gh api -X PUT repos/spali/<repo>/actions/permissions/workflow \
      -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false
+   # public repositories only
    gh api -X PUT repos/spali/<repo>/actions/permissions/fork-pr-contributor-approval \
      -f approval_policy=all_external_contributors
    ```

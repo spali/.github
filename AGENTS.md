@@ -496,6 +496,9 @@ issue and the log of the failed step. Explanations for humans:
   answers 404 `Vulnerability alerts are disabled.` when the setting is off (a
   finding, not n/a). `private-vulnerability-reporting` answers a generic 404 on
   private repositories: decide by `private` from the inventory, do not call it.
+  `repos/R/actions/permissions/fork-pr-contributor-approval` answers 422 `Fork PR
+  approval is not allowed for private repositories`: decide by `private`, do not
+  call it.
   Not applicable are only the tested answers in `scripts/monitor-lib.sh`
   (code scanning `no analysis found` or `not enabled`, `Dependabot alerts are
   disabled for this repository`, the ruleset message above).
