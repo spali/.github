@@ -406,3 +406,22 @@ item_value() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $
   run_script
   [ "$(count unanswered)" -eq 0 ]
 }
+
+@test "unanswered: an ignored open item answered by the owner still emits the ignored finding without calls" {
+  echo '{"managed":[],"ignores":[{"repo":"Spali/A","check":"unanswered","item":5,"reason":"r"}]}' >"$CONFIG"
+  { item 5 other 2026-09-01T10:00:00Z; item 7 other 2026-09-01T10:00:00Z pr; } | jq -s . | gh_respond "$ISS" -
+  { post other 2026-09-02T10:00:00Z; post spali 2026-09-03T10:00:00Z; } | jq -s . | comments 5
+  run_script
+  [ "$(message unanswered 0)" = "issue #5 is open (ignored)" ]
+  [ "$(item_value unanswered 0)" = 5 ]
+  run ! grep -Eq 'issues/5/|pulls/5/' "$GH_LOG"
+}
+
+@test "unanswered: an ignored open pull request emits the ignored finding" {
+  echo '{"managed":[],"ignores":[{"repo":"spali/a","check":"unanswered","item":7,"reason":"r"}]}' >"$CONFIG"
+  item 7 spali 2026-11-13T10:00:00Z pr | jq -s . | gh_respond "$ISS" -
+  run_script
+  [ "$(count unanswered)" -eq 1 ]
+  [ "$(message unanswered)" = "pull request #7 is open (ignored)" ]
+  [ "$(item_value unanswered)" = 7 ]
+}

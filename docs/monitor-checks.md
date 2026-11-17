@@ -171,8 +171,10 @@ unanswered:
   days: 14
 ```
 
-**Fix:** answer it or close it. To accept one item, ignore it by its number;
-once the item is closed, the ignore is reported as `ignore-unused`: remove it.
+**Fix:** answer it or close it. To accept one item, ignore it by its number
+(`item` is only allowed for this check). The ignore stays used while the item
+is open, whoever answered last; once the item is closed, it is reported as
+`ignore-unused`: remove it.
 
 ```yaml
 ignores:

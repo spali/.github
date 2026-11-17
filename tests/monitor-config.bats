@@ -461,3 +461,10 @@ YAML
   [ "$status" -eq 1 ]
   [[ $stderr == *"duplicate ignore spali/x unanswered 1"* ]]
 }
+
+@test "ignores item is only allowed for check unanswered" {
+  f=$(printf 'version: 1\nignores:\n  - {repo: spali/x, check: adoption, item: 3, reason: r}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"error: $f: ignores[0].item is only allowed for check unanswered"* ]]
+}
