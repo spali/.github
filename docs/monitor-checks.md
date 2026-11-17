@@ -198,8 +198,9 @@ The GitHub Lists of the owner (stars), named in `lists` of `repos.yml`.
 lists (`fork in none of the fork lists`), or an archived repository is in
 none of the archive lists of `lists.archived` (`archived, in none of the
 archive lists`). Archived repositories, forks too, are judged only by the
-archive lists. Not reported while a configured list is missing (that is
-`config-invalid`).
+archive lists. The fork and archive variants are not reported while one of
+their configured Lists is missing (that is `config-invalid`); "in no list" is
+still reported.
 
 **Fix:** add it to a list (an archived repository to an archive list).
 
@@ -232,6 +233,10 @@ archive it on GitHub and put it in an archive list, such as
 only for its lists. To move it to a newer state, unarchive it, sync it, and
 archive it again.
 
+A repository under `managed:` must first be removed from `managed:` (the sync
+cannot push to an archived repository); until then the monitor reports it as
+`managed-settings`.
+
 ## adoption
 
 🔵 An own repository (not a fork, not under `managed:`) that does not use the shared
@@ -260,9 +265,13 @@ of the entry.
 🔴 A managed repository deviates from its settings: issues, pull requests,
 wiki, discussions, projects and Actions are all off unless its `settings:`
 says otherwise. The detail lists each difference
-(`has_wiki is true, expected false`).
+(`has_wiki is true, expected false`). An archived repository still under
+`managed:` is reported with one finding (`archived but still under
+managed:: remove the entry`) and gets no other managed check.
 
-**Fix:** correct the repository settings, or the `settings:` of its entry.
+**Fix:** correct the repository settings, or the `settings:` of its entry; for
+an archived one, remove the entry from `managed:` (see
+[Freeze a fork or mirror](#freeze-a-fork-or-mirror)).
 
 ## managed-behind
 
