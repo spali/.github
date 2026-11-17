@@ -222,15 +222,6 @@ lists of `lists.archived` (`archived, still in "<list>"`).
 
 **Fix:** move it to an archive list.
 
-## list-external-own
-
-🔵 An own repository (not archived) is in a list of `lists.external`, such as
-"🔍 Interesting and related", which is for repositories of others
-(`own repository in "<list>"`). An archived one is `list-archived` instead.
-
-**Fix:** move own work to your stack list and own forks to a mirrors list
-(`lists.mirrors`).
-
 ### Freeze a fork or mirror
 
 To keep a fork or mirror at its current state, without syncs or checks:
@@ -242,6 +233,15 @@ archive it again.
 A repository under `managed:` must first be removed from `managed:` (the sync
 cannot push to an archived repository); until then the monitor reports it as
 `managed-settings`.
+
+## list-external-own
+
+🔵 An own repository (not archived) is in a list of `lists.external`, such as
+"🔍 Interesting and related", which is for repositories of others
+(`own repository in "<list>"`). An archived one is `list-archived` instead.
+
+**Fix:** move own work to your stack list and own forks to a mirrors list
+(`lists.mirrors`).
 
 ## adoption
 
