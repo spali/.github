@@ -6,6 +6,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 MONITOR_CHECKS=(
   devbuild-closed-pr orphan-tag several-drafts next-stale pin-behind
   settings-merge settings-alerts settings-pvr settings-actions
+  settings-fork-approval
   ruleset-main ruleset-tags main-red renovate-stale workflow-disabled
   dependabot-alert code-scanning-alert unanswered
   fork-behind fork-workflows-active fork-delete-candidate
@@ -42,6 +43,8 @@ MONITOR_TODO='{
     "text": "Reporters of a public repository cannot send a vulnerability privately: enable private vulnerability reporting."},
   "settings-actions": {"category": "cleanup", "areas": ["settings"], "title": "Fix the Actions permissions",
     "text": "Workflows get write permissions by default, or Actions may approve pull requests: set the workflow token to read-only and turn off approving pull requests."},
+  "settings-fork-approval": {"category": "cleanup", "areas": ["settings", "health", "forks", "managed"], "title": "Require approval for fork pull request workflows",
+    "text": "Workflows of pull requests from forks run without approval and can pick a self-hosted runner: require approval for all external contributors."},
   "ruleset-main": {"category": "cleanup", "areas": ["settings"], "title": "Restore the main ruleset",
     "text": "The ruleset that protects `main` is missing or differs from the documented one: restore it."},
   "ruleset-tags": {"category": "cleanup", "areas": ["settings"], "title": "Restore the tag ruleset",
@@ -260,6 +263,33 @@ json_out() {
     return 1
   fi
   printf -v "$var" '%s' "$json_result"
+}
+
+# check_fork_approval REPO PRIVATE: settings-fork-approval. A pull request from
+# a fork chooses its own runs-on (e.g. a self-hosted runner); requiring approval
+# for all external contributors is the only guard. The endpoint answers 422 for
+# private repositories, so they are skipped without a call (PRIVATE is "true";
+# anything else counts as public). Actions disabled is skipped too. Writes
+# findings only and always returns 0.
+check_fork_approval() {
+  local repo=$1 private=$2 body out
+  if [[ $private == true ]]; then
+    finding skip settings-fork-approval "$repo" "private repository"
+    return 0
+  fi
+  body=$(fetch settings-fork-approval "$repo" "repos/$repo/actions/permissions") || return 0
+  json_out settings-fork-approval "$repo" out -r '.enabled' <<<"$body" || return 0
+  if [[ $out == false ]]; then
+    finding skip settings-fork-approval "$repo" "Actions disabled"
+    return 0
+  fi
+  body=$(fetch settings-fork-approval "$repo" "repos/$repo/actions/permissions/fork-pr-contributor-approval") || return 0
+  json_out settings-fork-approval "$repo" out -r '
+    if .approval_policy == "all_external_contributors" then ""
+    else "approval_policy: got \(.approval_policy | tojson), want \("all_external_contributors" | tojson)" end' <<<"$body" || return 0
+  if [[ -n $out ]]; then
+    finding red settings-fork-approval "$repo" "$out"
+  fi
 }
 
 # disabled_workflows CHECK REPO OUTVAR reads a workflows API body on stdin and

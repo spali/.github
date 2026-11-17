@@ -242,3 +242,56 @@ gh_fail_raw() {
   run jq -r '."fork-delete-candidate".text' <<<"$MONITOR_TODO"
   [ "$output" = 'No own commits and no open pull request upstream: delete it, archive it to freeze the state you reference, or add it to `managed:` to keep it synced.' ]
 }
+
+@test "fork approval: private repository is skipped without a call" {
+  check_fork_approval spali/x true
+  [ "$(jq -c . "$FINDINGS")" = '{"level":"skip","check":"settings-fork-approval","repo":"spali/x","message":"private repository"}' ]
+  [ ! -s "$GH_LOG" ]
+}
+
+@test "fork approval: Actions disabled is skipped" {
+  echo '{"enabled":false}' | gh_respond '*actions/permissions' -
+  check_fork_approval spali/x false
+  [ "$(jq -c . "$FINDINGS")" = '{"level":"skip","check":"settings-fork-approval","repo":"spali/x","message":"Actions disabled"}' ]
+  ! grep -q fork-pr-contributor-approval "$GH_LOG"
+}
+
+@test "fork approval: all_external_contributors is clean" {
+  echo '{"enabled":true}' | gh_respond '*actions/permissions' -
+  echo '{"approval_policy":"all_external_contributors"}' | gh_respond '*fork-pr-contributor-approval' -
+  check_fork_approval spali/x false
+  [ ! -s "$FINDINGS" ]
+}
+
+@test "fork approval: first_time_contributors is red" {
+  echo '{"enabled":true}' | gh_respond '*actions/permissions' -
+  echo '{"approval_policy":"first_time_contributors"}' | gh_respond '*fork-pr-contributor-approval' -
+  check_fork_approval spali/x false
+  [ "$(jq -c . "$FINDINGS")" = '{"level":"red","check":"settings-fork-approval","repo":"spali/x","message":"approval_policy: got \"first_time_contributors\", want \"all_external_contributors\""}' ]
+}
+
+@test "fork approval: missing policy is red" {
+  echo '{"enabled":true}' | gh_respond '*actions/permissions' -
+  echo '{}' | gh_respond '*fork-pr-contributor-approval' -
+  check_fork_approval spali/x false
+  [ "$(jq -r .message "$FINDINGS")" = 'approval_policy: got null, want "all_external_contributors"' ]
+  [ "$(jq -r .level "$FINDINGS")" = red ]
+}
+
+@test "fork approval: missing enabled counts as enabled" {
+  echo '{}' | gh_respond '*actions/permissions' -
+  echo '{"approval_policy":"first_time_contributors"}' | gh_respond '*fork-pr-contributor-approval' -
+  check_fork_approval spali/x false
+  [ "$(jq -r .level "$FINDINGS")" = red ]
+  [ "$(jq -r .check "$FINDINGS")" = settings-fork-approval ]
+}
+
+@test "fork approval: API error is check-failed" {
+  echo '{"enabled":true}' | gh_respond '*actions/permissions' -
+  gh_fail '*fork-pr-contributor-approval' 'gh: boom (HTTP 500)'
+  check_fork_approval spali/x false
+  [ "$(wc -l <"$FINDINGS")" -eq 1 ]
+  [ "$(jq -r .check "$FINDINGS")" = check-failed ]
+  [ "$(jq -r .level "$FINDINGS")" = red ]
+  [[ $(jq -r .message "$FINDINGS") == "settings-fork-approval: "* ]]
+}
