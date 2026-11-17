@@ -28,7 +28,7 @@ setup() {
     {name: "o/MFork", central: false, fork: true, private: false, default_branch: "main",
      parent: {name: "up/mfork", default_branch: "main"}, pins: []},
     {name: "o/mplain", central: false, fork: false, private: false, default_branch: "main", pins: []}]' >"$MONITOR_WORK/inventory.json"
-  jq -n '{version: 1, lists: {}, forks: [], ignores: [], monitor: {jobs: "per-repo"},
+  jq -n '{version: 1, lists: {}, ignores: [], monitor: {jobs: "per-repo"},
     managed: [{repo: "o/mplain", upstream: "https://src.example/p.git"},
       {repo: "o/mfork", upstream: "https://github.com/up/mfork"},
       {repo: "o/gone", upstream: "https://github.com/up/gone"}]}' \

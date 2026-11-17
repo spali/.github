@@ -68,7 +68,7 @@ level() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) |
 }
 
 @test "fork behind is info" {
-  respond_jq "$BEHIND" '{ahead_by: 4, commits: [{commit: {committer: {date: "2026-01-01T00:00:00Z"}}}]}'
+  respond_jq "$BEHIND" '{ahead_by: 4}'
   run_script
   [ "$(count fork-behind)" -eq 1 ]
   [ "$(level fork-behind)" = info ]
