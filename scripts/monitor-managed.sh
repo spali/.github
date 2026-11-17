@@ -316,6 +316,10 @@ check_repo() {
   repo_info "$repo" info || return 0
   json_out managed-missing "$repo" fields -r '[.default_branch, .private, .pushed_at] | @tsv' <<<"$info" || return 0
   IFS=$'\t' read -r default PRIVATE pushed <<<"$fields"
+  if [[ $(jq -r '.archived // false' <<<"$info") == true ]]; then
+    finding red managed-settings "$repo" 'archived but still under `managed:`: remove the entry'
+    return 0
+  fi
   check_settings "$repo" "$(jq -c .settings <<<"$entry")" "$info"
   tmp=$(mktemp -d)
   if [[ $(jq -r .kind <<<"$entry") == fork ]]; then
