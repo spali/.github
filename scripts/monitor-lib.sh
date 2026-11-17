@@ -61,7 +61,7 @@ MONITOR_TODO='{
   "fork-sync-stale": {"category": "cleanup", "areas": ["forks"], "title": "Fix the sync workflow of forks",
     "text": "A fork with its own sync workflow misses upstream commits for too long: check its sync workflow."},
   "fork-workflows-active": {"category": "cleanup", "areas": ["forks"], "title": "Turn off Actions in forks",
-    "text": "Upstream workflows run in the fork and cost minutes or fail: disable them if unwanted."},
+    "text": "Upstream workflows run in the fork and cost minutes or fail: disable Actions in the settings of the fork if unwanted."},
   "fork-delete-candidate": {"category": "decide", "areas": ["forks"], "title": "Delete forks without own work?",
     "text": "No own commits and no open pull request upstream: keep the fork only if it is in a List on purpose or you plan to work on it, else delete it."},
   "mirror-behind": {"category": "cleanup", "areas": ["mirrors"], "title": "Fix mirrors that fall behind",

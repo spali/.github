@@ -20,6 +20,7 @@ setup() {
 
 BEHIND='*repos/spali/f/compare/main...up:dev'
 WFS='*repos/spali/f/actions/workflows?per_page=100'
+PERMS='*repos/spali/f/actions/permissions'
 OWN='*repos/up/f/compare/dev...spali:f:main'
 # pulls are looked up per fork branch: PRS/CLOSED answer every branch,
 # open_on/closed_on BRANCH JSON one branch (the URL-encoded name)
@@ -37,6 +38,7 @@ closed_on() { respond_jq "*repos/up/f/pulls?state=closed&head=spali:$1&per_page=
 # that upstream does not have (no candidate).
 run_script() {
   respond_jq "$BEHIND" '{ahead_by: 0, commits: []}'
+  respond_jq "$PERMS" '{enabled: true}'
   respond_jq "$WFS" '{workflows: []}'
   respond_jq "$OWN" '{ahead_by: 0}'
   respond_jq "$PRS" '[]'
@@ -118,6 +120,24 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
   [ "$(message workflow-disabled)" = "Rebase Upstream (.github/workflows/sync.yml) disabled by GitHub after 60 days of inactivity" ]
   [ "$(count fork-workflows-active)" -eq 0 ]
   [ "$(grep -c 'actions/workflows' "$GH_LOG")" -eq 1 ]
+  [ "$(grep -c 'actions/permissions' "$GH_LOG")" -eq 0 ]
+}
+
+@test "other fork with Actions disabled is clean, workflows are not read" {
+  respond_jq "$PERMS" '{enabled: false}'
+  jq -nc '{workflows: [{name: "A", path: "a.yml", state: "active"}]}' | gh_respond "$WFS" -
+  run_script
+  [ "$(count fork-workflows-active)" -eq 0 ]
+  [ "$(count check-failed)" -eq 0 ]
+  [ "$(grep -c 'actions/workflows' "$GH_LOG")" -eq 0 ]
+}
+
+@test "unreadable Actions permissions of a fork fail the check" {
+  gh_fail "$PERMS" 'gh: Server Error (HTTP 502)'
+  run_script
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(message check-failed)" = "fork-workflows-active: gh: Server Error (HTTP 502)" ]
+  [ "$(count fork-workflows-active)" -eq 0 ]
 }
 
 @test "other fork with active workflows is info" {
