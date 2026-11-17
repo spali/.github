@@ -2,11 +2,11 @@ version: 1
 lists:
   exclusive:
     - ["🚀 My stack", "🗃️ My stack Archive"]
-    - ["▶️ Constribution forks", "♻️ Customization forks"]
+    - ["▶️ Contribution forks", "♻️ Customization forks"]
   archived: ["🗃️ My stack Archive"]
   mirrors:
     synced: ["👀  Mirrors"]
-    other: ["▶️ Constribution forks", "♻️ Customization forks"]
+    other: ["▶️ Contribution forks", "♻️ Customization forks"]
   external: ["🔍 Interesting and related"]
 ignores:
   - repo: spali/old-thing

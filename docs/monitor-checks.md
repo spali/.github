@@ -197,7 +197,7 @@ The GitHub Lists of the owner (stars), named in `lists` of `repos.yml`.
 🔵 A repository is in no list (`in no list`), a fork or a repository under
 `managed:` (such as a mirror of a repository outside GitHub) is in none of the
 mirrors lists of `lists.mirrors` (`synced` and `other`, for example
-"👀  Mirrors", "▶️ Constribution forks", "♻️ Customization forks"; message
+"👀  Mirrors", "▶️ Contribution forks", "♻️ Customization forks"; message
 `in none of the mirrors lists`), or an archived repository is in none of the
 archive lists of `lists.archived` (`archived, in none of the archive lists`).
 Archived repositories, forks too, are judged only by the archive lists. The

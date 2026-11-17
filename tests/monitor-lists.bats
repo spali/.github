@@ -15,14 +15,14 @@ setup() {
   STACK="🚀 My stack"
   ARCH="🗃️ My stack Archive"
   MIRR="👀  Mirrors"
-  F1="▶️ Constribution forks"
+  F1="▶️ Contribution forks"
   F2="♻️ Customization forks"
   PIN="📌 Pinned snapshots"
   EXT="🔍 Interesting and related"
   jq -n '{lists: {exclusive: [["🚀 My stack", "🗃️ My stack Archive"],
-      ["▶️ Constribution forks", "♻️ Customization forks"]],
+      ["▶️ Contribution forks", "♻️ Customization forks"]],
       archived: ["🗃️ My stack Archive", "📌 Pinned snapshots"],
-      mirrors: {synced: ["👀  Mirrors"], other: ["▶️ Constribution forks", "♻️ Customization forks"]},
+      mirrors: {synced: ["👀  Mirrors"], other: ["▶️ Contribution forks", "♻️ Customization forks"]},
       external: ["🔍 Interesting and related"]}}' >"$CONFIG"
   inv spali/a false false true
 }
@@ -192,7 +192,7 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
 }
 
 @test "only other mirrors lists: no unmanaged, list-none still works" {
-  config '.lists.mirrors = {other: ["▶️ Constribution forks", "♻️ Customization forks"]}'
+  config '.lists.mirrors = {other: ["▶️ Contribution forks", "♻️ Customization forks"]}'
   jq -n '[{name: "spali/f", private: false, fork: true, central: true},
     {name: "spali/g", private: false, fork: true, central: true}]' >"$INVENTORY"
   all_lists '(.[2].items = [["spali/f", false], ["spali/x", false]]) | (.[3].items = [["spali/g", false]])'
@@ -301,7 +301,7 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(count list-archived)" -eq 1 ]
   [ "$(level list-archived)" = info ]
   [ "$(repo list-archived)" = spali/old ]
-  [ "$(message list-archived)" = 'archived, still in "🚀 My stack", "▶️ Constribution forks"' ]
+  [ "$(message list-archived)" = 'archived, still in "🚀 My stack", "▶️ Contribution forks"' ]
 }
 
 @test "archived repo in no list is list-none" {
@@ -393,7 +393,7 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
 @test "fork gets no list-none while a mirrors list is missing" {
   jq -n '[{name: "spali/a", private: false, fork: false, central: true},
     {name: "spali/f", private: false, fork: true, central: true}]' >"$INVENTORY"
-  lists '[{name: "🚀 My stack", items: [["spali/a", false]]}, {name: "🗃️ My stack Archive", items: []}, {name: "👀  Mirrors", items: []}, {name: "▶️ Constribution forks", items: []}, {name: "📌 Pinned snapshots", items: []}, {name: "🔍 Interesting and related", items: []}]'
+  lists '[{name: "🚀 My stack", items: [["spali/a", false]]}, {name: "🗃️ My stack Archive", items: []}, {name: "👀  Mirrors", items: []}, {name: "▶️ Contribution forks", items: []}, {name: "📌 Pinned snapshots", items: []}, {name: "🔍 Interesting and related", items: []}]'
   run_script
   [ "$(count config-invalid)" -eq 1 ]
   [ "$(count list-none)" -eq 0 ]
