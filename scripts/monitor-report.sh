@@ -60,7 +60,6 @@ $cfg[0] as $cfg | . as $f
       elif $c == "dependabot-alert" then ["Dependabot", "\($r | gh)/security/dependabot"]
       elif $c == "code-scanning-alert" then ["Code scanning", "\($r | gh)/security/code-scanning"]
       elif ($c | startswith("fork-")) then ["Fork", ($r | gh)]
-      elif $c == "mirror-behind" then ["Mirror", ($r | gh)]
       elif ($c | startswith("list-")) then ["Lists", "\($r | split("/")[0] | gh)?tab=stars"]
       else null end;
   # The message as Markdown: URLs, and issue numbers become links.
@@ -137,17 +136,16 @@ $cfg[0] as $cfg | . as $f
       | map(.name) | unique | map(select(. as $n | $dirty | index($n) | not))
     else null end) as $clean
   # Overview: the groups of the check scripts (as the workflow matrix), by
-  # lowercase name; the column forks also takes the mirrors, lists the
-  # whole inventory.
+  # lowercase name; the column lists takes the whole
+  # inventory.
 | ($inventory | if . then groups($cfg; .) | map_values(map(ascii_downcase))
-    | .forks += .mirrors | .lists = ($inventory | map(.name | ascii_downcase)) else null end) as $applies
+    | .lists = ($inventory | map(.name | ascii_downcase)) else null end) as $applies
 | ([["release", "Release"], ["settings", "Settings"], ["health", "Health"],
     ["forks", "Fork / Mirror"], ["managed", "Sync"], ["lists", "Lists"]]) as $cols
 | def column:
     (.repo | ascii_downcase) as $r
     | (if .check == "check-failed" then ((.message // "" | tostring | capture("^(?<k>[a-z-]+): ") | .k)? // "" | $todo[.].areas) else null end) as $named
-    | ($named // $todo[.check].areas // ($cols | map(.[0])))
-    | map(if . == "mirrors" then "forks" else . end) as $cands
+    | ($named // $todo[.check].areas // ($cols | map(.[0]))) as $cands
     | (first($cands[] | select(. as $a | $applies[$a] | index($r))) // $cands[0]);
   def overview:
     ($listed | map(select(.repo != null and .check != "ignore-unused") | .col = column | select(.col != null))) as $marks

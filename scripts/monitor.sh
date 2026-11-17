@@ -6,7 +6,7 @@
 # Usage: monitor.sh            all phases, prints only the report (local run)
 #        monitor.sh PHASE      one phase, prints its log (one workflow step
 #                              each); the phases share the dir $MONITOR_WORK
-# Phases, in order: config inventory release settings health forks mirrors
+# Phases, in order: config inventory release settings health forks
 # managed lists report issue. A check phase lists every repository it looked at
 # (clean ones with ✓, the others as a log group with their findings) and
 # annotates each red finding that is not ignored. MONITOR_REPO limits a check
@@ -28,10 +28,10 @@ DIR=${MONITOR_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")}
 # shellcheck source=scripts/monitor-lib.sh
 source "$DIR/monitor-lib.sh"
 
-PHASES=(config inventory matrix release settings health forks mirrors managed lists report issue)
-CHECKS=(release settings health forks mirrors managed lists)
+PHASES=(config inventory matrix release settings health forks managed lists report issue)
+CHECKS=(release settings health forks managed lists)
 CONFIG_FILE=${MONITOR_CONFIG:-repos.yml}
-EMPTY_CONFIG='{"version":1,"lists":{},"mirrors":[],"forks":[],"ignores":[]}'
+EMPTY_CONFIG='{"version":1,"lists":{},"ignores":[]}'
 
 # annotate escapes the findings (JSON lines on stdin) as workflow commands.
 # shellcheck disable=SC2016 # jq program
@@ -93,12 +93,11 @@ MATRIX_JQ=$MONITOR_GROUPS_JQ'
 phase_matrix() {
   jq -c --slurpfile cfg "$CONFIG" "$MATRIX_JQ" "$INVENTORY" 2>/dev/null ||
     jq -c --slurpfile cfg "$CONFIG" -n '[] | '"$MATRIX_JQ" 2>/dev/null ||
-    jq -cn '{release: [], settings: [], health: [], forks: [], mirrors: [], managed: [], "runs-on": "ubuntu-latest"}'
+    jq -cn '{release: [], settings: [], health: [], forks: [], managed: [], "runs-on": "ubuntu-latest"}'
 }
 
 # phase_check NAME runs monitor-NAME.sh and logs what it found. With
-# MONITOR_REPO the script sees only that repository (and that mirror or
-# managed entry).
+# MONITOR_REPO the script sees only that repository (and that managed entry).
 phase_check() {
   local name=$1 script=monitor-$1.sh from checked_file rows inv=$INVENTORY cfg=$CONFIG
   checked_file="$WORK/checked-$name"
@@ -108,8 +107,7 @@ phase_check() {
     inv="$WORK/inventory-$name.json"
     cfg="$WORK/config-$name.json"
     jq --arg r "$MONITOR_REPO" '[.[] | select(.name == $r)]' "$INVENTORY" >"$inv" 2>/dev/null || echo '[]' >"$inv"
-    jq --arg r "$MONITOR_REPO" '.mirrors = [(.mirrors // [])[] | select(.target == $r)] |
-      .managed = [(.managed // [])[] | select((.repo | ascii_downcase) == ($r | ascii_downcase))]' \
+    jq --arg r "$MONITOR_REPO" '.managed = [(.managed // [])[] | select((.repo | ascii_downcase) == ($r | ascii_downcase))]' \
       "$CONFIG" >"$cfg"
   fi
   if ! MONITOR_CHECKED=$checked_file LISTS_TOKEN=${LISTS_TOKEN:-${GH_TOKEN:-}} \
