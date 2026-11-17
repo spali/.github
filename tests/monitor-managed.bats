@@ -28,6 +28,7 @@ sha() { printf '%040d' "$1"; }
 
 REPO='*api repos/spali/f'
 ACT='*repos/spali/f/actions/permissions'
+APPROVAL='*repos/spali/f/actions/permissions/fork-pr-contributor-approval'
 UP='*api repos/up/f'
 TB='*repos/spali/f/branches?per_page=100 --paginate'
 UB='*repos/up/f/branches?per_page=100 --paginate'
@@ -50,6 +51,7 @@ run_script() {
   respond_jq "$REPO" '{default_branch: "main", private: false, pushed_at: "2026-11-01T00:00:00Z",
     has_issues: false, has_pull_requests: false, has_wiki: false, has_discussions: false, has_projects: false}'
   respond_jq "$ACT" '{enabled: false}'
+  respond_jq "$APPROVAL" '{approval_policy: "all_external_contributors"}'
   respond_jq "$UP" '{default_branch: "dev"}'
   jq -nc --arg a "$(sha 1)" --arg b "$(sha 2)" --arg c "$(sha 3)" \
     '[{name: "main", commit: {sha: $a}}, {name: "feat", commit: {sha: $b}}, {name: "wip", commit: {sha: $c}}]' |
@@ -66,11 +68,14 @@ run_script() {
 count() { jq -s --arg c "$1" 'map(select(.check == $c)) | length' "$FINDINGS"; }
 message() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | .[$i].message' "$FINDINGS"; }
 level() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | .[$i].level' "$FINDINGS"; }
+# A managed repository has Actions disabled by default: its fork approval
+# check is skipped, which is no finding of interest here.
+no_findings() { [ "$(jq -s 'map(select(.check != "settings-fork-approval" or .level != "skip")) | length' "$FINDINGS")" -eq 0 ]; }
 repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDINGS"; }
 
 @test "compliant managed fork has no findings" {
   run_script
-  [ ! -s "$FINDINGS" ]
+  no_findings
 }
 
 @test "records the checked repositories" {
@@ -122,7 +127,7 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
     has_issues: true, has_pull_requests: false, has_wiki: false, has_discussions: false, has_projects: false}'
   respond_jq "$ACT" '{enabled: true}'
   run_script
-  [ ! -s "$FINDINGS" ]
+  no_findings
 }
 
 @test "default branch behind upstream default is managed-behind" {
@@ -144,7 +149,7 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   respond_jq "$MAIN" "$(behind 1 2026-11-12T13:00:00Z)"
   respond_jq "$FEAT" "$(behind 1 2026-11-12T12:00:00Z)"
   run_script
-  [ ! -s "$FINDINGS" ]
+  no_findings
 }
 
 @test "behind more than 48 h is red, to the second" {
@@ -266,7 +271,7 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   respond_jq "$FEAT" "$(behind 2 2026-11-01T00:00:00Z)"
   run_script
   [ "$(count managed-behind)" -eq 0 ]
-  [ ! -s "$FINDINGS" ]
+  no_findings
 }
 
 @test "a PR head of another repository is still managed-behind" {
@@ -362,7 +367,7 @@ follow() {
   follow
   respond_jq '*compare/*...other' "$(behind 2 2026-11-01T00:00:00Z)"
   run_script
-  [ ! -s "$FINDINGS" ]
+  no_findings
   run ! grep -F 'other' "$GH_LOG"
 }
 
@@ -441,7 +446,7 @@ no_commit() { gh_fail "$MCMP$1" 'gh: Not Found (HTTP 404)'; }
   refs refs/heads/main:1 refs/tags/v1:2 refs/heads/extra:7 | git_respond "$TGT" -
   respond_jq "${MCMP}main...extra" '{ahead_by: 0}'
   run_script
-  [ ! -s "$FINDINGS" ]
+  no_findings
   run ! grep -vE '^api repos/spali/m(/actions/permissions|/compare/([0-9]{40}\.\.\.[0-9]{40}|main\.\.\.extra))?$' "$GH_LOG"
 }
 
@@ -463,7 +468,7 @@ no_commit() { gh_fail "$MCMP$1" 'gh: Not Found (HTTP 404)'; }
   refs refs/heads/main:1 refs/tags/v1:2 | git_respond "$SRC" -
   refs refs/heads/main:1 | git_respond "$TGT" -
   run_script
-  [ ! -s "$FINDINGS" ]
+  no_findings
 }
 
 @test "mirror pushed exactly 48 h ago is no finding" {
@@ -472,7 +477,7 @@ no_commit() { gh_fail "$MCMP$1" 'gh: Not Found (HTTP 404)'; }
   refs refs/heads/main:1 refs/tags/v1:2 | git_respond "$SRC" -
   refs refs/heads/main:1 | git_respond "$TGT" -
   run_script
-  [ ! -s "$FINDINGS" ]
+  no_findings
 }
 
 @test "mirror pushed 48 h and a second ago is red" {
@@ -620,7 +625,7 @@ behind_mirror() {
   : >"$GIT_LOG"
   jq '.managed[0].tags = false' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
   run_script
-  [ ! -s "$FINDINGS" ]
+  no_findings
   [ ! -s "$GIT_LOG" ]
 }
 
@@ -643,4 +648,15 @@ behind_mirror() {
   run_script
   [ "$(count managed-behind)" -eq 1 ]
   [ "$(count check-failed)" -eq 0 ]
+}
+
+@test "fork approval red is reported for a managed repository" {
+  jq '.managed[0].settings = {actions: true}' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  respond_jq "$ACT" '{enabled: true}'
+  respond_jq "$APPROVAL" '{approval_policy: "first_time_contributors"}'
+  run_script
+  [ "$(count settings-fork-approval)" -eq 1 ]
+  [ "$(level settings-fork-approval)" = red ]
+  [ "$(message settings-fork-approval)" = 'approval_policy: got "first_time_contributors", want "all_external_contributors"' ]
+  [ "$(repo_of settings-fork-approval)" = spali/f ]
 }
