@@ -56,7 +56,7 @@ MONITOR_TODO='{
     "text": "A dependency has a known vulnerability: update it, or dismiss the alert with a reason."},
   "code-scanning-alert": {"category": "cleanup", "areas": ["health"], "title": "Handle code scanning alerts",
     "text": "Code scanning found a problem in the code: fix it, or dismiss the alert with a reason."},
-  "unanswered": {"category": "fix", "areas": ["health"], "title": "Answer waiting pull requests and issues",
+  "unanswered": {"category": "cleanup", "areas": ["health"], "title": "Answer waiting pull requests and issues",
     "text": "Someone waits for an answer in an open pull request or issue: answer it, close it, or ignore the item with a reason."},
   "fork-behind": {"category": "cleanup", "areas": ["forks"], "title": "Bring forks up to date",
     "text": "A fork is behind its upstream: sync it by hand, add it to `managed:` to keep it synced, or archive it to freeze this state."},
