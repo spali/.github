@@ -127,6 +127,13 @@ YAML
   [[ $stderr != *"exclusive[0]"* ]]
 }
 
+@test "lists.mirrors must be a mapping" {
+  f=$(printf 'version: 1\nlists: {mirrors: [a]}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"lists.mirrors must be a mapping"* ]]
+}
+
 @test "lists.exclusive must be a list" {
   f=$(printf 'version: 1\nlists: {exclusive: x}\n' | mk bad.yml)
   run --separate-stderr "$CONFIG" validate "$f"

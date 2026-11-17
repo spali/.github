@@ -374,7 +374,7 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
 }
 
 @test "foreign repos in lists are ignored" {
-  all_lists '(.[0].items = [["spali/a", false], ["other/x", true]]) | (.[3].items = [["other/y", false]])'
+  all_lists '(.[0].items = [["spali/a", false], ["other/x", true]]) | (.[3].items = [["other/y", false]]) | (.[6].items = [["other/x", false]])'
   run_script
   [ ! -s "$FINDINGS" ]
 }
