@@ -521,7 +521,7 @@ J
   # shellcheck source=../scripts/monitor-lib.sh
   source "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
   for c in "${MONITOR_CHECKS[@]}"; do
-    jq -e --arg c "$c" '.[$c] | (.category == "decide" or .category == "cleanup" or .category == "fix")
+    jq -e --arg c "$c" '.[$c] | (.category == "decide" or .category == "cleanup")
       and (.title | type == "string" and length > 0)
       and (.text | type == "string" and length > 0 and endswith("."))
       and (.areas | type == "array" and all(.[]; IN("release", "settings", "health", "forks", "managed", "lists")))' \
