@@ -57,6 +57,7 @@ $cfg[0] as $cfg | . as $f
       elif $c == "settings-actions" then ["Actions settings", "\($r | gh)/settings/actions"]
       elif $c == "ruleset-main" or $c == "ruleset-tags" then ["Rulesets", "\($r | gh)/settings/rules"]
       elif $c == "main-red" or $c == "workflow-disabled" or $c == "fork-workflows-active" then ["Actions", "\($r | gh)/actions"]
+      elif $c == "unanswered" then ["Issues", "\($r | gh)/issues"]
       elif $c == "dependabot-alert" then ["Dependabot", "\($r | gh)/security/dependabot"]
       elif $c == "code-scanning-alert" then ["Code scanning", "\($r | gh)/security/code-scanning"]
       elif ($c | startswith("fork-")) then ["Fork", ($r | gh)]
@@ -77,7 +78,7 @@ $cfg[0] as $cfg | . as $f
   ($cfg.ignores // []) as $ign
 | ($f | map(select(. as $x | any($ign[]; . as $i | $x | matches($i)) | not))) as $kept
 | ($ign | map(select(. as $i | any($f[]; matches($i)) | not))
-    | map({level: "info", check: "ignore-unused", repo, message: "unused ignore: \(.reason)"})) as $unused
+    | map({level: "info", check: "ignore-unused", repo, message: (if .item then "unused ignore of #\(.item): \(.reason)" else "unused ignore: \(.reason)" end)})) as $unused
 | ($kept + $unused) as $rows
 | def level_rows($l): $rows | map(select(.level == $l));
   # The red and info rows in the order of their tables (check, then

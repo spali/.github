@@ -139,8 +139,8 @@ J
   run "$REPORT"
   [[ $output != *"[#70]"* ]]
   [[ $output == *"[#71]"* ]]
-  [[ $output == *"unused ignore: closed"* ]]
-  [[ $output != *"unused ignore: seen"* ]]
+  [[ $output == *"unused ignore of [#99](https://github.com/spali/pub/issues/99): closed"* ]]
+  [[ $output != *"unused ignore of [#70]"* ]]
 }
 
 @test "unused ignore becomes info" {
@@ -716,4 +716,34 @@ J
   run "$REPORT"
   [[ "$(section "🔵 Info")" == *"[O/a]"*"[o/b]"*"[o/C]"* ]]
   [[ "$(section "📝 TODO")" == *"[O/a]"*"[o/b]"*"[o/C]"* ]]
+}
+
+@test "an item ignore stays used while the ignored finding of the open item exists" {
+  findings <<'J'
+{"level":"red","check":"unanswered","repo":"spali/a","message":"issue #5 is open (ignored)","item":5}
+J
+  config <<'J'
+{"ignores":[{"repo":"spali/a","check":"unanswered","item":5,"reason":"r"}]}
+J
+  run "$REPORT"
+  [ "$status" -eq 0 ]
+  [[ $output != *"ignore-unused"* ]]
+}
+
+@test "an unused item ignore names the item" {
+  findings </dev/null
+  config <<'J'
+{"ignores":[{"repo":"spali/a","check":"unanswered","item":5,"reason":"hush"}]}
+J
+  run "$REPORT"
+  [[ $output == *"| unused ignore of [#5](https://github.com/spali/a/issues/5): hush |"* ]]
+}
+
+@test "an unanswered row links to the issues of the repository" {
+  findings <<'J'
+{"level":"red","check":"unanswered","repo":"spali/a","message":"issue #5 waits for an answer for 9 days: https://github.com/spali/a/issues/5","item":5}
+J
+  config <<<'{}'
+  run "$REPORT"
+  [[ $output == *"| [Issues](https://github.com/spali/a/issues) |"* ]]
 }

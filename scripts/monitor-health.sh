@@ -67,9 +67,11 @@ check_renovate() {
 # or pull request whose newest human post is not by the owner and older than
 # DAYS. Posts: the opening, issue comments and, for pull requests, reviews
 # (not pending, not an empty COMMENTED) and review comments. Bots are ignored;
-# items opened by a bot or not older than DAYS need no further call.
+# items opened by a bot or not older than DAYS need no further call. An open
+# item with an item ignore always yields the finding "<kind> #N is open
+# (ignored)" (no further call), so the ignore stays used until the item closes.
 check_unanswered() {
-  local repo=$1 days=$2 tmp posts part list n created url pr last login at d kind
+  local repo=$1 days=$2 tmp posts part list n created url pr isign last login at d kind ign
   tmp=$(mktemp)
   posts=$(mktemp)
   part=$(mktemp)
@@ -78,10 +80,20 @@ check_unanswered() {
   paged unanswered "$repo" "repos/$repo/issues?state=open&per_page=100" \
     '{number, created_at, html_url, pr: has("pull_request"), user: {login: .user.login, type: .user.type}}' \
     "$tmp" || return 0
-  json_out unanswered "$repo" list -r "$BOT_JQ"'
-    .[] | select(.user | bot | not) | [.number, .created_at, .html_url, .pr] | @tsv' "$tmp" || return 0
-  while IFS=$'\t' read -r n created url pr; do
+  json_out unanswered "$repo" ign -c --arg r "$repo" '
+    [(.ignores // [])[] | select(.check == "unanswered" and (.item | type) == "number"
+      and ((.repo // "") | ascii_downcase) == ($r | ascii_downcase)) | .item]' "$CONFIG" || return 0
+  json_out unanswered "$repo" list -r --argjson ign "$ign" "$BOT_JQ"'
+    .[] | select((.user | bot | not) or (.number as $n | $ign | index($n)))
+    | [.number, .created_at, .html_url, .pr, (.number as $n | $ign | index($n) != null)] | @tsv' "$tmp" || return 0
+  while IFS=$'\t' read -r n created url pr isign; do
     [[ -n $n ]] || continue
+    if [[ $isign == true ]]; then
+      kind=issue
+      [[ $pr != true ]] || kind='pull request'
+      finding red unanswered "$repo" "$kind #$n is open (ignored)" "$n"
+      continue
+    fi
     d=$(days_since "$created")
     ((d > days)) || continue
     jq -c '.[] | select(.number == ($n | tonumber)) | [{at: .created_at, user}]' \

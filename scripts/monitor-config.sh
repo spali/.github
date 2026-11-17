@@ -133,7 +133,8 @@ if type != "object" then "top level must be a mapping" else
          elif .check == "check-failed" then "\($p).check: check-failed cannot be ignored"
          elif (.check as $c | $checks | any(. == $c)) | not then "\($p).check: unknown check \(.check | tostring)"
          else empty end),
-        (if has("item") and (.item | posint | not) then "\($p).item must be a positive integer" else empty end),
+        (if has("item") and (.item | posint | not) then "\($p).item must be a positive integer"
+         elif has("item") and .check != "unanswered" then "\($p).item is only allowed for check unanswered" else empty end),
         (if (.reason | type) == "string" and (.reason | test("\\S")) then empty
          else "\($p).reason must not be empty" end)
       end),
