@@ -408,12 +408,10 @@ layout() {
     {name: "o/central", central: true, fork: false, pins: []},
     {name: "o/plain", central: false, fork: false, pins: []},
     {name: "o/fork", central: false, fork: true, parent: {name: "up/fork"}, pins: []},
-    {name: "o/mirror", central: false, fork: false, pins: []},
     {name: "o/clean", central: false, fork: false, pins: []}]' >"$BATS_TEST_TMPDIR/inv.json"
   export INVENTORY="$BATS_TEST_TMPDIR/inv.json"
   config <<'J'
-{"mirrors":[{"target":"o/mirror","source":"https://src.example/m.git","interval_hours":24}],
- "managed":[{"repo":"o/Man","upstream":"https://src.example/p.git"}],"ignores":[]}
+{"managed":[{"repo":"o/Man","upstream":"https://src.example/p.git"}],"ignores":[]}
 J
   findings <<'J'
 {"level":"red","check":"main-red","repo":"o/plain","message":"CI failed"}
@@ -421,7 +419,6 @@ J
 {"level":"info","check":"fork-behind","repo":"o/fork","message":"3 commits behind upstream"}
 {"level":"info","check":"branch-undeclared","repo":"o/fork","message":"b: 2 own commits"}
 {"level":"info","check":"branch-undeclared","repo":"o/fork","message":"a: 1 own commits"}
-{"level":"red","check":"check-failed","repo":"o/mirror","message":"mirror-behind: target not visible"}
 {"level":"info","check":"list-none","repo":"o/central","message":"in no list"}
 {"level":"skip","check":"ruleset-tags","repo":"o/central","message":"rulesets not available"}
 {"level":"red","check":"config-invalid","repo":null,"message":"repos.yml: bad"}
@@ -437,7 +434,7 @@ todo_titles() { section "📝 TODO" | grep '^<details'; }
   export GITHUB_SERVER_URL=https://github.com GITHUB_REPOSITORY=o/ctl GITHUB_RUN_ID=42
   run "$REPORT"
   [ "$status" -eq 1 ]
-  grep -qxF '> **[4 red](#user-content-red)** · [5 info](#user-content-info) · [1 clean](#user-content-clean) · [1 not checked](#user-content-not-checked) · [8 to do](#user-content-todo) · updated 2026-11-16 19:45 UTC · [run](https://github.com/o/ctl/actions/runs/42)' <<<"$output"
+  grep -qxF '> **[3 red](#user-content-red)** · [5 info](#user-content-info) · [1 clean](#user-content-clean) · [1 not checked](#user-content-not-checked) · [7 to do](#user-content-todo) · updated 2026-11-16 19:45 UTC · [run](https://github.com/o/ctl/actions/runs/42)' <<<"$output"
   [[ ${lines[-1]} != *"Updated"* && ${lines[-1]} != *"updated"* ]]
   [ "$(grep -c 'updated 2026' <<<"$output")" -eq 1 ]
 }
@@ -453,15 +450,14 @@ todo_titles() { section "📝 TODO" | grep '^<details'; }
   layout
   run "$REPORT"
   run todo_titles
-  [ "${#lines[@]}" -eq 8 ]
-  [ "${lines[0]}" = '<details open><summary>🔴 <b>Fix now</b> · Fix checks that could not run · 1 repository · <code>check-failed</code></summary>' ]
-  [[ ${lines[1]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · 1 entry · <code>config-invalid</code></summary>' ]]
-  [[ ${lines[2]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · 1 repository · <code>main-red</code></summary>' ]]
-  [[ ${lines[3]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · <code>managed-behind</code></summary>' ]]
-  [[ ${lines[4]} == '<details><summary>🤔 <b>Decide</b> · '*' · 1 repository · <code>adoption</code></summary>' ]]
-  [[ ${lines[5]} == '<details><summary>🤔 <b>Decide</b> · '*' · 2 entries · <code>branch-undeclared</code></summary>' ]]
-  [[ ${lines[6]} == '<details><summary>🧹 <b>Clean up</b> · '*' · <code>fork-behind</code></summary>' ]]
-  [[ ${lines[7]} == '<details><summary>🧹 <b>Clean up</b> · '*' · <code>list-none</code></summary>' ]]
+  [ "${#lines[@]}" -eq 7 ]
+  [[ ${lines[0]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · 1 entry · <code>config-invalid</code></summary>' ]]
+  [[ ${lines[1]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · 1 repository · <code>main-red</code></summary>' ]]
+  [[ ${lines[2]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · <code>managed-behind</code></summary>' ]]
+  [[ ${lines[3]} == '<details><summary>🤔 <b>Decide</b> · '*' · 1 repository · <code>adoption</code></summary>' ]]
+  [[ ${lines[4]} == '<details><summary>🤔 <b>Decide</b> · '*' · 2 entries · <code>branch-undeclared</code></summary>' ]]
+  [[ ${lines[5]} == '<details><summary>🧹 <b>Clean up</b> · '*' · <code>fork-behind</code></summary>' ]]
+  [[ ${lines[6]} == '<details><summary>🧹 <b>Clean up</b> · '*' · <code>list-none</code></summary>' ]]
 }
 
 @test "TODO: an entry explains the check, links its docs and lists the rows like the details" {
@@ -511,7 +507,7 @@ J
     jq -e --arg c "$c" '.[$c] | (.category == "decide" or .category == "cleanup")
       and (.title | type == "string" and length > 0)
       and (.text | type == "string" and length > 0 and endswith("."))
-      and (.areas | type == "array" and all(.[]; IN("release", "settings", "health", "forks", "mirrors", "managed", "lists")))' \
+      and (.areas | type == "array" and all(.[]; IN("release", "settings", "health", "forks", "managed", "lists")))' \
       <<<"$MONITOR_TODO" >/dev/null || { echo "no complete TODO entry: $c"; return 1; }
   done
   # and no entry for an unknown check
@@ -542,12 +538,11 @@ J
   [ "${lines[0]}" = '| Repository | Release | Settings | Health | Fork / Mirror | Sync | Lists |' ]
   [ "${lines[1]}" = '| :-- | :-: | :-: | :-: | :-: | :-: | :-: |' ]
   [ "${lines[2]}" = '| [o/man](https://github.com/o/man) | – | – | – | – | [🔴](#user-content-f-managed-behind-o-man) | – |' ]
-  [ "${lines[3]}" = '| [o/mirror](https://github.com/o/mirror) | – | – | – | [🔴](#user-content-f-check-failed-o-mirror) | – | ✅ |' ]
   # adoption sits in Release although release does not apply to o/plain
-  [ "${lines[4]}" = '| [o/plain](https://github.com/o/plain) | [🔵](#user-content-f-adoption-o-plain) | – | [🔴](#user-content-f-main-red-o-plain) | – | – | ✅ |' ]
-  [ "${lines[5]}" = '| [o/central](https://github.com/o/central) | ✅ | ⚪ | ✅ | – | – | [🔵](#user-content-f-list-none-o-central) |' ]
-  [ "${lines[6]}" = '| [o/fork](https://github.com/o/fork) | – | – | – | [🔵](#user-content-f-branch-undeclared-o-fork)[🔵](#user-content-f-branch-undeclared-o-fork-2)[🔵](#user-content-f-fork-behind-o-fork) | – | ✅ |' ]
-  [ "${#lines[@]}" -eq 7 ]
+  [ "${lines[3]}" = '| [o/plain](https://github.com/o/plain) | [🔵](#user-content-f-adoption-o-plain) | – | [🔴](#user-content-f-main-red-o-plain) | – | – | ✅ |' ]
+  [ "${lines[4]}" = '| [o/central](https://github.com/o/central) | ✅ | ⚪ | ✅ | – | – | [🔵](#user-content-f-list-none-o-central) |' ]
+  [ "${lines[5]}" = '| [o/fork](https://github.com/o/fork) | – | – | – | [🔵](#user-content-f-branch-undeclared-o-fork)[🔵](#user-content-f-branch-undeclared-o-fork-2)[🔵](#user-content-f-fork-behind-o-fork) | – | ✅ |' ]
+  [ "${#lines[@]}" -eq 6 ]
   # the clean repository and the repo-less finding are not in the matrix
   [[ $ov != *"o/clean"* && $ov != *"config-invalid"* ]]
   [[ $ov == *"🔴 fix · 🔵 note · ✅ ok · ⚪ not checked · – does not apply"* ]]
@@ -579,7 +574,7 @@ J
   findings <<<"$f"
   run "$REPORT"
   links=$(section "📋 Overview" | grep -o '(#user-content-f-[^)]*)' | sed 's/^(#user-content-//; s/)$//')
-  [ "$(wc -l <<<"$links")" -eq 9 ]
+  [ "$(wc -l <<<"$links")" -eq 8 ]
   for l in $links; do
     [ "$(grep -cF "<a name=\"$l\"></a>" <<<"$output")" -eq 1 ] || { echo "not one anchor: $l"; return 1; }
   done
@@ -637,7 +632,7 @@ J
   run "$REPORT"
   [ "$status" -eq 1 ]
   [[ $output != *"📋 Overview"* && $output != *"user-content-overview"* ]]
-  [ "$(todo_titles | wc -l)" -eq 8 ]
+  [ "$(todo_titles | wc -l)" -eq 7 ]
 }
 
 @test "per-repo job mode renders the same overview" {

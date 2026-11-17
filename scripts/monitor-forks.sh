@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Fork checks: fork-sync-stale / fork-behind (missing upstream commits),
-# workflow-disabled / fork-workflows-active, fork-delete-candidate,
-# contribution-stale, branch-undeclared (info).
-# Scope: inventory forks with a parent that are neither mirror targets nor
-# managed (monitor-managed.sh checks those).
+# Fork checks: fork-behind (missing upstream commits), fork-workflows-active,
+# fork-delete-candidate, contribution-stale, branch-undeclared (info).
+# Scope: inventory forks with a parent that are not managed (monitor-managed.sh
+# checks those).
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
@@ -12,51 +11,29 @@ source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 
 need_env FINDINGS INVENTORY CONFIG
 
-# check_behind REPO BRANCH PARENT PARENT_BRANCH SYNC_HOURS: SYNC_HOURS is empty
-# for forks without their own sync workflow.
+# check_behind REPO BRANCH PARENT PARENT_BRANCH: info fork-behind when the
+# fork misses upstream commits.
 check_behind() {
-  local repo=$1 branch=$2 parent=$3 pbranch=$4 sync=$5 body n date age
+  local repo=$1 branch=$2 parent=$3 pbranch=$4 body n
   body=$(fetch fork-behind "$repo" \
     "repos/$repo/compare/$(uri "$branch")...${parent%%/*}:$(uri "$pbranch")") || return 0
   json_out fork-behind "$repo" n -r '.ahead_by // 0' <<<"$body" || return 0
   ((n > 0)) || return 0
-  if [[ -z $sync ]]; then
-    finding info fork-behind "$repo" "$n commits behind upstream"
-    return 0
-  fi
-  json_out fork-sync-stale "$repo" date -r '.commits[0].commit.committer.date // empty' <<<"$body" || return 0
-  if [[ -z $date ]]; then
-    parse_failed fork-sync-stale "$repo"
-    return 0
-  fi
-  age=$(((${MONITOR_NOW:-$(date -u +%s)} - $(date -u -d "$date" +%s)) / 3600))
-  if ((age > sync + 24)); then
-    finding red fork-sync-stale "$repo" "$n upstream commits missing, oldest from $date"
-  fi
+  finding info fork-behind "$repo" "$n commits behind upstream"
 }
 
-# check_workflows REPO SYNCED: workflow-disabled (forks with their own sync
-# workflow) or fork-workflows-active (all other forks). A fork with Actions
-# disabled in its settings is clean: its workflows still report "active".
+# check_workflows REPO: fork-workflows-active. A fork with Actions disabled in
+# its settings is clean: its workflows still report "active".
 check_workflows() {
-  local repo=$1 synced=$2 body found line n
-  if [[ -z $synced ]]; then
-    body=$(fetch fork-workflows-active "$repo" "repos/$repo/actions/permissions") || return 0
-    json_out fork-workflows-active "$repo" n -r '.enabled' <<<"$body" || return 0
-    [[ $n != false ]] || return 0
-  fi
-  body=$(fetch workflow-disabled "$repo" "repos/$repo/actions/workflows?per_page=100") || return 0
-  if [[ -n $synced ]]; then
-    disabled_workflows workflow-disabled "$repo" found <<<"$body" || return 0
-    while IFS= read -r line; do
-      [[ -z $line ]] || finding red workflow-disabled "$repo" "$line"
-    done <<<"$found"
-  else
-    json_out fork-workflows-active "$repo" n '
-      [.workflows // [] | .[] | select(.state == "active")] | length' <<<"$body" || return 0
-    if ((n > 0)); then
-      finding info fork-workflows-active "$repo" "$n active workflows"
-    fi
+  local repo=$1 body n
+  body=$(fetch fork-workflows-active "$repo" "repos/$repo/actions/permissions") || return 0
+  json_out fork-workflows-active "$repo" n -r '.enabled' <<<"$body" || return 0
+  [[ $n != false ]] || return 0
+  body=$(fetch fork-workflows-active "$repo" "repos/$repo/actions/workflows?per_page=100") || return 0
+  json_out fork-workflows-active "$repo" n '
+    [.workflows // [] | .[] | select(.state == "active")] | length' <<<"$body" || return 0
+  if ((n > 0)); then
+    finding info fork-workflows-active "$repo" "$n active workflows"
   fi
 }
 
@@ -117,23 +94,21 @@ check_undeclared() {
 }
 
 main() {
-  local forks repo branch parent pbranch sync prs fb
+  local forks repo branch parent pbranch prs fb
   if ! forks=$(jq -r --slurpfile c "$CONFIG" '
-      ([$c[0].mirrors // [] | .[].target]) as $m |
       ([$c[0].managed // [] | .[].repo | ascii_downcase]) as $mg |
-      ([$c[0].forks // [] | .[] | {key: .repo, value: .sync_interval_hours}] | from_entries) as $f |
-      .[] | select(.fork == true and .parent != null and ([.name] | inside($m) | not)) |
+      .[] | select(.fork == true and .parent != null) |
       select(.name | ascii_downcase | IN($mg[]) | not) |
-      [.name, .default_branch, .parent.name, .parent.default_branch, ($f[.name] // "" | tostring)] | @tsv' \
+      [.name, .default_branch, .parent.name, .parent.default_branch] | @tsv' \
     "$INVENTORY" 2>/dev/null); then
     finding red check-failed - "fork checks: cannot parse inventory"
     return 0
   fi
-  while IFS=$'\t' read -r repo branch parent pbranch sync; do
+  while IFS=$'\t' read -r repo branch parent pbranch; do
     [[ -n $repo ]] || continue
     checked "$repo"
-    check_behind "$repo" "$branch" "$parent" "$pbranch" "$sync"
-    check_workflows "$repo" "$sync"
+    check_behind "$repo" "$branch" "$parent" "$pbranch"
+    check_workflows "$repo"
     prs=$(mktemp)
     fb=$(mktemp)
     # the open upstream pulls of the fork branches (never all upstream pulls)

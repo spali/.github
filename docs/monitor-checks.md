@@ -18,7 +18,7 @@ are 🤔 Decide (a choice only you can make: `adoption`, `branch-undeclared`,
 and sentence of each entry are in `MONITOR_TODO` in `scripts/monitor-lib.sh`.
 
 Groups: [Release flow](#release-flow) · [Settings](#settings) ·
-[Health](#health) · [Forks](#forks) · [Mirrors](#mirrors) · [Lists](#lists) ·
+[Health](#health) · [Forks](#forks) · [Lists](#lists) ·
 [Managed repositories](#managed-repositories) · [Monitor](#monitor)
 
 # Release flow
@@ -118,7 +118,7 @@ block moving a tag. ⚪ Not checked like `ruleset-main`.
 
 # Health
 
-Own repositories that are neither forks nor mirrors nor managed.
+Own repositories that are neither forks nor managed.
 
 ## main-red
 
@@ -137,7 +137,7 @@ update).
 ## workflow-disabled
 
 🔴 GitHub disabled a workflow after 60 days without activity in the
-repository. Scheduled jobs (such as a fork sync) then stop silently.
+repository. Scheduled jobs then stop silently.
 
 **Fix:** `gh workflow enable <workflow> -R <repo>`; push a commit if it
 should keep running.
@@ -166,14 +166,6 @@ Forks with an upstream that are not managed.
 
 **Fix:** sync it (button "Sync fork") when you need the changes.
 
-## fork-sync-stale
-
-🔴 A fork with its own sync workflow (listed under `forks` in `repos.yml`)
-misses upstream commits older than its `sync_interval_hours` plus 24 hours:
-the sync does not work.
-
-**Fix:** look at the sync workflow of the fork (disabled? failing? conflict?).
-
 ## fork-workflows-active
 
 🔵 A fork has Actions enabled and active workflows (usually copied from
@@ -191,17 +183,6 @@ closed or merged pull request from the fork (contribution done): nothing
 would be lost.
 
 **Fix:** delete the fork if you no longer need it.
-
-# Mirrors
-
-Mirror targets listed under `mirrors` in `repos.yml`.
-
-## mirror-behind
-
-🔴 The mirror lacks branches or tags of its source, and its last push is
-older than `interval_hours` plus 24 hours: the mirror job does not work.
-
-**Fix:** look at the mirror job.
 
 # Lists
 

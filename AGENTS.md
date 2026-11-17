@@ -452,10 +452,8 @@ issue and the log of the failed step. Explanations for humans:
 | `dependabot-alert` | open alert; red for critical/high, info for low/medium | update or dismiss with a reason |
 | `code-scanning-alert` | open alert; red for critical/high, info for low/medium | fix or dismiss with a reason |
 | `fork-behind` (info) | a fork is behind its upstream | sync when you care |
-| `fork-sync-stale` | a fork with its own sync workflow misses upstream commits beyond `sync_interval_hours` + 24 h | check the sync workflow |
 | `fork-workflows-active` (info) | a fork runs its own workflows | disable Actions in the fork's settings if unwanted (disabled Actions = clean) |
 | `fork-delete-candidate` (info) | no own commits on the default branch, no open upstream PR from the fork, and every fork branch also exists upstream or was the head of a closed or merged upstream PR from the fork | consider deleting the fork |
-| `mirror-behind` | the mirror target lacks refs of its source beyond `interval_hours` + 24 h | check the mirror job in the mirror repository |
 | `list-none` (info) | a repository is in no list | add it to a list |
 | `list-contradiction` (info) | a repository is in both lists of an exclusive pair | fix the lists |
 | `list-mirror-missing` (info) | a mirror target is not in the mirrors list | add it to the list |
@@ -512,9 +510,9 @@ issue and the log of the failed step. Explanations for humans:
   `sync.yml` / `profile-cards.yml` (`MAINTENANCE_WORKFLOWS` in `monitor-repos.sh`) is not
   `central` (not a release-flow repository): no release checks and, because it
   has pins, no `adoption` finding, but `pin-behind` applies.
-- A fork's own sync workflow is disabled after 60 days without repository
-  activity like any scheduled workflow of a public repository
-  (`disabled_inactivity`); the monitor reports it as `workflow-disabled`.
+- A scheduled workflow of a public repository is disabled after 60 days without
+  repository activity (`disabled_inactivity`); the monitor reports it as
+  `workflow-disabled` for own repositories.
 - The REST repository (`GET repos/{owner}/{repo}`) answers `null` for the merge
   settings (`allow_merge_commit`, …) to an app token without write access;
   `settings-merge` reads them with GraphQL (`mergeCommitAllowed`, …), which
@@ -527,7 +525,7 @@ issue and the log of the failed step. Explanations for humans:
   Report concatenates them. Inventory cannot use `monitor.runs-on`: the value
   comes from its own output.
 - `git ls-remote` on mirror targets only compares the refs of the source; extra
-  refs in the target are fine.
+  refs in the target are fine (`managed-behind`).
 - Sync tokens (tested 2026-11-16): an installation token scoped
   (`repositories:`) to a repository that does not exist cannot be created
   (422). Forking needs an installation token that is not scoped to
@@ -565,9 +563,5 @@ CI runs the same checks as the required checks `shellcheck`, `bats`,
   hand: `gh release delete <tag> --cleanup-tag --yes`).
 - A tag left over without a release is only cleaned up for `-next` and
   `-pr.N`; a leftover release tag `vX.Y.Z` fails the tag check as usual.
-- `mirror-behind` uses the target's last push time as grace: a quiet mirror
-  can be red for up to a day after an upstream change, and a mirror that still
-  pushes some refs daily stays green while other refs lag. This stays until
-  the mirror sync in `spali/.github` reports its own failed runs.
 - `pin-behind` does not run during the first 7 days after a new
   `spali/.github` release.

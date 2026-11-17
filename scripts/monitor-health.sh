@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Health checks for owned, non-fork, non-mirror, unmanaged repositories:
+# Health checks for owned, non-fork, unmanaged repositories:
 # main-red, renovate-stale, workflow-disabled, dependabot-alert,
 # code-scanning-alert.
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
@@ -93,9 +93,8 @@ check_alerts() {
 main() {
   local repos repo branch
   if ! repos=$(jq -r --slurpfile c "$CONFIG" '
-      ([$c[0].mirrors // [] | .[].target]) as $m |
       ([$c[0].managed // [] | .[].repo | ascii_downcase]) as $mg |
-      .[] | select(.fork == false and ([.name] | inside($m) | not)) |
+      .[] | select(.fork == false) |
       select(.name | ascii_downcase | IN($mg[]) | not) |
       [.name, .default_branch] | @tsv' "$INVENTORY" 2>/dev/null); then
     finding red check-failed - "health checks: cannot parse inventory"

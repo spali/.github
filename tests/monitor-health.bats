@@ -10,7 +10,7 @@ setup() {
   CONFIG="$BATS_TEST_TMPDIR/config.json"
   export FINDINGS INVENTORY CONFIG
   : >"$FINDINGS"
-  echo '{"mirrors":[]}' >"$CONFIG"
+  echo '{"managed":[]}' >"$CONFIG"
   export MONITOR_NOW
   MONITOR_NOW=$(date -u -d 2026-11-14T12:00:00Z +%s)
   unset GITHUB_WORKFLOW_REF
@@ -180,15 +180,12 @@ run_entry() {
   [ "$(level check-failed)" = red ]
 }
 
-@test "forks and mirror targets are out of scope" {
+@test "forks are out of scope" {
   jq -n '[
     {name: "spali/a", fork: false, default_branch: "main"},
-    {name: "spali/fork", fork: true, default_branch: "main"},
-    {name: "spali/mirror", fork: false, default_branch: "main"}]' >"$INVENTORY"
-  echo '{"mirrors":[{"target":"spali/mirror"}]}' >"$CONFIG"
+    {name: "spali/fork", fork: true, default_branch: "main"}]' >"$INVENTORY"
   run_script
   run ! grep -q 'spali/fork' "$GH_LOG"
-  run ! grep -q 'spali/mirror' "$GH_LOG"
   grep -q 'spali/a/' "$GH_LOG"
 }
 
@@ -252,7 +249,7 @@ run_entry() {
   jq -n '[
     {name: "spali/a", fork: false, default_branch: "main"},
     {name: "spali/Managed", fork: false, default_branch: "main"}]' >"$INVENTORY"
-  echo '{"mirrors":[],"managed":[{"repo":"spali/managed","upstream":"https://src.example/m.git"}]}' >"$CONFIG"
+  echo '{"managed":[{"repo":"spali/managed","upstream":"https://src.example/m.git"}]}' >"$CONFIG"
   run_script
   run ! grep -qi 'spali/managed' "$GH_LOG"
   grep -q 'spali/a/' "$GH_LOG"

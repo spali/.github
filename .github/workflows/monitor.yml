@@ -27,7 +27,7 @@
 # finding is open. The caller owns the schedule and the concurrency group.
 #
 # Jobs: Inventory (control file, inventory, the jobs per check group) → one
-# matrix job per check group (release, settings, health, forks, mirrors,
+# matrix job per check group (release, settings, health, forks,
 # managed) and Lists → Report (collects the findings of all jobs as artifacts,
 # kept 1 day; job summary and overview issue). The control file chooses one job per group
 # (monitor.jobs: per-group, default) or one per group and repository
@@ -69,7 +69,6 @@ jobs:
       settings: ${{ steps.matrix.outputs.settings }}
       health: ${{ steps.matrix.outputs.health }}
       forks: ${{ steps.matrix.outputs.forks }}
-      mirrors: ${{ steps.matrix.outputs.mirrors }}
       managed: ${{ steps.matrix.outputs.managed }}
     steps:
       - &app-token
@@ -112,7 +111,7 @@ jobs:
         if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
         run: |
           groups=$(.monitor/scripts/monitor.sh matrix)
-          for g in release settings health forks mirrors managed; do
+          for g in release settings health forks managed; do
             echo "$g=$(jq -c --arg g "$g" '.[$g]' <<<"$groups")" >>"$GITHUB_OUTPUT"
             echo "$g: $(jq -r --arg g "$g" '.[$g] | length' <<<"$groups") repositories"
           done
@@ -201,18 +200,6 @@ jobs:
         repo: ${{ fromJSON(needs.prepare.outputs.forks) }}
     steps: *group-steps
 
-  mirrors:
-    name: Mirrors · ${{ matrix.repo || 'all repositories' }}
-    needs: prepare
-    if: ${{ !cancelled() && needs.prepare.outputs.ready == 'true' && needs.prepare.outputs.mirrors != '[]' }}
-    runs-on: ${{ fromJSON(needs.prepare.outputs.runner) }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        repo: ${{ fromJSON(needs.prepare.outputs.mirrors) }}
-    steps: *group-steps
-
   managed:
     name: Managed · ${{ matrix.repo || 'all repositories' }}
     needs: prepare
@@ -247,7 +234,7 @@ jobs:
 
   report:
     name: Report
-    needs: [prepare, release, settings, health, forks, mirrors, managed, lists]
+    needs: [prepare, release, settings, health, forks, managed, lists]
     if: ${{ !cancelled() && needs.prepare.outputs.ready == 'true' }}
     runs-on: ${{ fromJSON(needs.prepare.outputs.runner) }}
     timeout-minutes: 10

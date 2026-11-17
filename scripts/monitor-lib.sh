@@ -8,8 +8,8 @@ MONITOR_CHECKS=(
   settings-merge settings-alerts settings-pvr settings-actions
   ruleset-main ruleset-tags main-red renovate-stale workflow-disabled
   dependabot-alert code-scanning-alert
-  fork-behind fork-sync-stale fork-workflows-active fork-delete-candidate
-  mirror-behind list-none list-contradiction list-mirror-missing list-archived
+  fork-behind fork-workflows-active fork-delete-candidate
+  list-none list-contradiction list-mirror-missing list-archived
   managed-missing managed-settings managed-behind branch-undeclared
   rebase-pending sync-failed contribution-stale unmanaged
   adoption check-failed config-invalid ignore-unused
@@ -50,7 +50,7 @@ MONITOR_TODO='{
     "text": "The latest run of a workflow on the default branch failed: fix the cause and re-run it."},
   "renovate-stale": {"category": "cleanup", "areas": ["health"], "title": "Merge or close old Renovate pull requests",
     "text": "A Renovate pull request is open for more than 7 days: review and merge it, or close it."},
-  "workflow-disabled": {"category": "cleanup", "areas": ["health", "forks"], "title": "Enable disabled workflows",
+  "workflow-disabled": {"category": "cleanup", "areas": ["health"], "title": "Enable disabled workflows",
     "text": "GitHub disabled a workflow after 60 days without activity: enable it again, or delete it."},
   "dependabot-alert": {"category": "cleanup", "areas": ["health"], "title": "Handle Dependabot alerts",
     "text": "A dependency has a known vulnerability: update it, or dismiss the alert with a reason."},
@@ -58,14 +58,10 @@ MONITOR_TODO='{
     "text": "Code scanning found a problem in the code: fix it, or dismiss the alert with a reason."},
   "fork-behind": {"category": "cleanup", "areas": ["forks"], "title": "Bring forks up to date",
     "text": "A fork is behind its upstream: sync it with the Sync fork button, or add it to `managed:` so the central sync keeps it current."},
-  "fork-sync-stale": {"category": "cleanup", "areas": ["forks"], "title": "Fix the sync workflow of forks",
-    "text": "A fork with its own sync workflow misses upstream commits for too long: check its sync workflow."},
   "fork-workflows-active": {"category": "cleanup", "areas": ["forks"], "title": "Turn off Actions in forks",
     "text": "Upstream workflows run in the fork and cost minutes or fail: disable Actions in the settings of the fork if unwanted."},
   "fork-delete-candidate": {"category": "decide", "areas": ["forks"], "title": "Delete forks without own work?",
     "text": "No own commits and no open pull request upstream: keep the fork only if it is in a List on purpose or you plan to work on it, else delete it."},
-  "mirror-behind": {"category": "cleanup", "areas": ["mirrors"], "title": "Fix mirrors that fall behind",
-    "text": "A mirror target lacks refs of its source for too long: check the mirror job."},
   "list-none": {"category": "cleanup", "areas": ["lists"], "title": "Add repositories to a List",
     "text": "The repository is in no List, or a fork is in none of the fork Lists: add it to the right List."},
   "list-contradiction": {"category": "decide", "areas": ["lists"], "title": "Choose one of two exclusive Lists",
@@ -92,7 +88,7 @@ MONITOR_TODO='{
     "text": "A repository in the mirrors List is neither managed nor a mirror target: add it to `managed:`, or ignore it."},
   "adoption": {"category": "decide", "areas": ["release"], "title": "Adopt the release flow?",
     "text": "An own repository does not use the central release flow: adopt it, or ignore the finding."},
-  "check-failed": {"category": "cleanup", "areas": ["release", "settings", "health", "forks", "mirrors", "managed", "lists"], "title": "Fix checks that could not run",
+  "check-failed": {"category": "cleanup", "areas": ["release", "settings", "health", "forks", "managed", "lists"], "title": "Fix checks that could not run",
     "text": "A check could not run (API error, missing access, bad response): read the detail and fix the cause; never ignore it."},
   "config-invalid": {"category": "cleanup", "areas": [], "title": "Fix the control file",
     "text": "The control file is missing or invalid, or names an unknown List or check: fix the file."},
@@ -103,14 +99,13 @@ MONITOR_TODO='{
 # jq definitions of the repositories each check group looks at, shared by
 # the workflow matrix (monitor.sh) and the overview of the report:
 # groups($c; $inv) with $c the control file and $inv the inventory (anything
-# but an array counts as empty) is {release, settings, health, forks, mirrors,
+# but an array counts as empty) is {release, settings, health, forks,
 # managed: [names, sorted]}. Managed repositories (names compared
 # case-insensitively) are left out of health and forks; the group managed
 # takes the names of the control file.
 # shellcheck disable=SC2016,SC2034 # jq program; used by monitor.sh and monitor-report.sh
 MONITOR_GROUPS_JQ='
   def groups($c; $inv):
-    ([$c.mirrors // [] | .[].target]) as $m |
     ([$c.managed // [] | .[].repo]) as $mg |
     ([$mg[] | ascii_downcase]) as $mgl |
     def unmanaged: (.name | ascii_downcase | IN($mgl[])) | not;
@@ -119,9 +114,8 @@ MONITOR_GROUPS_JQ='
     {
       release: names(.central or ((.pins // []) | length > 0)),
       settings: names(.central == true),
-      health: names(.fork == false and ([.name] | inside($m) | not) and unmanaged),
-      forks: names(.fork == true and .parent != null and ([.name] | inside($m) | not) and unmanaged),
-      mirrors: ($m | sort),
+      health: names(.fork == false and unmanaged),
+      forks: names(.fork == true and .parent != null and unmanaged),
       managed: ($mg | sort)
     };'
 
@@ -292,10 +286,10 @@ remote_head() {
   awk '$1 == "ref:" && $3 == "HEAD" { sub(/^refs\/heads\//, "", $2); print $2; exit }' <<<"$out"
 }
 
-# api_refs REPO OUTFILE [CHECK]: the same list for a private repository via
-# the API. Errors are check-failed findings of CHECK (default mirror-behind).
+# api_refs REPO OUTFILE CHECK: the same list for a private repository via
+# the API. Errors are check-failed findings of CHECK.
 api_refs() {
-  local check=${3:-mirror-behind} kind part
+  local check=$3 kind part
   : >"$2"
   for kind in heads tags; do
     part=$(mktemp)

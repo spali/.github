@@ -10,7 +10,7 @@ setup() {
   CONFIG="$BATS_TEST_TMPDIR/config.json"
   export FINDINGS INVENTORY CONFIG
   : >"$FINDINGS"
-  echo '{"mirrors":[],"forks":[]}' >"$CONFIG"
+  echo '{"managed":[]}' >"$CONFIG"
   export MONITOR_NOW
   MONITOR_NOW=$(date -u -d 2026-11-14T12:00:00Z +%s)
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/monitor-forks.sh"
@@ -56,8 +56,6 @@ count() { jq -s --arg c "$1" 'map(select(.check == $c)) | length' "$FINDINGS"; }
 message() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | .[$i].message' "$FINDINGS"; }
 level() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | .[$i].level' "$FINDINGS"; }
 
-synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirrors":[]}' >"$CONFIG"; }
-
 @test "compliant fork has no findings" {
   run_script
   [ ! -s "$FINDINGS" ]
@@ -69,58 +67,12 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
   [ "$(cat "$MONITOR_CHECKED")" = "spali/f" ]
 }
 
-@test "synced fork 3 days behind is red" {
-  synced
-  respond_jq "$BEHIND" '{ahead_by: 7, commits: [{commit: {committer: {date: "2026-11-01T00:00:00Z"}}}]}'
-  run_script
-  [ "$(count fork-sync-stale)" -eq 1 ]
-  [ "$(level fork-sync-stale)" = red ]
-  [ "$(message fork-sync-stale)" = "7 upstream commits missing, oldest from 2026-11-01T00:00:00Z" ]
-  [ "$(count fork-behind)" -eq 0 ]
-}
-
-@test "synced fork with a commit from 10 hours ago missing is fine" {
-  synced
-  respond_jq "$BEHIND" '{ahead_by: 1, commits: [{commit: {committer: {date: "2026-11-14T02:00:00Z"}}}]}'
-  run_script
-  [ ! -s "$FINDINGS" ]
-}
-
-@test "synced fork with a commit missing 178 hours is within the grace" {
-  synced
-  respond_jq "$BEHIND" '{ahead_by: 1, commits: [{commit: {committer: {date: "2026-11-07T02:00:00Z"}}}]}'
-  run_script
-  [ ! -s "$FINDINGS" ]
-}
-
-@test "synced fork with a commit missing 193 hours is red" {
-  synced
-  respond_jq "$BEHIND" '{ahead_by: 1, commits: [{commit: {committer: {date: "2026-11-06T11:00:00Z"}}}]}'
-  run_script
-  [ "$(count fork-sync-stale)" -eq 1 ]
-}
-
-@test "unsynced fork behind is info" {
+@test "fork behind is info" {
   respond_jq "$BEHIND" '{ahead_by: 4, commits: [{commit: {committer: {date: "2026-01-01T00:00:00Z"}}}]}'
   run_script
   [ "$(count fork-behind)" -eq 1 ]
   [ "$(level fork-behind)" = info ]
   [ "$(message fork-behind)" = "4 commits behind upstream" ]
-  [ "$(count fork-sync-stale)" -eq 0 ]
-}
-
-@test "synced fork reports disabled workflows, not active ones" {
-  synced
-  jq -nc '{workflows: [
-    {name: "Rebase Upstream", path: ".github/workflows/sync.yml", state: "disabled_inactivity"},
-    {name: "CI", path: ".github/workflows/ci.yml", state: "active"}]}' | gh_respond "$WFS" -
-  run_script
-  [ "$(count workflow-disabled)" -eq 1 ]
-  [ "$(level workflow-disabled)" = red ]
-  [ "$(message workflow-disabled)" = "Rebase Upstream (.github/workflows/sync.yml) disabled by GitHub after 60 days of inactivity" ]
-  [ "$(count fork-workflows-active)" -eq 0 ]
-  [ "$(grep -c 'actions/workflows' "$GH_LOG")" -eq 1 ]
-  [ "$(grep -c 'actions/permissions' "$GH_LOG")" -eq 0 ]
 }
 
 @test "other fork with Actions disabled is clean, workflows are not read" {
@@ -190,12 +142,10 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
   [ "$(count fork-delete-candidate)" -eq 1 ]
 }
 
-@test "fork without parent, non-forks and mirror targets are out of scope" {
+@test "fork without parent and non-forks are out of scope" {
   jq -n '[
     {name: "spali/orphan", fork: true, default_branch: "main", parent: null},
-    {name: "spali/plain", fork: false, default_branch: "main", parent: null},
-    {name: "spali/m", fork: true, default_branch: "main", parent: {name: "up/m", default_branch: "main"}}]' >"$INVENTORY"
-  echo '{"mirrors":[{"target":"spali/m"}],"forks":[]}' >"$CONFIG"
+    {name: "spali/plain", fork: false, default_branch: "main", parent: null}]' >"$INVENTORY"
   run_script
   [ ! -s "$GH_LOG" ]
   [ ! -s "$FINDINGS" ]
@@ -209,21 +159,20 @@ synced() { echo '{"forks":[{"repo":"spali/f","sync_interval_hours":168}],"mirror
 }
 
 @test "large payloads are handled" {
-  synced
   head -c 250000 /dev/zero | tr '\0' x >"$BATS_TEST_TMPDIR/big"
   jq -nc --rawfile big "$BATS_TEST_TMPDIR/big" '{ahead_by: 2, commits: [
     {commit: {message: $big, committer: {date: "2026-11-01T00:00:00Z"}}}]}' | gh_respond "$BEHIND" -
   jq -nc --rawfile big "$BATS_TEST_TMPDIR/big" '[{head: {repo: {full_name: "o/x"}}, body: $big}]' |
     gh_respond '*repos/up/f/pulls?state=open&head=spali:main&per_page=100 --paginate' -
   run_script
-  [ "$(count fork-sync-stale)" -eq 1 ]
+  [ "$(count fork-behind)" -eq 1 ]
   [ "$(count check-failed)" -eq 0 ]
 }
 
 @test "managed fork is skipped by fork checks" {
   jq -n '[{name: "spali/F", fork: true, default_branch: "main",
     parent: {name: "up/f", default_branch: "dev"}}]' >"$INVENTORY"
-  echo '{"mirrors":[],"forks":[],"managed":[{"repo":"spali/f","upstream":"https://github.com/up/f"}]}' >"$CONFIG"
+  echo '{"managed":[{"repo":"spali/f","upstream":"https://github.com/up/f"}]}' >"$CONFIG"
   run_script
   [ ! -s "$GH_LOG" ]
   [ ! -s "$FINDINGS" ]
