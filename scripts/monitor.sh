@@ -9,15 +9,16 @@
 # The inventory phase also writes archived.json (names of the archived
 # repositories, kept apart: only the lists check looks at them).
 # Phases, in order: config inventory release settings health forks
-# managed lists report issue. A check phase lists every repository it looked at
-# (clean ones with ✓, the others as a log group with their findings) and
-# annotates each red finding that is not ignored. MONITOR_REPO limits a check
-# phase (not lists) to one repository: one matrix job per repository. The
+# managed lists billing report issue. A check phase lists every repository it
+# looked at (clean ones with ✓, the others as a log group with their findings)
+# and annotates each red finding that is not ignored. MONITOR_REPO limits a
+# check phase (not lists or billing, they concern the whole account) to one
+# repository: one matrix job per repository. The
 # phase matrix (after inventory) prints the repositories of each check group
 # as one JSON object for that matrix.
 #
 # Env: GH_TOKEN, MONITOR_CONFIG (default repos.yml), LISTS_TOKEN (default
-# GH_TOKEN), MONITOR_ISSUE_REPO, ISSUE_TOKEN and MONITOR_COMMENT_AUTHOR (see
+# GH_TOKEN), BILLING_TOKEN (see monitor-billing.sh), MONITOR_ISSUE_REPO, ISSUE_TOKEN and MONITOR_COMMENT_AUTHOR (see
 # monitor-issue.sh), MONITOR_SCRIPTS_DIR (default: this script's directory), MONITOR_WORK.
 # The report goes to $GITHUB_STEP_SUMMARY, or to stdout if that is not set.
 # Exit status: all phases: 1 if a red finding is left or the issue update
@@ -30,8 +31,8 @@ DIR=${MONITOR_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")}
 # shellcheck source=scripts/monitor-lib.sh
 source "$DIR/monitor-lib.sh"
 
-PHASES=(config inventory matrix release settings health forks managed lists report issue)
-CHECKS=(release settings health forks managed lists)
+PHASES=(config inventory matrix release settings health forks managed lists billing report issue)
+CHECKS=(release settings health forks managed lists billing)
 CONFIG_FILE=${MONITOR_CONFIG:-repos.yml}
 EMPTY_CONFIG='{"version":1,"lists":{},"ignores":[]}'
 
@@ -230,8 +231,8 @@ main() {
       echo "error: unknown phase $1 (${PHASES[*]})" >&2
       exit 2
     fi
-    if [[ -n ${MONITOR_REPO:-} && $1 == lists ]]; then
-      echo "error: MONITOR_REPO does not apply to lists" >&2
+    if [[ -n ${MONITOR_REPO:-} && ($1 == lists || $1 == billing) ]]; then
+      echo "error: MONITOR_REPO does not apply to $1" >&2
       exit 2
     fi
     if [[ -z ${MONITOR_WORK:-} ]]; then

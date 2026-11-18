@@ -511,6 +511,40 @@ J
   [[ $output == *"[0 to do](#user-content-todo)"* ]]
 }
 
+@test "TODO: a check marked todo false is listed under Info only, not in the TODO or its count" {
+  findings <<'J'
+{"level":"info","check":"billing","repo":null,"message":"Actions minutes 15 % (300 of 2000)"}
+{"level":"info","check":"list-none","repo":"o/a","message":"in no list"}
+J
+  run "$REPORT"
+  [ "$status" -eq 0 ]
+  [[ "$(section "📝 TODO")" != *"billing"* ]]
+  [[ "$(section "📝 TODO")" == *"<code>list-none</code>"* ]]
+  [[ $output == *"[2 info](#user-content-info)"*"[1 to do](#user-content-todo)"* ]]
+  [[ "$(section "🔵 Info")" == *"### \`billing\`"*"| - | Actions minutes 15 % (300 of 2000) |"* ]]
+}
+
+@test "TODO: a check marked todo false gives an empty TODO when it is the only finding" {
+  findings <<'J'
+{"level":"info","check":"billing","repo":null,"message":"Actions minutes 15 %"}
+J
+  run "$REPORT"
+  [[ "$(section "📝 TODO")" == $'## 📝 TODO\n\nNothing to do.' ]]
+  [[ $output == *"[0 to do](#user-content-todo)"* ]]
+}
+
+@test "a failed billing check is red and a Fix now entry, without a repository" {
+  findings <<'J'
+{"level":"red","check":"check-failed","repo":null,"message":"billing: cannot parse API response"}
+J
+  export INVENTORY="$FIX/inventory.json"
+  run "$REPORT"
+  [ "$status" -eq 1 ]
+  [[ "$(section "🔴 Red")" == *"### \`check-failed\`"*"| - | billing: cannot parse API response |"* ]]
+  [[ "$(todo_titles)" == '<details open><summary>🔴 <b>Fix now</b> · Fix checks that could not run · 1 entry · <code>check-failed</code></summary>' ]]
+  [[ "$(section "📝 TODO")" == *"| - | billing: cannot parse API response |"* ]]
+}
+
 @test "TODO: pipes in the explanation-free rows stay escaped" {
   findings <<'J'
 {"level":"info","check":"list-none","repo":"o/a","message":"a | b"}

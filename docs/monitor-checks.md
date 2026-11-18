@@ -455,16 +455,19 @@ The included Actions quota of the account (Settings → Billing), checked once
 per run, not per repository. Only private repositories count (public ones use
 Actions for free); a repository of the usage that is not in the inventory
 (deleted, renamed, archived) counts as private and is marked
-`(not in inventory)`. The checks need an account token with Plan read access;
-without one the run lists ⚪ `billing` "no account token: billing not
-checked".
+`(not in inventory)`. The checks need a fine-grained token of the owner with
+the account permission Plan: read (the optional secret `account-token` of the
+monitor workflow); without one the run lists ⚪ `billing` "no account token:
+billing not checked".
 
 Minutes weigh by price: the cost of all minutes (macOS and Windows cost more)
 divided by the price of a Linux minute, so the numbers read like GitHub's.
 Storage is a monthly average: GB-hours so far against the included GB over
 the elapsed hours. Projections (UTC month): minutes at the pace so far;
 storage at the level of yesterday (on day 1 the average so far) for the rest
-of the month. Included values come from the plan (Free: 2000 minutes and
+of the month. Yesterday is the UTC day before the run; shortly after midnight
+GitHub may still be filling in its usage, so the storage level can read low
+in an early run. Included values come from the plan (Free: 2000 minutes and
 0.5 GB, Pro: 3000 and 2 GB; other plans need the block), thresholds default
 to 75 %. Set any of them in the control file:
 

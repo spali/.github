@@ -11,7 +11,7 @@ setup() {
   cp "$REAL"/lib.sh "$REAL"/monitor-lib.sh "$REAL"/monitor-config.sh \
     "$REAL"/monitor-report.sh "$MONITOR_SCRIPTS_DIR"/
   local s
-  for s in release settings health forks managed lists; do
+  for s in release settings health forks managed lists billing; do
     printf '#!/usr/bin/env bash\nexit 0\n' >"$MONITOR_SCRIPTS_DIR/monitor-$s.sh"
   done
   cp "$FIX/inventory.json" "$BATS_TEST_TMPDIR/inventory.json"
@@ -259,7 +259,7 @@ check_stub() {
 @test "an unknown phase is an error" {
   phase nope
   [ "$status" -eq 2 ]
-  [ "$stderr" = "error: unknown phase nope (config inventory matrix release settings health forks managed lists report issue)" ]
+  [ "$stderr" = "error: unknown phase nope (config inventory matrix release settings health forks managed lists billing report issue)" ]
 }
 
 @test "config phase reports a valid control file" {
@@ -309,6 +309,33 @@ EOS
   phase lists
   [ "$status" -eq 0 ]
   [ "$(jq -c . "$BATS_TEST_TMPDIR/archived.seen")" = '["spali/old"]' ]
+}
+
+@test "billing phase runs the billing script with the whole inventory and the account token" {
+  check_stub billing 'jq -c "[.[].name]" "$INVENTORY" >"'"$BATS_TEST_TMPDIR"'/seen"
+printf "%s\n" "${BILLING_TOKEN:-}" >"'"$BATS_TEST_TMPDIR"'/token"
+finding info billing - "Actions minutes 15 %"'
+  phase config
+  phase inventory
+  BILLING_TOKEN=acct phase billing
+  [ "$status" -eq 0 ]
+  [ "${lines[-1]}" = "billing: 0 repositories · 0 red · 1 info · 0 not checked · 0 ignored" ]
+  [[ $output == *"ℹ billing: Actions minutes 15 %"* ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/seen")" = "$(jq -c '[.[].name]' "$FIX/inventory.json")" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/token")" = acct ]
+}
+
+@test "MONITOR_REPO with billing is a usage error" {
+  MONITOR_REPO=spali/a phase billing
+  [ "$status" -eq 2 ]
+  [ "$stderr" = "error: MONITOR_REPO does not apply to billing" ]
+}
+
+@test "all phases run the billing check" {
+  check_stub billing 'finding info billing - "Actions minutes 15 %"'
+  run --separate-stderr "$MONITOR"
+  [ "$status" -eq 0 ]
+  [[ $output == *"Actions minutes 15 %"* ]]
 }
 
 @test "inventory phase fails when the script crashes" {

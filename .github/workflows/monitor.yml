@@ -19,6 +19,7 @@
 #         app-client-id: ${{ vars.MONITOR_APP_CLIENT_ID }}
 #       secrets:
 #         app-key: ${{ secrets.MONITOR_APP_KEY }}
+#         account-token: ${{ secrets.ACCOUNT_TOKEN }} # optional: billing check
 #
 # The control file (default repos.yml) is read from the calling repository.
 # The monitor only reads from GitHub, with a read-only app token; the single
@@ -27,9 +28,10 @@
 # finding is open. The caller owns the schedule and the concurrency group.
 #
 # Jobs: Inventory (control file, inventory, the jobs per check group) → one
-# matrix job per check group (release, settings, health, forks,
-# managed) and Lists → Report (collects the findings of all jobs as artifacts,
-# kept 1 day; job summary and overview issue). The control file chooses one job per group
+# matrix job per check group (release, settings, health, forks, managed) and
+# Lists (the account-level checks lists and billing; billing only with the
+# optional secret account-token) → Report (collects the findings of all jobs
+# as artifacts, kept 1 day; job summary and overview issue). The control file chooses one job per group
 # (monitor.jobs: per-group, default) or one per group and repository
 # (per-repo), and the runner of all jobs but Inventory (monitor.runs-on).
 name: Monitor
@@ -49,6 +51,9 @@ on:
       app-key:
         description: Private key of the read-only GitHub App
         required: true
+      account-token:
+        description: "Fine-grained token of the owner with account permission Plan: read; enables the billing check"
+        required: false
 
 permissions:
   contents: read
@@ -242,6 +247,13 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: .monitor/scripts/monitor.sh lists
+      # runs also when Check lists found a red finding
+      - name: Check billing
+        if: ${{ !cancelled() && steps.scripts.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BILLING_TOKEN: ${{ secrets.account-token }}
+        run: .monitor/scripts/monitor.sh billing
       - *upload-findings
 
   report:

@@ -401,8 +401,9 @@ labeled, unlabeled, closed`. It never checks out code of the pull request, so
 `pull_request_target` is safe and labels pull requests from forks too.
 
 **`monitor.yml`** (needs `contents: read`, `issues: write`): inputs
-`app-client-id` (required) and `config` (default `repos.yml`), secret
-`app-key`. **`monitor-config.yml`** (needs `contents: read`): input `config`.
+`app-client-id` (required) and `config` (default `repos.yml`), secrets
+`app-key` and `account-token` (optional, enables the billing check).
+**`monitor-config.yml`** (needs `contents: read`): input `config`.
 See [Maintenance monitor](#maintenance-monitor).
 
 **`sync.yml`** (needs `contents: read`): inputs `app-client-id` (required),
@@ -456,6 +457,14 @@ It checks five groups (archived repositories only by the Lists check):
 | Managed | forks and mirrors listed under `managed` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, undeclared branches with own commits, manual rebases pending |
 | Lists | all repositories, archived ones too | GitHub Lists that contradict the archive state, forks or mirrors (an archived repository belongs in an archive list of `lists.archived`, see [freeze a fork or mirror](docs/monitor-checks.md#freeze-a-fork-or-mirror); forks and managed repositories in a mirrors list, every repository in a `synced` mirrors list under `managed`; no own repositories in `lists.external`); repositories without the release flow; the last run of the control repository's sync failed |
 
+Once per run, for the whole account, the **billing** check (in the Lists job)
+compares the Actions minutes and storage used by private repositories with
+the included quota of the plan: red at 75 % (`billing.*.threshold`) or when
+the month-end projection reaches 100 % (from day 7), plus one info line with
+the numbers and the top repositories. It needs the optional secret
+`account-token`; without it the check is listed as not checked. See
+[Billing](docs/monitor-checks.md#billing).
+
 The pin check also covers the control repository's own pin of `monitor.yml`.
 A repository that only calls the maintenance workflows (monitor, sync,
 profile cards) is not a release-flow repository.
@@ -495,6 +504,7 @@ after 48 h.
          app-client-id: ${{ vars.MONITOR_APP_CLIENT_ID }}
        secrets:
          app-key: ${{ secrets.MONITOR_APP_KEY }}
+         account-token: ${{ secrets.ACCOUNT_TOKEN }} # optional: billing check
    ```
 
    `with.config` (default `repos.yml`) names another control file.
@@ -523,6 +533,7 @@ after 48 h.
 | `monitor` | optional: `jobs` (`per-group`, the default: one job per check group; `per-repo`: one job per check group and repository) and `runs-on` (a runner label or a list of labels, default `ubuntu-latest`) |
 | `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `archived` (list of lists), `mirrors` (mapping: `synced` and `other`, each a list of lists), `external` (list of lists) |
 | `managed` | forks and mirrors kept in sync by [`sync.yml`](#fork-and-mirror-sync): `repo`, `upstream`, optional `branches`, `follow`, `tags`, `settings`, `private` |
+| `billing` | optional: `minutes` (`included`, `threshold`) and `storage` (`included-gb`, `threshold`) of the [billing check](docs/monitor-checks.md#billing); missing values come from the plan (Free, Pro), thresholds default to 75 |
 | `unanswered` | optional: `days` (positive integer, default 7): how long someone may wait for an answer in an open pull request or issue |
 | `ignores` | accepted findings: `repo`, `check` (an id from the AGENTS.md catalog, not `check-failed`), optional `item` (a pull request or issue number: ignores only that item), `reason` (required) |
 
@@ -563,9 +574,17 @@ when the cause is gone.
 If the app loses access to all repositories, the run ends red
 (`check-failed`), not green.
 
+**Set up the account token** (optional, for the billing check): create a
+fine-grained personal access token of the owner with the account permission
+Plan: read and no repository access, and store it as the secret
+`ACCOUNT_TOKEN` in the control repository (passed as `account-token`, see
+above). When the token expires, the billing check fails red
+(`check-failed`): renew it.
+
 **The run.** The job **Inventory** reads the control file and the list of
 repositories. Then each check group runs as a matrix job: release flow,
-settings and rulesets, health, forks and managed, plus **Lists**. With
+settings and rulesets, health, forks and managed, plus **Lists** (which also
+runs the billing check). With
 `monitor.jobs: per-group` (default) that is one job per group; with `per-repo`
 one job per group and repository (`Forks · spali/x`), so every repository
 shows ✓ or ✗ in the run graph, at the cost of more jobs (each counts at
@@ -621,7 +640,8 @@ top counts red, info, clean, not checked and the TODO entries, each count
 linked to its section, and ends with the time of the update and a link to the
 run. 📝 TODO lists what to do: one collapsible entry per check and
 category, 🔴 Fix now for red findings (open), 🤔 Decide and 🧹 Clean up for
-info findings (collapsed), each with one sentence of explanation, an ℹ️ link and the rows of that check.
+info findings (collapsed), each with one sentence of explanation, an ℹ️ link and the rows of that check
+(the `billing` status line is only listed under Info).
 📋 Overview is a matrix of the repositories with a red or info finding (red
 first) and the areas Release, Settings, Health, Fork / Mirror, Sync and Lists:
 one icon per finding that jumps to its row below, ⚪ if a check of that area
