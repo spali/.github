@@ -549,7 +549,9 @@ Your own runner:
   `per-repo` takes longer on a single runner;
 - must be online when the run starts: with a `self-hosted` label, Inventory
   checks that at least one runner of the control repository with all labels
-  is online (busy is fine) and otherwise fails the run, so GitHub notifies you
+  is online (busy is fine; it looks again every 10 seconds for up to 2 minutes,
+  as ephemeral runners register again after each job) and otherwise fails the
+  run, so GitHub notifies you
   instead of the jobs waiting in the queue for a day; there is no fallback to
   GitHub-hosted runners (the sync checks the same in Managed repositories);
 - gets the read-only app token and the issue token of each job: use it only
