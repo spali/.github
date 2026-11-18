@@ -8,7 +8,7 @@ MONITOR_CHECKS=(
   settings-merge settings-alerts settings-pvr settings-actions
   settings-fork-approval
   ruleset-main ruleset-tags main-red renovate-stale workflow-disabled
-  dependabot-alert code-scanning-alert unanswered
+  dependabot-alert code-scanning-alert unanswered stale-branch
   fork-behind fork-workflows-active fork-delete-candidate
   list-none list-contradiction list-archived list-external-own
   managed-missing managed-settings managed-behind branch-undeclared
@@ -35,7 +35,7 @@ MONITOR_TODO='{
     "text": "The `-next` pre-release is older than the latest release: re-run the Release workflow on `main`, or delete the pre-release."},
   "pin-behind": {"category": "cleanup", "areas": ["release"], "title": "Update pinned shared workflows",
     "text": "A caller pins an older release of the shared workflows: merge or fix the Renovate pull request."},
-  "settings-merge": {"category": "cleanup", "areas": ["settings"], "title": "Fix the merge settings",
+  "settings-merge": {"category": "cleanup", "areas": ["settings", "health"], "title": "Fix the merge settings",
     "text": "The merge options differ from the documented setup: fix the setting."},
   "settings-alerts": {"category": "cleanup", "areas": ["settings"], "title": "Turn on Dependabot alerts",
     "text": "Dependabot alerts are off, so vulnerable dependencies go unnoticed: enable them."},
@@ -61,6 +61,8 @@ MONITOR_TODO='{
     "text": "Code scanning found a problem in the code: fix it, or dismiss the alert with a reason."},
   "unanswered": {"category": "cleanup", "areas": ["health"], "title": "Answer waiting pull requests and issues",
     "text": "Someone waits for an answer in an open pull request or issue: answer it, close it, or ignore the item with a reason."},
+  "stale-branch": {"category": "decide", "areas": ["health", "forks", "managed"], "title": "Delete branches of merged pull requests",
+    "text": "The pull request of a branch is merged but the branch is left: delete it, or ignore the pull request number as item if the branch carries on."},
   "fork-behind": {"category": "cleanup", "areas": ["forks"], "title": "Bring forks up to date",
     "text": "A fork is behind its upstream: sync it by hand, add it to `managed:` to keep it synced, or archive it to freeze this state."},
   "fork-workflows-active": {"category": "cleanup", "areas": ["forks"], "title": "Turn off Actions in forks",
@@ -223,9 +225,10 @@ paged() {
 }
 
 # head_pulls CHECK REPO UPSTREAM_REPO STATE BRANCHES_JSON FILE writes the
-# pulls of UPSTREAM_REPO in STATE (open or closed) whose head is one of the
+# pulls of UPSTREAM_REPO in STATE (open, closed or all) whose head is one of the
 # branches BRANCHES_JSON (JSON array of names) of the owner of REPO to FILE:
-# [{head_repo, head_ref, number, created_at, html_url}]. One query per branch
+# [{head_repo, head_ref, head_sha, number, state, merged_at, created_at,
+# html_url}]. One query per branch
 # with the head filter (branch URL-encoded), never all pulls of the upstream
 # (thousands for large projects). Callers still filter on head_repo == REPO.
 # API errors are check-failed findings of CHECK; it then returns 1.
@@ -240,7 +243,7 @@ head_pulls() {
   while IFS= read -r head; do
     [[ -n $head ]] || continue
     paged "$check" "$repo" "repos/$up/pulls?state=$state&head=$head&per_page=100" \
-      '{head_repo: (.head.repo.full_name // ""), head_ref: .head.ref, number, created_at, html_url}' "$part" || return 1
+      '{head_repo: (.head.repo.full_name // ""), head_ref: .head.ref, head_sha: .head.sha, number, state, merged_at, created_at, html_url}' "$part" || return 1
     cat "$part" >>"$all"
   done <<<"$heads"
   json_out "$check" "$repo" heads -s 'add // []' "$all" || return 1
@@ -288,6 +291,78 @@ check_fork_approval() {
   if [[ -n $out ]]; then
     finding red settings-fork-approval "$repo" "$out"
   fi
+}
+
+# check_merge REPO: settings-merge (expected values: README "Set up a new
+# repository", step 6), for every owned repository that is neither a fork nor
+# managed. The merge settings are read with GraphQL: the REST repository
+# answers null for them to an app token without write access. Writes findings
+# only and always returns 0.
+# shellcheck disable=SC2016 # GraphQL variables, no shell expansion wanted
+MERGE_QUERY='query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
+    deleteBranchOnMerge squashMergeCommitTitle
+  }
+}'
+check_merge() {
+  local body problems
+  body=$(fetch settings-merge "$1" graphql -f query="$MERGE_QUERY" \
+    -f owner="${1%%/*}" -f name="${1#*/}") || return 0
+  # shellcheck disable=SC2016 # jq program
+  json_out settings-merge "$1" problems -r \
+    '.data.repository | if . == null then error("no repository") else . end |
+     {allow_merge_commit: .mergeCommitAllowed,
+      allow_squash_merge: .squashMergeAllowed,
+      allow_rebase_merge: .rebaseMergeAllowed,
+      delete_branch_on_merge: .deleteBranchOnMerge,
+      squash_merge_commit_title: .squashMergeCommitTitle} as $r |
+     {allow_merge_commit: false, allow_squash_merge: true,
+       allow_rebase_merge: true, delete_branch_on_merge: true,
+       squash_merge_commit_title: "PR_TITLE"} | to_entries |
+     map(select($r[.key] != .value) |
+       "\(.key): got \($r[.key] | tojson), want \(.value | tojson)") | join("; ")' \
+    <<<"$body" || return 0
+  [[ -z $problems ]] || finding red settings-merge "$1" "$problems"
+}
+
+# check_stale_branches REPO DEFAULT TARGET BRANCHES_FILE: stale-branch. Every
+# branch of REPO (BRANCHES_FILE: [{name, sha}]) except DEFAULT that was the
+# head of a merged pull request from REPO into TARGET (REPO itself, or the
+# upstream of a fork) and has no open one; the newest merge counts: red when the branch
+# still points at the merged head, info when it has commits after it. The
+# finding carries the pull request number as item. One pulls query per branch
+# (head filter, state all). Writes findings only and always returns 0.
+check_stale_branches() {
+  local repo=$1 default=$2 target=$3 branches=$4 names prs rows branch same n url pr
+  # shellcheck disable=SC2016 # jq program
+  json_out stale-branch "$repo" names -c --arg d "$default" '[.[].name | select(. != $d)]' "$branches" || return 0
+  [[ $names != '[]' ]] || return 0
+  prs=$(mktemp)
+  # shellcheck disable=SC2064 # expand now
+  trap "rm -f '$prs'; trap - RETURN" RETURN
+  head_pulls stale-branch "$repo" "$target" all "$names" "$prs" || return 0
+  # shellcheck disable=SC2016 # jq program
+  json_out stale-branch "$repo" rows -r --arg r "$repo" --slurpfile b "$branches" '
+    [.[] | select((.head_repo // "" | ascii_downcase) == ($r | ascii_downcase))] |
+    group_by(.head_ref)[] | select(all(.state != "open")) |
+    [.[] | select(.merged_at != null)] | max_by(.merged_at) // empty | . as $p |
+    first($b[0][] | select(.name == $p.head_ref) | .sha) as $sha |
+    [$p.head_ref, ($sha == $p.head_sha), $p.number, $p.html_url] | @tsv' "$prs" || return 0
+  while IFS=$'\t' read -r branch same n url; do
+    [[ -n $branch ]] || continue
+    # the report links "#N" to REPO; a pull request upstream gets its URL
+    if [[ ${target,,} == "${repo,,}" ]]; then
+      pr="pull request #$n" url=
+    else
+      pr="pull request $target#$n" url=": $url"
+    fi
+    if [[ $same == true ]]; then
+      finding red stale-branch "$repo" "$branch: $pr is merged, delete the branch$url" "$n"
+    else
+      finding info stale-branch "$repo" "$branch: $pr is merged, the branch has newer commits$url" "$n"
+    fi
+  done <<<"$rows"
 }
 
 # disabled_workflows CHECK REPO OUTVAR reads a workflows API body on stdin and

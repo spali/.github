@@ -28,6 +28,25 @@ CS='*repos/spali/a/code-scanning/alerts?state=open&per_page=100 --paginate'
 ISS='*repos/spali/a/issues?state=open&per_page=100 --paginate'
 APERMS='*repos/spali/a/actions/permissions'
 APPROVAL='*repos/spali/a/actions/permissions/fork-pr-contributor-approval'
+MERGE='*graphql*owner=spali*name=a'
+BRANCHES='*repos/spali/a/branches?per_page=100 --paginate'
+FIX="$BATS_TEST_DIRNAME/fixtures/monitor"
+
+# merge_json [FILTER]: the recorded compliant merge settings (GraphQL; REST
+# answers null for them to an app token), with an optional jq filter.
+merge_json() { jq -c "${1:-.}" "$FIX/settings-merge.json" | gh_respond "$MERGE" -; }
+
+# pulls_on BRANCH JSON: the pulls of spali/a with head spali:BRANCH (all states).
+pulls_on() { respond_jq "*repos/spali/a/pulls?state=all&head=spali:$1&per_page=100 --paginate" "$2"; }
+
+# pull REF NUMBER STATE MERGED_AT HEAD_SHA [HEAD_REPO]: one pull request of the API.
+pull() {
+  local ref=$1
+  shift
+  jq -nc --arg ref "$ref" --argjson n "$1" --arg s "$2" --arg m "$3" --arg sha "$4" --arg hr "${5:-spali/a}" \
+    '{number: $n, state: $s, merged_at: (if $m == "" then null else $m end), created_at: "2026-11-01T00:00:00Z",
+      html_url: "https://github.com/spali/a/pull/\($n)", head: {ref: $ref, sha: $sha, repo: {full_name: $hr}}}'
+}
 
 # run_json GLOB JQ_EXPRESSION registers a response built by jq -n.
 respond_jq() { jq -nc "$2" | gh_respond "$1" -; }
@@ -41,6 +60,8 @@ run_script() {
   respond_jq "$ISS" '[]'
   respond_jq "$APERMS" '{enabled: true}'
   respond_jq "$APPROVAL" '{approval_policy: "all_external_contributors"}'
+  merge_json
+  respond_jq "$BRANCHES" '[{name: "main", commit: {sha: "m1"}}]'
   run --separate-stderr "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -446,4 +467,91 @@ item_value() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $
   [ "$(level settings-fork-approval)" = skip ]
   [ "$(message settings-fork-approval)" = "private repository" ]
   run ! grep -q fork-pr-contributor-approval "$GH_LOG"
+}
+
+@test "settings-merge names each differing field" {
+  merge_json '.data.repository.mergeCommitAllowed = true | .data.repository.squashMergeCommitTitle = "COMMIT_OR_PR_TITLE"'
+  run_script
+  [ "$(count settings-merge)" -eq 1 ]
+  [ "$(level settings-merge)" = red ]
+  [ "$(message settings-merge)" = 'allow_merge_commit: got true, want false; squash_merge_commit_title: got "COMMIT_OR_PR_TITLE", want "PR_TITLE"' ]
+  [ "$(jq -s length "$FINDINGS")" -eq 1 ]
+}
+
+@test "settings-merge reads GraphQL, not the REST repository" {
+  run_script
+  grep -q 'graphql' "$GH_LOG"
+  run ! grep -qx 'api repos/spali/a' "$GH_LOG"
+}
+
+@test "settings-merge without a repository in the answer is check-failed" {
+  merge_json '.data.repository = null'
+  run_script
+  [ "$(count settings-merge)" -eq 0 ]
+  [ "$(message check-failed)" = "settings-merge: cannot parse API response" ]
+}
+
+@test "settings-merge: a failing call is check-failed, never green" {
+  gh_fail "$MERGE" 'Server Error (HTTP 500)'
+  run_script
+  [ "$(count settings-merge)" -eq 0 ]
+  [ "$(message check-failed)" = "settings-merge: Server Error (HTTP 500)" ]
+}
+
+@test "settings-merge checks non-central repositories too" {
+  jq -n '[{name: "spali/a", fork: false, central: false, default_branch: "main"}]' >"$INVENTORY"
+  merge_json '.data.repository.deleteBranchOnMerge = false'
+  run_script
+  [ "$(message settings-merge)" = 'delete_branch_on_merge: got false, want true' ]
+}
+
+@test "stale-branch: a merged branch at the merged head is red with the pull request as item" {
+  respond_jq "$BRANCHES" '[{name: "main", commit: {sha: "m1"}}, {name: "feat/x", commit: {sha: "s1"}}]'
+  pull feat/x 5 closed 2026-11-10T00:00:00Z s1 | jq -s . | gh_respond '*pulls?state=all&head=spali:feat%2Fx&*' -
+  run_script
+  [ "$(count stale-branch)" -eq 1 ]
+  [ "$(level stale-branch)" = red ]
+  [ "$(message stale-branch)" = "feat/x: pull request #5 is merged, delete the branch" ]
+  [ "$(jq -rs 'map(select(.check == "stale-branch")) | .[0].item' "$FINDINGS")" = 5 ]
+  [ "$(jq -s length "$FINDINGS")" -eq 1 ]
+}
+
+@test "stale-branch: commits after the merge are info" {
+  respond_jq "$BRANCHES" '[{name: "main", commit: {sha: "m1"}}, {name: "b", commit: {sha: "new"}}]'
+  pull b 5 closed 2026-11-10T00:00:00Z old | jq -s . | gh_respond '*pulls?state=all&head=spali:b&*' -
+  run_script
+  [ "$(level stale-branch)" = info ]
+  [ "$(message stale-branch)" = "b: pull request #5 is merged, the branch has newer commits" ]
+}
+
+@test "stale-branch: the newest merged pull request counts" {
+  respond_jq "$BRANCHES" '[{name: "main", commit: {sha: "m1"}}, {name: "b", commit: {sha: "s2"}}]'
+  { pull b 4 closed 2026-11-01T00:00:00Z s1; pull b 6 closed 2026-11-12T00:00:00Z s2; pull b 7 closed "" s3; } |
+    jq -s . | gh_respond '*pulls?state=all&head=spali:b&*' -
+  run_script
+  [ "$(level stale-branch)" = red ]
+  [[ $(message stale-branch) == "b: pull request #6 is merged"* ]]
+}
+
+@test "stale-branch: an open pull request, a closed unmerged one or another head repository is no finding" {
+  respond_jq "$BRANCHES" '[{name: "main", commit: {sha: "m1"}}, {name: "o", commit: {sha: "s1"}},
+    {name: "c", commit: {sha: "s1"}}, {name: "f", commit: {sha: "s1"}}]'
+  { pull o 1 closed 2026-11-01T00:00:00Z s1; pull o 2 open "" s1; } | jq -s . | gh_respond '*head=spali:o&*' -
+  pull c 3 closed "" s1 | jq -s . | gh_respond '*head=spali:c&*' -
+  pull f 4 closed 2026-11-01T00:00:00Z s1 other/a | jq -s . | gh_respond '*head=spali:f&*' -
+  run_script
+  [ ! -s "$FINDINGS" ]
+}
+
+@test "stale-branch: one query per branch, never for the default branch" {
+  respond_jq "$BRANCHES" '[{name: "main", commit: {sha: "m1"}}, {name: "a", commit: {sha: "1"}}, {name: "b", commit: {sha: "2"}}]'
+  run_script
+  [ "$(grep -c 'pulls?state=all' "$GH_LOG")" -eq 2 ]
+  run ! grep -q 'head=spali:main' "$GH_LOG"
+}
+
+@test "stale-branch: an API error is check-failed" {
+  gh_fail "$BRANCHES" 'Server Error (HTTP 500)'
+  run_script
+  [ "$(message check-failed)" = "stale-branch: Server Error (HTTP 500)" ]
 }
