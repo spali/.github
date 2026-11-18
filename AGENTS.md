@@ -531,7 +531,10 @@ issue and the log of the failed step. Explanations for humans:
   no runner of the control repository with all labels is online. GitHub does
   not notify about queued jobs, and Report itself would wait for the runner,
   so the failure of that first job is the only alert. `ready` of Inventory is
-  set only after the check. No fallback to hosted runners (owner's decision,
+  set only after the check. It looks again for up to 2 minutes
+  (`RUNNER_ONLINE_WAIT`, `RUNNER_ONLINE_INTERVAL`): ephemeral runners
+  deregister after each job, and right after a sync run all of them were
+  offline or not listed at once (E2E 2026-11-18). No fallback to hosted runners (owner's decision,
   2026-11-18).
 - `git ls-remote` on mirror targets only compares the refs of the source; extra
   refs in the target are fine (`managed-behind`).

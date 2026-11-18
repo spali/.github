@@ -7,6 +7,8 @@ setup() {
   load helpers/gh-stub
   stub_gh
   export GITHUB_REPOSITORY=o/control
+  # no second look unless a test asks for it
+  export RUNNER_ONLINE_WAIT=0
 }
 
 runners() {
@@ -56,6 +58,34 @@ EOF
   [[ $output == *"error: no online self-hosted runner with the labels self-hosted, linux in o/control"* ]]
   [[ $output == *"registered: r1 (offline), r2 (online)"* ]]
   [[ $output == *"start a runner or change monitor.runs-on"* ]]
+}
+
+@test "a runner that comes online while waiting passes" {
+  local resp="$BATS_TEST_TMPDIR/runners.json"
+  echo '{"total_count": 1, "runners": [{"name": "r1", "status": "offline", "labels": [{"name": "self-hosted"}]}]}' >"$resp"
+  echo '{"total_count": 1, "runners": [{"name": "r1", "status": "online", "labels": [{"name": "self-hosted"}]}]}' >"$BATS_TEST_TMPDIR/online.json"
+  gh_respond 'api repos/o/control/actions/runners?per_page=100' "$resp"
+  # the fake sleep brings the runner online and logs the interval
+  cat >"$BATS_TEST_TMPDIR/bin/sleep" <<EOS
+#!/usr/bin/env bash
+echo "sleep \$1" >>"$BATS_TEST_TMPDIR/sleeps"
+cp "$BATS_TEST_TMPDIR/online.json" "$resp"
+EOS
+  chmod +x "$BATS_TEST_TMPDIR/bin/sleep"
+  RUNNER_ONLINE_WAIT=60 RUNNER_ONLINE_INTERVAL=7 run "$SCRIPT" '["self-hosted"]'
+  [ "$status" -eq 0 ]
+  [[ $output == *"no runner online with labels self-hosted yet (registered: r1 (offline)), next look in 7s"* ]]
+  [[ $output == *"runs-on: 1 of 1 runners online with labels self-hosted" ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/sleeps")" = "sleep 7" ]
+  [ "$(wc -l <"$GH_LOG")" -eq 2 ]
+}
+
+@test "waiting gives up after the wait time" {
+  runners <<<'{"total_count": 0, "runners": []}'
+  RUNNER_ONLINE_WAIT=1 RUNNER_ONLINE_INTERVAL=1 run "$SCRIPT" '["self-hosted"]'
+  [ "$status" -eq 1 ]
+  [ "$(wc -l <"$GH_LOG")" -ge 2 ]
+  [[ $output == *"after 1s (registered: none)"* ]]
 }
 
 @test "no registered runner at all fails" {
