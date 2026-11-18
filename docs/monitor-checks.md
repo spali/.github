@@ -474,10 +474,15 @@ hold unsynced forks.
 # Billing
 
 The included Actions quota of the account (Settings → Billing), checked once
-per run, not per repository. Only private repositories count (public ones use
-Actions for free); a repository of the usage that is not in the inventory
-(deleted, renamed, archived) counts as private and is marked
-`(not in inventory)`. The checks need a fine-grained token of the owner with
+per run, not per repository. Only the products Actions and Packages count
+(they share the included quota; Codespaces, Git LFS and others are left out),
+and only private repositories (public ones use Actions for free). A repository
+of the usage that is not in the inventory (archived, created since) is looked
+up once per run with the app token: a public one is left out, an archived
+private one counts and is marked `(archived)`, one that no longer exists
+(deleted, renamed) counts as private and is marked `(not in inventory)`. A
+failing lookup is `check-failed`. Without an inventory (empty list) the run
+lists ⚪ `billing` "no inventory: billing not checked". The checks need a fine-grained token of the owner with
 the account permission Plan: read (the optional secret `account-token` of the
 monitor workflow); without one the run lists ⚪ `billing` "no account token:
 billing not checked".
@@ -529,7 +534,10 @@ the usage is expected.
 🔵 One line per run with the numbers, also without a red finding, to see the
 trend: `Actions minutes 15 % (300 of 2000, projected 26 %) · storage 0 %
 (<1 MB of 500 MB, projected 0 %) · top: private-a 300 min · top storage:
-private-a <1 MB`. Not a TODO entry. ⚪ Not checked without an account token.
+private-a <1 MB`. Before day 7 of the month the projection is not shown yet
+(`Actions minutes 15 % (300 of 2000, projection from day 7)`, the same for
+storage). Not a TODO entry. ⚪ Not checked without an account token or without
+an inventory.
 
 **Fix:** nothing to do; act on `billing-minutes` or `billing-storage`.
 

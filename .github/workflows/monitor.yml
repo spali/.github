@@ -19,7 +19,7 @@
 #         app-client-id: ${{ vars.MONITOR_APP_CLIENT_ID }}
 #       secrets:
 #         app-key: ${{ secrets.MONITOR_APP_KEY }}
-#         account-token: ${{ secrets.ACCOUNT_TOKEN }} # optional: billing check
+#         account-token: ${{ secrets.ACCOUNT_TOKEN }} # optional: billing check (secret name is an example, e.g. ACCOUNT_TOKEN)
 #
 # The control file (default repos.yml) is read from the calling repository.
 # The monitor only reads from GitHub, with a read-only app token; the single

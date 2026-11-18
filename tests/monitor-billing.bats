@@ -29,15 +29,17 @@ now() {
   export MONITOR_NOW
 }
 
-# usage JQ_ARRAY: the usage answer from [[day, sku, quantity, repo, price], ...]
-# (day of November 2026 or a full date; price optional, default GitHub's).
+# usage JQ_ARRAY: the usage answer from [[day, sku, quantity, repo, price,
+# product], ...] (day of November 2026 or a full date; price optional or null,
+# default GitHub's; product optional, default actions; a sku ending in
+# "storage" is GigabyteHours, else Minutes).
 usage() {
   jq -nc "$1"' | {usageItems: map(
     {"Actions Linux": 0.006, "Actions macOS 3-core": 0.062, "Actions Windows": 0.01,
       "Actions Linux ARM": 0.005, "Actions storage": 0.00033602}[.[1]] as $d | (.[4] // $d) as $p |
     {date: (if (.[0] | type) == "number" then "2026-11-\(.[0] | tostring | if length == 1 then "0" + . else . end)" else .[0] end + "T00:00:00Z"),
-      product: "actions", sku: .[1], quantity: .[2],
-      unitType: (if .[1] == "Actions storage" then "GigabyteHours" else "Minutes" end),
+      product: (.[5] // "actions"), sku: .[1], quantity: .[2],
+      unitType: (if .[1] | endswith("storage") then "GigabyteHours" else "Minutes" end),
       pricePerUnit: $p, grossAmount: (.[2] * $p), discountAmount: (.[2] * $p), netAmount: 0,
       repositoryName: .[3]})}' | gh_respond "$USAGE" -
 }
@@ -131,6 +133,14 @@ total() { jq -s length "$FINDINGS"; }
   run_script
   [ "$(count billing-minutes)" -eq 0 ]
   [ "$(total)" -eq 1 ]
+  [[ "$(info)" == 'Actions minutes 45 % (900 of 2000, projection from day 7) · storage 0 % (0 MB of 500 MB, projection from day 7)'* ]]
+}
+
+@test "day 7: the info line shows the projection" {
+  now 2026-11-07T00:00:00Z
+  usage '[[6, "Actions Linux", 300, "private-a"]]'
+  run_script
+  [[ "$(info)" == 'Actions minutes 15 % (300 of 2000, projected 75 %) · storage 0 % (0 MB of 500 MB, projected 0 %)'* ]]
 }
 
 @test "storage red by the level of yesterday only" {
@@ -206,9 +216,69 @@ total() { jq -s length "$FINDINGS"; }
 
 @test "repositories not in the inventory count as private and are named" {
   usage '[[17, "Actions Linux", 300, "gone-c"], [17, "Actions Linux", 60, ""], [17, "Actions Linux", 100, "public-b"]]'
+  gh_fail 'api repos/spali/gone-c' 'gh: Not Found (HTTP 404)'
   run_script
   [[ "$(info)" == 'Actions minutes 18 % (360 of 2000, '* ]]
   [[ "$(info)" == *'top: gone-c (not in inventory) 300 min, (no name) (not in inventory) 60 min'* ]]
+  # one lookup for the unknown name, none for the empty one or the inventory
+  [ "$(grep -c '^api repos/' "$GH_LOG")" -eq 1 ]
+}
+
+@test "an archived public repository is looked up with the app token and ignored" {
+  usage '[[17, "Actions Linux", 300, "archived-e"], [16, "Actions Linux", 100, "archived-e"], [17, "Actions Linux", 300, "private-a"]]'
+  echo '{"name": "archived-e", "private": false, "archived": true}' | gh_respond 'api repos/spali/archived-e' -
+  run_script
+  [[ "$(info)" == 'Actions minutes 15 % (300 of 2000, '* ]]
+  [[ "$(info)" != *archived-e* ]]
+  [ "$(grep -cx 'api repos/spali/archived-e' "$GH_LOG")" -eq 1 ]
+  # the lookup uses the app token, the billing calls the account token
+  [ "$(paste -d ' ' "$GH_LOG" "$GH_TOKENS" | grep '^api repos/' | awk '{print $NF}')" = app-token ]
+  [ "$(paste -d ' ' "$GH_LOG" "$GH_TOKENS" | grep '^api users/' | awk '{print $NF}' | sort -u)" = account-token ]
+}
+
+@test "an archived private repository counts and is marked archived" {
+  usage '[[17, "Actions Linux", 300, "archived-f"], [17, "Actions storage", 24, "archived-f"]]'
+  echo '{"name": "archived-f", "private": true, "archived": true}' | gh_respond 'api repos/spali/archived-f' -
+  run_script
+  [[ "$(info)" == 'Actions minutes 15 % (300 of 2000, '* ]]
+  [[ "$(info)" == *'top: archived-f (archived) 300 min'* ]]
+  [[ "$(info)" == *'top storage: archived-f (archived) '* ]]
+}
+
+@test "a lookup error is check-failed, nothing else" {
+  usage '[[17, "Actions Linux", 300, "gone-c"]]'
+  gh_fail 'api repos/spali/gone-c' 'gh: Bad credentials (HTTP 401)'
+  run_script
+  [ "$(jq -c . "$FINDINGS")" = '{"level":"red","check":"check-failed","repo":null,"message":"billing: gh: Bad credentials (HTTP 401)"}' ]
+}
+
+@test "a lookup answer that is not JSON is check-failed" {
+  usage '[[17, "Actions Linux", 300, "gone-c"]]'
+  echo '<html>oops</html>' | gh_respond 'api repos/spali/gone-c' -
+  run_script
+  [ "$(jq -c . "$FINDINGS")" = '{"level":"red","check":"check-failed","repo":null,"message":"billing: cannot parse API response"}' ]
+}
+
+@test "only Actions and Packages count, not Codespaces" {
+  usage '[[17, "Actions Linux", 300, "private-a"], [17, "Codespaces compute 2-core", 5000, "private-a", 0.18, "codespaces"],
+    [17, "Codespaces storage", 500, "private-a", 0.07, "codespaces"], [16, "Packages storage", 42, "private-a", 0.0008, "Packages"]]'
+  run_script
+  [[ "$(info)" == 'Actions minutes 15 % (300 of 2000, projected 26 %) · storage 20 % (100 MB of 500 MB, '* ]]
+  [ "$(total)" -eq 1 ]
+}
+
+@test "no lookup for an unknown repository of a product that does not count" {
+  usage '[[17, "Actions Linux", 300, "private-a"], [17, "Codespaces compute 2-core", 50, "gone-c", 0.18, "codespaces"]]'
+  run_script
+  [ "$(grep -c '^api repos/' "$GH_LOG")" -eq 0 ]
+}
+
+@test "empty inventory: skip, no computing" {
+  echo '[]' >"$INVENTORY"
+  usage '[[17, "Actions Linux", 300, "private-a"]]'
+  run_script
+  [ "$(jq -c . "$FINDINGS")" = '{"level":"skip","check":"billing","repo":null,"message":"no inventory: billing not checked"}' ]
+  [ ! -s "$GH_LOG" ]
 }
 
 @test "a repository is matched to the inventory case-insensitively" {
@@ -222,14 +292,14 @@ total() { jq -s length "$FINDINGS"; }
   usage '[[1, "Actions storage", 0.3, "private-a"], [1, "Actions Linux", 600, "private-a"]]'
   run_script
   [ "$(total)" -eq 1 ]
-  [ "$(info)" = 'Actions minutes 30 % (600 of 2000, projected 3600 %) · storage 10 % (50 MB of 500 MB, projected 10 %) · top: private-a 600 min · top storage: private-a 50 MB' ]
+  [ "$(info)" = 'Actions minutes 30 % (600 of 2000, projection from day 7) · storage 10 % (50 MB of 500 MB, projection from day 7) · top: private-a 600 min · top storage: private-a 50 MB' ]
 }
 
 @test "start of the month without usage: 0 %, no division by zero" {
   now 2026-11-01T00:00:00Z
   echo '{"usageItems": []}' | gh_respond "$USAGE" -
   run_script
-  [ "$(jq -c . "$FINDINGS")" = '{"level":"info","check":"billing","repo":null,"message":"Actions minutes 0 % (0 of 2000, projected 0 %) · storage 0 % (0 MB of 500 MB, projected 0 %)"}' ]
+  [ "$(jq -c . "$FINDINGS")" = '{"level":"info","check":"billing","repo":null,"message":"Actions minutes 0 % (0 of 2000, projection from day 7) · storage 0 % (0 MB of 500 MB, projection from day 7)"}' ]
 }
 
 @test "usage items of other months are left out" {
