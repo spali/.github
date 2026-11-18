@@ -80,7 +80,7 @@ pull request closed
 |---|---|
 | `.github/release-drafter.yml` | autolabeler rules, categories, version rule, notes template |
 | `.github/workflows/pr.yml` | reusable; jobs `label`, `check`, `cleanup` |
-| `.github/workflows/image-cleanup.yml` | reusable; job `cleanup`; deletes `*-pr.*` and `*-next` image versions of a ghcr.io package, run by repositories with an image |
+| `.github/workflows/image-cleanup.yml` | reusable; job `cleanup`; deletes `*-pr.*`/`*-next` image tags whose release no longer exists, plus untagged and orphaned images, of a ghcr.io package; run by repositories with an image |
 | `.github/workflows/release-prepare.yml` | reusable; job `prepare`; outputs below |
 | `.github/workflows/release-publish.yml` | reusable; job `publish` |
 | `.github/workflows/monitor.yml` | reusable; job `monitor`; run by the private control repository |
@@ -104,7 +104,9 @@ pull request closed
 
 ### The interface (do not change it without a new major version)
 
-A repository's `.github/workflows/release.yml` has exactly three jobs:
+A repository's `.github/workflows/release.yml` has exactly three jobs (repositories
+with a container image add a fourth job `image-cleanup`, see the image-cleanup
+paragraph below):
 
 1. `prepare`: `uses: spali/.github/.github/workflows/release-prepare.yml@<sha>`,
    permissions `contents: write`, `pull-requests: read`, `actions: read`,
@@ -135,7 +137,10 @@ edited, synchronize, labeled, unlabeled, closed` on base `main`, permissions
 `if: github.event.action == 'closed'`): input `package` (default: the
 repository name), caller permissions `contents: read`, `packages: write`. It
 deletes image tags `*-pr.*` and `*-next` that have no release any more,
-untagged and orphaned images; release tags are never touched. Repositories
+untagged and orphaned images; release tags are never touched. The cleanup is
+eventual: an image is deleted by the next cleanup run (next merge, release or
+PR close) once it is older than 2 hours, and after a release the `next` tag
+keeps pointing at the last next image until the next merge. Repositories
 without an image do not call it.
 
 The reusable monitor workflows are part of the interface too.
@@ -492,9 +497,9 @@ issue and the log of the failed step. Explanations for humans:
   `github.workflow_sha` describe the **caller**; `job.workflow_sha` /
   `job.workflow_ref` describe the called workflow. actionlint does not know the
   `job.workflow_*` properties yet (ignored in `.github/actionlint.yaml`).
-- Deleting ghcr.io package versions with `GITHUB_TOKEN` needs the repository to
-  have the Admin role in the package's "Manage Actions access"; otherwise the
-  `image-cleanup` job fails with 403.
+- Deleting ghcr.io package versions with `GITHUB_TOKEN` requires the repository
+  to have the Admin role under the package's Manage Actions access (the action
+  needs it); otherwise the `image-cleanup` job fails with 403.
 - Events caused by `GITHUB_TOKEN` (labels, tags created by API) start no new
   workflow runs.
 - Draft releases are not returned by the "release by tag" API; list releases.

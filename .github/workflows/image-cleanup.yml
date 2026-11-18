@@ -42,13 +42,12 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: image-cleanup-${{ github.repository }}-${{ inputs.package || github.event.repository.name }}
-  cancel-in-progress: false
-
 jobs:
   cleanup:
     name: cleanup
+    concurrency:
+      group: image-cleanup-${{ github.repository }}-${{ inputs.package || github.event.repository.name }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -79,3 +78,8 @@ jobs:
           exclude-tags: ${{ steps.keep.outputs.tags }}
           delete-untagged: true
           delete-orphaned-images: true
+          # A build pushes its image before publish creates the release, so a
+          # concurrent cleanup must not delete it. The action skips versions
+          # updated more recently, from all rules. 2 hours is above the 45
+          # minute build timeout plus the wait for publish.
+          older-than: 2 hours
