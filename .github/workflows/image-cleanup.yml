@@ -6,17 +6,25 @@
 # closed pull request and the older next releases), plus untagged and
 # orphaned images. Release images (X.Y.Z, X.Y, X, latest) are never deleted.
 #
-# Call it from the workflow that runs the pull request cleanup (closed) and
-# from the one that runs on pushes to main, after the release flow:
+# Call it as a job after the release flow in release.yml and after the pr job
+# in pr.yml (input package: the package name, default the repository name):
 #
-#   permissions:
-#     contents: read
-#     packages: write
-#   jobs:
+#   # release.yml
 #     image-cleanup:
-#       uses: spali/.github/.github/workflows/image-cleanup.yml@v1
-#       with:
-#         package: my-image # default: the repository name
+#       needs: publish
+#       permissions:
+#         contents: read
+#         packages: write # delete image versions
+#       uses: spali/.github/.github/workflows/image-cleanup.yml@<sha> # vX.Y.Z
+#
+#   # pr.yml
+#     image-cleanup:
+#       needs: pr
+#       if: github.event.action == 'closed'
+#       permissions:
+#         contents: read
+#         packages: write # delete image versions
+#       uses: spali/.github/.github/workflows/image-cleanup.yml@<sha> # vX.Y.Z
 #
 # The repository needs Admin access on the package (package settings, Manage
 # Actions access) to delete versions.
