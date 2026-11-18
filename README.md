@@ -144,7 +144,10 @@ image tags `X.Y.Z-pr.N` and `X.Y.Z-next` once their pre-release is gone, plus
 untagged images that belong to no tagged image and orphaned attestations.
 Release images (`X.Y.Z`, `X.Y`, `X`, `latest`, exception versions) are never
 deleted. It is safe for multi-arch images. Repositories without an image need
-no change.
+no change. The cleanup is eventual: an image is deleted by the next cleanup
+run (next merge, release or pull request close) once it is older than 2 hours,
+and after a release the `next` tag keeps pointing at the last next image until
+the next merge.
 
 ### Attestation
 
@@ -337,13 +340,15 @@ Works for any language. Steps 1–4 are files, 5–9 are settings.
 8. **Renovate app:** make sure the Renovate GitHub app has access to the
    repository (GitHub → Settings → Applications → Renovate → Configure).
 9. **Image repositories only:** if the `image-cleanup` job cannot delete,
-   give the repository the Admin role in the package settings (Manage Actions
-   access).
+   note that the action needs the repository to have the Admin role under the
+   package's Manage Actions access (package settings).
 
 ## Interface
 
 `release.yml` in a repository has three jobs: `prepare` and `publish` call this
-repository, `build` is the repository's own.
+repository, `build` is the repository's own. Repositories with a container
+image add a fourth job `image-cleanup` (see the image-cleanup paragraph
+below).
 
 **`release-prepare.yml`** (needs `contents: write`, `pull-requests: read`, `actions: read`)
 

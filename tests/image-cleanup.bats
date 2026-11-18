@@ -30,7 +30,7 @@ releases() {
   [ "$(cat "$GITHUB_OUTPUT")" = "tags=" ]
 }
 
-@test "the script lists draft releases too (gh release list includes them)" {
+@test "the script ignores other release fields" {
   echo '[{"tagName":"v1.3.0-next","isDraft":true},{"tagName":"v1.3.0","isDraft":false}]' |
     gh_respond 'release list *' -
   run "$SCRIPT"
@@ -86,12 +86,12 @@ wf() {
     "$BATS_TEST_DIRNAME/../.github/workflows/image-cleanup.yml"
   [ "$(wf '.jobs.cleanup.steps[2].uses')" = 'dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f' ]
   run wf '.jobs.cleanup.steps[2].with'
-  [ "$output" = '{"token":"${{ github.token }}","owner":"${{ github.repository_owner }}","package":"${{ inputs.package || github.event.repository.name }}","delete-tags":"*-pr.*,*-next","exclude-tags":"${{ steps.keep.outputs.tags }}","delete-untagged":true,"delete-orphaned-images":true}' ]
+  [ "$output" = '{"token":"${{ github.token }}","owner":"${{ github.repository_owner }}","package":"${{ inputs.package || github.event.repository.name }}","delete-tags":"*-pr.*,*-next","exclude-tags":"${{ steps.keep.outputs.tags }}","delete-untagged":true,"delete-orphaned-images":true,"older-than":"2 hours"}' ]
 }
 
 @test "workflow serializes runs per package" {
-  [ "$(wf '.concurrency.group')" = 'image-cleanup-${{ github.repository }}-${{ inputs.package || github.event.repository.name }}' ]
-  [ "$(wf '.concurrency."cancel-in-progress"')" = 'false' ]
+  [ "$(wf '.jobs.cleanup.concurrency.group')" = 'image-cleanup-${{ github.repository }}-${{ inputs.package || github.event.repository.name }}' ]
+  [ "$(wf '.jobs.cleanup.concurrency."cancel-in-progress"')" = 'false' ]
 }
 
 @test "workflow package input is optional" {
