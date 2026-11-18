@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Enforces the settings of ENTRY on the managed repository: the five has_*
-# features and GitHub Actions. Prints "<key>: <old> -> <new>" per change or
+# features, GitHub Actions and, for public repositories, the approval of fork
+# pull request workflows for all external contributors. Prints "<key>: <old> -> <new>" per change or
 # "settings ok". Only keys that differ are written.
 #
 # env: ENTRY (the object of managed_entry), GH_TOKEN.
@@ -62,6 +63,29 @@ if gh api "repos/$REPO/actions/permissions" >"$TMP/actions.json" 2>"$TMP/err"; t
   fi
 else
   fail
+fi
+
+# A pull request from a fork chooses its own runs-on (e.g. a self-hosted
+# runner): require approval for all external contributors. Also with Actions
+# off, so the guard is in place when Actions is turned on later. Public
+# repositories only: the endpoint answers 422 for private ones.
+APPROVAL=all_external_contributors
+if [[ $(jq -r '.private' "$TMP/repo.json") != true ]]; then
+  if gh api "repos/$REPO/actions/permissions/fork-pr-contributor-approval" >"$TMP/approval.json" 2>"$TMP/err"; then
+    old=$(jq -r '.approval_policy' "$TMP/approval.json")
+    if [[ $old != "$APPROVAL" ]]; then
+      changed=1
+      jq -n --arg p "$APPROVAL" '{approval_policy: $p}' >"$TMP/approval-put.json"
+      if gh api -X PUT "repos/$REPO/actions/permissions/fork-pr-contributor-approval" \
+        --input "$TMP/approval-put.json" >/dev/null 2>"$TMP/err"; then
+        printf 'fork_pr_approval: %s -> %s\n' "$old" "$APPROVAL"
+      else
+        fail
+      fi
+    fi
+  else
+    fail
+  fi
 fi
 
 [[ $FAILED -eq 0 ]] || exit 1

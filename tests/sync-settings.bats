@@ -8,6 +8,15 @@ setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/sync-settings.sh"
   export GH_TOKEN=secret-token
   settings '{}'
+  # the fork approval endpoint answers from this file; approval rewrites it
+  APPROVAL_FILE="$BATS_TEST_TMPDIR/approval.json"
+  approval all_external_contributors
+  gh_respond 'api repos/spali/tool/actions/permissions/fork-pr-contributor-approval' "$APPROVAL_FILE"
+}
+
+# approval <policy> sets the answer of the fork pull request approval endpoint
+approval() {
+  jq -nc --arg p "$1" '{approval_policy: $p}' >"$APPROVAL_FILE"
 }
 
 # settings <json> sets ENTRY through managed_entry with the given exceptions
@@ -26,7 +35,9 @@ only_repo_paths() {
   while IFS= read -r line; do
     [[ $line == "api repos/spali/tool" || $line == "api repos/spali/tool/actions/permissions" ||
       $line == "api -X PATCH repos/spali/tool --input "* ||
-      $line == "api -X PUT repos/spali/tool/actions/permissions --input "* ]] || {
+      $line == "api -X PUT repos/spali/tool/actions/permissions --input "* ||
+      $line == "api repos/spali/tool/actions/permissions/fork-pr-contributor-approval" ||
+      $line == "api -X PUT repos/spali/tool/actions/permissions/fork-pr-contributor-approval --input "* ]] || {
       echo "unexpected call: $line" >&2
       return 1
     }
@@ -85,6 +96,73 @@ only_repo_paths() {
   [ "$output" = "actions: false -> true" ]
   n=$(gh_calls | grep -n PUT | cut -d: -f1)
   [ "$(jq -c . "$GH_INPUTS/$n")" = '{"enabled":true}' ]
+}
+
+
+@test "fork approval is required for all external contributors with Actions on" {
+  settings '{"actions": true}'
+  echo "$ALL_OFF" | gh_respond 'api repos/spali/tool' -
+  echo '{"enabled": true}' | gh_respond 'api repos/spali/tool/actions/permissions' -
+  approval first_time_contributors
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "fork_pr_approval: first_time_contributors -> all_external_contributors" ]
+  only_repo_paths
+  n=$(gh_calls | grep -n 'PUT repos/spali/tool/actions/permissions/fork-pr-contributor-approval' | cut -d: -f1)
+  [ "$(jq -c . "$GH_INPUTS/$n")" = '{"approval_policy":"all_external_contributors"}' ]
+}
+
+@test "fork approval already set sends no PUT" {
+  settings '{"actions": true}'
+  echo "$ALL_OFF" | gh_respond 'api repos/spali/tool' -
+  echo '{"enabled": true}' | gh_respond 'api repos/spali/tool/actions/permissions' -
+  approval all_external_contributors
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "settings ok" ]
+  ! gh_calls | grep -q PUT
+}
+
+@test "fork approval is set right after Actions are enabled" {
+  settings '{"actions": true}'
+  echo "$ALL_OFF" | gh_respond 'api repos/spali/tool' -
+  echo '{"enabled": false}' | gh_respond 'api repos/spali/tool/actions/permissions' -
+  approval first_time_contributors_new_to_github
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "actions: false -> true" ]
+  [ "${lines[1]}" = "fork_pr_approval: first_time_contributors_new_to_github -> all_external_contributors" ]
+}
+
+@test "fork approval is required with Actions off too" {
+  echo "$ALL_OFF" | gh_respond 'api repos/spali/tool' -
+  echo '{"enabled": false}' | gh_respond 'api repos/spali/tool/actions/permissions' -
+  approval first_time_contributors
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "fork_pr_approval: first_time_contributors -> all_external_contributors" ]
+  only_repo_paths
+}
+
+@test "fork approval is skipped for a private repository" {
+  settings '{"actions": true}'
+  jq -c '.private = true' <<<"$ALL_OFF" | gh_respond 'api repos/spali/tool' -
+  echo '{"enabled": true}' | gh_respond 'api repos/spali/tool/actions/permissions' -
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "settings ok" ]
+  ! gh_calls | grep -q fork-pr-contributor-approval
+}
+
+@test "fork approval API error fails" {
+  settings '{"actions": true}'
+  echo "$ALL_OFF" | gh_respond 'api repos/spali/tool' -
+  echo '{"enabled": true}' | gh_respond 'api repos/spali/tool/actions/permissions' -
+  gh_fail 'api -X PUT repos/spali/tool/actions/permissions/fork-pr-contributor-approval *' 'gh: Forbidden (HTTP 403)'
+  approval first_time_contributors
+  run "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [ "$output" = "error: spali/tool: gh: Forbidden (HTTP 403)" ]
 }
 
 @test "API error fails" {

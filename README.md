@@ -672,7 +672,9 @@ For each managed repository it
 1. creates a missing fork (a missing mirror must be created by hand once, see
    below);
 2. enforces its settings: issues, pull requests, wiki, discussions, projects
-   and GitHub Actions are off unless `settings:` turns them on;
+   and GitHub Actions are off unless `settings:` turns them on; a public
+   repository requires approval of fork pull request workflows for all
+   external contributors (also with Actions off);
 3. syncs the refs from upstream, the same way for forks and mirrors:
    fast-forwards the default branch, rebases the declared branches onto
    their upstream branch, mirrors the upstream branches that match a
