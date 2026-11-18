@@ -576,8 +576,8 @@ If the app loses access to all repositories, the run ends red
 
 **Set up the account token** (optional, for the billing check): create a
 fine-grained personal access token of the owner with the account permission
-Plan: read and no repository access, and store it as the secret
-`ACCOUNT_TOKEN` in the control repository (passed as `account-token`, see
+Plan: read and no repository access, and store it as a secret in the control
+repository (e.g. `ACCOUNT_TOKEN`, the caller passes it as `account-token`, see
 above). When the token expires, the billing check fails red
 (`check-failed`): renew it.
 

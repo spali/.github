@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # Included Actions quota of the account (billing-minutes, billing-storage, and
-# one info line billing per run). Only private repositories count: a
-# repository of the usage that is not in the inventory (deleted, renamed,
-# archived) counts as private. Minutes weigh by price (grossAmount over the
-# Actions Linux price), so macOS and Windows count like GitHub bills them;
-# storage is a monthly average in GB. Red when the usage so far reaches the
-# threshold, or from day 7 of the month (UTC) when the projection to month end
-# reaches 100 %. Included values and thresholds come from `billing:` in the
+# one info line billing per run). Only usage of the products Actions and
+# Packages (the included quota) of private repositories counts. A repository
+# of the usage that is not in the inventory (archived, created since) is looked
+# up once per run with the app token: public ones are left out, archived
+# private ones are marked (archived), a 404 (deleted, renamed) counts as
+# private and is marked (not in inventory). Minutes weigh by price (grossAmount
+# over the Actions Linux price), so macOS and Windows count like GitHub bills
+# them; storage is a monthly average in GB. Red when the usage so far reaches
+# the threshold, or from day 7 of the month (UTC) when the projection to month
+# end reaches 100 %. Included values and thresholds come from `billing:` in the
 # control file, else from the plan (free, pro) and 75 %. Writes findings only
-# (account level, no repository). Env: FINDINGS INVENTORY CONFIG (file paths),
-# BILLING_TOKEN (account token with Plan read, used as GH_TOKEN; missing: skip
-# finding), optional MONITOR_NOW (epoch seconds, default now).
+# (account level, no repository). Env: FINDINGS INVENTORY CONFIG (file paths;
+# empty inventory: skip finding), BILLING_TOKEN (account token with Plan read,
+# used for the billing calls; missing: skip finding), GH_TOKEN (app token, for
+# the repository lookups), optional MONITOR_NOW (epoch seconds, default now).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
 # shellcheck source=scripts/monitor-lib.sh
@@ -22,6 +26,16 @@ OWNER=spali
 
 # Included minutes and storage (GB) of the plans without `billing:`.
 PLANS='{"free": {"minutes": 2000, "gb": 0.5}, "pro": {"minutes": 3000, "gb": 2}}'
+
+# Prints the distinct names (one per line) of the counted usage items of
+# $month (YYYY-MM) that are neither empty nor in the inventory.
+UNKNOWN_JQ='
+  ([$inv[0][] | .name | ascii_downcase] | map({key: ., value: true}) | from_entries) as $known |
+  [.usageItems[] | select((.date // "") | startswith($month))
+    | select((.product // "") | ascii_downcase | . == "actions" or . == "packages")
+    | .repositoryName // "" | select(. != "")
+    | select(. as $n | $known | has("\($o)/\($n)" | ascii_downcase) | not)]
+  | unique_by(ascii_downcase) | .[]'
 
 # Prints TSV lines "level check message" from the usage answer on stdin.
 BILLING_JQ='
@@ -35,13 +49,18 @@ BILLING_JQ='
   $t[2] as $day |
   ($start | todate | .[0:7]) as $month |
   ($now - 86400 | todate | .[0:10]) as $yesterday |
-  ([$inv[0][] | {key: (.name | ascii_downcase), value: (.private == true)}] | from_entries) as $private |
-  def shown: (.repositoryName // "") as $n |
-    if $private | has("\($o)/\($n)" | ascii_downcase) then $n
-    else "\(if $n == "" then "(no name)" else $n end) (not in inventory)" end;
+  (([$inv[0][] | {key: (.name | ascii_downcase), value: {private: (.private == true), archived: false}}] | from_entries)
+    + $extra) as $repos |
+  ($repos | map_values(.private)) as $private |
+  def shown: (.repositoryName // "") as $n | $repos["\($o)/\($n)" | ascii_downcase] as $r |
+    if $r == null then "\(if $n == "" then "(no name)" else $n end) (not in inventory)"
+    elif $r.archived then "\($n) (archived)"
+    else $n end;
+  def proj($p): if $day >= 7 then "projected \($p | r) %" else "projection from day 7" end;
   [.usageItems[] | select((.date // "") | startswith($month))] as $items |
   (first($items[] | select(.sku == "Actions Linux") | .pricePerUnit | numbers | select(. > 0)) // 0.006) as $price |
-  [$items[] | select($private["\($o)/\(.repositoryName // "")" | ascii_downcase] != false)] as $own |
+  [$items[] | select((.product // "") | ascii_downcase | . == "actions" or . == "packages")
+    | select($private["\($o)/\(.repositoryName // "")" | ascii_downcase] != false)] as $own |
   [$own[] | select(.unitType == "Minutes")] as $min_items |
   [$own[] | select(.unitType == "GigabyteHours")] as $gb_items |
   (([$min_items[].grossAmount] | add // 0) / $price) as $used |
@@ -64,19 +83,46 @@ BILLING_JQ='
       "Actions storage at \($gb_pct | r) % of the included \($gb | mb) MB (\($avg | mb) MB on average), projected \($gb_proj | r) % by month end"]
    else empty end),
   ["info", "billing", ([
-     "Actions minutes \($min_pct | r) % (\($used | r) of \($minutes), projected \($min_proj | r) %)",
-     "storage \($gb_pct | r) % (\($avg | mb) MB of \($gb | mb) MB, projected \($gb_proj | r) %)",
+     "Actions minutes \($min_pct | r) % (\($used | r) of \($minutes), \(proj($min_proj)))",
+     "storage \($gb_pct | r) % (\($avg | mb) MB of \($gb | mb) MB, \(proj($gb_proj)))",
      ($min_items | top((.grossAmount // 0) / $price; "\(r) min") | select(. != "") | "top: \(.)"),
      ($gb_items | top(div(.quantity // 0; $e); "\(mb) MB") | select(. != "") | "top storage: \(.)")
    ] | join(" · "))]
   | @tsv'
 
+# lookup NAME: GET repos/OWNER/NAME with the app token. Prints the inventory
+# entry {key, value: {private, archived}}, nothing for a 404 (deleted or
+# renamed). Returns 1 after a check-failed finding.
+lookup() {
+  local errf body entry
+  errf=$(mktemp)
+  if body=$(GH_TOKEN=$APP_TOKEN gh api "repos/$OWNER/$(uri "$1")" 2>"$errf" </dev/null); then
+    rm -f "$errf"
+    json_out billing - entry -c --arg k "$OWNER/$1" '{key: ($k | ascii_downcase), value: {
+      private: (.private | if type == "boolean" then . else error("no private") end),
+      archived: (.archived == true)}}' <<<"$body" || return 1
+    printf '%s\n' "$entry"
+    return 0
+  fi
+  if ! grep -qF '(HTTP 404)' "$errf"; then
+    finding red check-failed - "billing: $(err_line "$errf")"
+    rm -f "$errf"
+    return 1
+  fi
+  rm -f "$errf"
+}
+
 main() {
-  local cfg plan body rows level check message now year month
+  local cfg plan body rows level check message now year month unknown name entries extra
   if [[ -z ${BILLING_TOKEN:-} ]]; then
     finding skip billing - "no account token: billing not checked"
     return 0
   fi
+  if ! jq -e 'type == "array" and length > 0' "$INVENTORY" >/dev/null 2>&1; then
+    finding skip billing - "no inventory: billing not checked"
+    return 0
+  fi
+  APP_TOKEN=${GH_TOKEN:-}
   export GH_TOKEN=$BILLING_TOKEN
   cfg=$(jq -c '.billing // {} | {minutes: .minutes.included, threshold: (.minutes.threshold // 75),
     gb: .storage["included-gb"], gb_threshold: (.storage.threshold // 75)}' "$CONFIG")
@@ -98,7 +144,16 @@ main() {
     parse_failed billing -
     return 0
   fi
+  json_out billing - unknown -r --arg month "$(date -u -d "@$now" +%Y-%m)" --arg o "$OWNER" \
+    --slurpfile inv "$INVENTORY" "$UNKNOWN_JQ" <<<"$body" || return 0
+  entries=
+  while IFS= read -r name; do
+    [[ -n $name ]] || continue
+    entries+=$(lookup "$name")$'\n' || return 0
+  done <<<"$unknown"
+  json_out billing - extra -cs 'from_entries' <<<"$entries" || return 0
   json_out billing - rows -r --argjson now "$now" --arg o "$OWNER" --slurpfile inv "$INVENTORY" \
+    --argjson extra "$extra" \
     --argjson minutes "$(jq '.minutes' <<<"$cfg")" --argjson min_threshold "$(jq '.threshold' <<<"$cfg")" \
     --argjson gb "$(jq '.gb' <<<"$cfg")" --argjson gb_threshold "$(jq '.gb_threshold' <<<"$cfg")" \
     "$BILLING_JQ" <<<"$body" || return 0
