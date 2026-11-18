@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Health checks for owned, non-fork, unmanaged repositories:
 # main-red, renovate-stale, unanswered, workflow-disabled, dependabot-alert,
-# code-scanning-alert, settings-fork-approval.
+# code-scanning-alert, stale-branch, settings-merge, settings-fork-approval.
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
@@ -155,6 +155,16 @@ check_alerts() {
   rm -f "$tmp"
 }
 
+# check_branches REPO DEFAULT: stale-branch for the pull requests inside REPO.
+check_branches() {
+  local tmp
+  tmp=$(mktemp)
+  if paged stale-branch "$1" "repos/$1/branches?per_page=100" '{name, sha: .commit.sha}' "$tmp"; then
+    check_stale_branches "$1" "$2" "$1" "$tmp"
+  fi
+  rm -f "$tmp"
+}
+
 main() {
   local repos repo branch private days
   if ! days=$(jq -er '.unanswered.days // 7 | numbers' "$CONFIG" 2>/dev/null); then
@@ -172,7 +182,9 @@ main() {
   while IFS=$'\t' read -r repo branch private; do
     [[ -n $repo ]] || continue
     checked "$repo"
+    check_merge "$repo"
     check_fork_approval "$repo" "$private"
+    check_branches "$repo" "$branch"
     check_main_red "$repo" "$branch"
     check_renovate "$repo"
     check_unanswered "$repo" "$days"

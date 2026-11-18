@@ -670,3 +670,14 @@ behind_mirror() {
   [ "$(message settings-fork-approval)" = "private repository" ]
   run ! grep -q fork-pr-contributor-approval "$GH_LOG"
 }
+
+@test "stale-branch: a declared fork branch whose upstream pull request was merged is info after new commits" {
+  jq -nc '[{number: 12, state: "closed", merged_at: "2026-11-01T00:00:00Z", created_at: "2026-10-01T00:00:00Z",
+    html_url: "https://github.com/up/f/pull/12", head: {ref: "feat", sha: "old", repo: {full_name: "spali/f"}}}]' |
+    gh_respond '*repos/up/f/pulls?state=all&head=spali:feat&per_page=100 --paginate' -
+  run_script
+  [ "$(count stale-branch)" -eq 1 ]
+  [ "$(level stale-branch)" = info ]
+  [ "$(message stale-branch)" = "feat: pull request up/f#12 is merged, the branch has newer commits: https://github.com/up/f/pull/12" ]
+  run ! grep -q 'state=all&head=spali:main&' "$GH_LOG"
+}

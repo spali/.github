@@ -14,8 +14,9 @@ file `repos.yml`. Settings and rulesets change only with the owner's approval.
 **TODO in the overview issue:** red findings are 🔴 Fix now. Info findings
 are 🤔 Decide (a choice only you can make: `adoption`, `branch-undeclared`,
 `contribution-stale`, `fork-delete-candidate`, `list-contradiction`,
-`rebase-pending`, `unmanaged`) or 🧹 Clean up (all other checks). The title
-and sentence of each entry are in `MONITOR_TODO` in `scripts/monitor-lib.sh`.
+`rebase-pending`, `stale-branch`, `unmanaged`) or 🧹 Clean up (all other
+checks). The title and sentence of each entry are in `MONITOR_TODO` in
+`scripts/monitor-lib.sh`.
 
 Groups: [Release flow](#release-flow) · [Settings](#settings) ·
 [Health](#health) · [Forks](#forks) · [Lists](#lists) ·
@@ -69,14 +70,6 @@ why there is none).
 
 Repositories that use the shared release flow. Expected values: README
 "Set up a new repository", steps 6 and 7.
-
-## settings-merge
-
-🔴 The merge options differ: merge commits must be off, squash and rebase
-on, branches deleted on merge, and the squash commit title must be the pull
-request title.
-
-**Fix:** Settings → General → Pull Requests.
 
 ## settings-alerts
 
@@ -133,6 +126,35 @@ block moving a tag. ⚪ Not checked like `ruleset-main`.
 
 Own repositories that are neither forks nor managed.
 
+## settings-merge
+
+🔴 The merge options differ: merge commits must be off, squash and rebase
+on, branches deleted on merge, and the squash commit title must be the pull
+request title. Checked on all own repositories that are neither forks nor
+managed (shown under Settings for central ones, else under Health).
+
+**Fix:** Settings → General → Pull Requests.
+
+## stale-branch
+
+🔴 A branch was the head of a merged pull request and still points at the
+merged commit: it is left over (usually because "Automatically delete head
+branches" was off, see `settings-merge`). 🔵 The branch has commits after the
+merge: maybe it carries on. A branch with an open pull request, the default
+branch and branches of unmerged pull requests are not reported; the newest
+merged pull request of a branch counts. Own repositories look at pull requests
+inside the repository, forks (also managed ones) at their pull requests into
+the upstream. The finding links the pull request (`#N` in the repository,
+`owner/upstream#N` upstream) and carries its number as `item`.
+
+**Fix:** delete the branch (`git push --delete origin <branch>`, or the
+Branches page). To keep it, ignore the pull request by its number:
+
+```yaml
+ignores:
+  - {repo: spali/example, check: stale-branch, item: 12, reason: release branch}
+```
+
 ## main-red
 
 🔴 The latest run of a workflow on the default branch failed. Runs of pull
@@ -185,9 +207,9 @@ unanswered:
 ```
 
 **Fix:** answer it or close it. To accept one item, ignore it by its number
-(`item` is only allowed for this check). The ignore stays used while the item
-is open, whoever answered last; once the item is closed, it is reported as
-`ignore-unused`: remove it.
+(`item` is only allowed for this check and `stale-branch`). The ignore stays
+used while the item is open, whoever answered last; once the item is closed,
+it is reported as `ignore-unused`: remove it.
 
 ```yaml
 ignores:

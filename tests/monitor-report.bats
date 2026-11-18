@@ -335,6 +335,7 @@ J
 {"level":"info","check":"list-none","repo":"o/r","message":"m"}
 {"level":"info","check":"fork-behind","repo":"o/r","message":"m"}
 {"level":"red","check":"settings-fork-approval","repo":"o/fa","message":"m"}
+{"level":"red","check":"stale-branch","repo":"o/sb","message":"m","item":3}
 J
   run "$REPORT"
   [[ $output == *"[Releases](https://github.com/o/r/releases)"* ]]
@@ -343,6 +344,7 @@ J
   [[ $output == *"[Security settings](https://github.com/o/r/settings/security_analysis)"* ]]
   [[ $output == *"[Actions settings](https://github.com/o/r/settings/actions)"* ]]
   [[ $output == *"[Actions settings](https://github.com/o/fa/settings/actions)"* ]]
+  [[ $output == *"[Branches](https://github.com/o/sb/branches)"* ]]
   [[ $output == *"[Rulesets](https://github.com/o/r/settings/rules)"* ]]
   [[ $output == *"[Actions](https://github.com/o/r/actions)"* ]]
   [[ $output == *"[Dependabot](https://github.com/o/r/security/dependabot)"* ]]
@@ -537,7 +539,7 @@ J
 @test "TODO: the categories follow the agreed mapping" {
   source "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
   run jq -r 'to_entries | map(select(.value.category == "decide") | .key) | sort | join(" ")' <<<"$MONITOR_TODO"
-  [ "$output" = "adoption branch-undeclared contribution-stale fork-delete-candidate list-contradiction rebase-pending unmanaged" ]
+  [ "$output" = "adoption branch-undeclared contribution-stale fork-delete-candidate list-contradiction rebase-pending stale-branch unmanaged" ]
 }
 
 @test "TODO: a check without an entry is Clean up, titled by its id, without sentence" {

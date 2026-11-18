@@ -462,9 +462,15 @@ YAML
   [[ $stderr == *"duplicate ignore spali/x unanswered 1"* ]]
 }
 
-@test "ignores item is only allowed for check unanswered" {
+@test "ignores item is only allowed for the checks unanswered and stale-branch" {
   f=$(printf 'version: 1\nignores:\n  - {repo: spali/x, check: adoption, item: 3, reason: r}\n' | mk bad.yml)
   run --separate-stderr "$CONFIG" validate "$f"
   [ "$status" -eq 1 ]
-  [[ $stderr == *"error: $f: ignores[0].item is only allowed for check unanswered"* ]]
+  [[ $stderr == *"error: $f: ignores[0].item is only allowed for the checks unanswered and stale-branch"* ]]
+}
+
+@test "ignores item is allowed for stale-branch" {
+  f=$(printf 'version: 1\nignores:\n  - {repo: spali/x, check: stale-branch, item: 3, reason: r}\n' | mk ok.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
 }

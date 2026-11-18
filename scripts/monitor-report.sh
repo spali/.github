@@ -58,6 +58,7 @@ $cfg[0] as $cfg | . as $f
       elif $c == "ruleset-main" or $c == "ruleset-tags" then ["Rulesets", "\($r | gh)/settings/rules"]
       elif $c == "main-red" or $c == "workflow-disabled" or $c == "fork-workflows-active" then ["Actions", "\($r | gh)/actions"]
       elif $c == "unanswered" then ["Issues", "\($r | gh)/issues"]
+      elif $c == "stale-branch" then ["Branches", "\($r | gh)/branches"]
       elif $c == "dependabot-alert" then ["Dependabot", "\($r | gh)/security/dependabot"]
       elif $c == "code-scanning-alert" then ["Code scanning", "\($r | gh)/security/code-scanning"]
       elif ($c | startswith("fork-")) then ["Fork", ($r | gh)]

@@ -346,3 +346,15 @@ pr_aged() {
   [ "$(message settings-fork-approval)" = "private repository" ]
   run ! grep -q fork-pr-contributor-approval "$GH_LOG"
 }
+
+@test "stale-branch: a fork branch of a merged upstream pull request is red" {
+  respond_jq "$FB" '[{name: "main", commit: {sha: "m1"}}, {name: "feature", commit: {sha: "s1"}}]'
+  respond_jq '*repos/up/f/pulls?state=all&head=spali:feature&per_page=100 --paginate' '[
+    {number: 9, state: "closed", merged_at: "2026-11-01T00:00:00Z", created_at: "2026-10-01T00:00:00Z",
+     html_url: "https://github.com/up/f/pull/9", head: {ref: "feature", sha: "s1", repo: {full_name: "spali/f"}}}]'
+  run_script
+  [ "$(count stale-branch)" -eq 1 ]
+  [ "$(level stale-branch)" = red ]
+  [ "$(message stale-branch)" = "feature: pull request up/f#9 is merged, delete the branch: https://github.com/up/f/pull/9" ]
+  run ! grep -q 'head=spali:main&' <(grep 'state=all' "$GH_LOG")
+}

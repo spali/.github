@@ -330,7 +330,8 @@ a red finding is open. Code: `scripts/monitor*.sh` in `spali/.github`.
 3. Fix the cause (table in section 5). Settings changes need the owner's
    approval (section 1).
 4. If the finding is accepted, open a PR in the control repository that adds
-   `{repo, check, reason}` to `ignores` in `repos.yml`. The reason is
+   `{repo, check, reason}` to `ignores` in `repos.yml` (`item` for one
+   pull request or issue of `unanswered` or `stale-branch`). The reason is
    required. Remove an ignore that is reported as `ignore-unused`.
 5. Re-run: `gh workflow run monitor.yml` in the control repository.
 
@@ -464,7 +465,7 @@ issue and the log of the failed step. Explanations for humans:
 | `several-drafts` | more than one draft release | ask the owner which to delete |
 | `next-stale` | `-next` pre-release older than the latest release | re-run the build on `main`, or delete it |
 | `pin-behind` | a caller (including the control repository's monitor pin) pins a `spali/.github` release older than a newer one (older than 7 days) | merge or fix the Renovate PR |
-| `settings-merge` | merge options differ from README "Set up", step 6 | fix the setting (owner approval) |
+| `settings-merge` | merge options differ from README "Set up", step 6 (all own repositories that are neither forks nor managed) | fix the setting (owner approval) |
 | `settings-alerts` | Dependabot alerts are off | enable them (owner approval) |
 | `settings-pvr` | private vulnerability reporting is off (public repo) | enable it (owner approval) |
 | `settings-actions` | default workflow permissions are not read-only, or Actions may approve PRs | fix the setting (owner approval) |
@@ -477,6 +478,7 @@ issue and the log of the failed step. Explanations for humans:
 | `dependabot-alert` | open alert; red for critical/high, info for low/medium | update or dismiss with a reason |
 | `code-scanning-alert` | open alert; red for critical/high, info for low/medium | fix or dismiss with a reason |
 | `unanswered` | in an open pull request or issue the newest human post (opening, comment, review, review comment; bots ignored, items opened by a bot skipped) is not by the owner and older than `unanswered.days` days (default 7); the finding carries the number as `item` | answer it or close it, or ignore the item (`item: <number>`) with a reason; the ignore stays used while the item is open and becomes `ignore-unused` once it is closed: then remove it |
+| `stale-branch` | a branch (not the default branch) was the head of a merged pull request from the repository (own repositories: into the repository; forks and managed forks: into the upstream) and has no open one; red when it still points at the merged head, info when it has commits after it; the newest merge counts; the finding carries the pull request number as `item` | delete the branch, or ignore the item (`item: <number>`) with a reason |
 | `fork-behind` (info) | a fork is behind its upstream | sync by hand, add it to `managed:`, or archive it to freeze this state |
 | `fork-workflows-active` (info) | a fork runs its own workflows | disable Actions in the fork's settings if unwanted (disabled Actions = clean) |
 | `fork-delete-candidate` (info) | no own commits on the default branch, no open upstream PR from the fork, and every fork branch also exists upstream or was the head of a closed or merged upstream PR from the fork | delete the fork, archive it to freeze the state you reference, or add it to `managed:` |

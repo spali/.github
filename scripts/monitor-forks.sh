@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fork checks: fork-behind (missing upstream commits), fork-workflows-active,
 # fork-delete-candidate, contribution-stale, branch-undeclared (info),
-# settings-fork-approval.
+# stale-branch (pull requests upstream), settings-fork-approval.
 # Scope: inventory forks with a parent that are not managed (monitor-managed.sh
 # checks those).
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
@@ -114,11 +114,13 @@ main() {
     prs=$(mktemp)
     fb=$(mktemp)
     # the open upstream pulls of the fork branches (never all upstream pulls)
-    if paged fork-delete-candidate "$repo" "repos/$repo/branches?per_page=100" '{name}' "$fb" &&
-      head_pulls fork-delete-candidate "$repo" "$parent" open "$(jq -c 'map(.name)' "$fb")" "$prs"; then
-      check_delete_candidate "$repo" "$branch" "$parent" "$pbranch" "$prs" "$fb"
-      check_contributions "$repo" "$prs"
-      check_undeclared "$repo" "$branch" "$parent" "$pbranch" "$prs"
+    if paged fork-delete-candidate "$repo" "repos/$repo/branches?per_page=100" '{name, sha: .commit.sha}' "$fb"; then
+      check_stale_branches "$repo" "$branch" "$parent" "$fb"
+      if head_pulls fork-delete-candidate "$repo" "$parent" open "$(jq -c 'map(.name)' "$fb")" "$prs"; then
+        check_delete_candidate "$repo" "$branch" "$parent" "$pbranch" "$prs" "$fb"
+        check_contributions "$repo" "$prs"
+        check_undeclared "$repo" "$branch" "$parent" "$pbranch" "$prs"
+      fi
     fi
     rm -f "$prs" "$fb"
   done <<<"$forks"

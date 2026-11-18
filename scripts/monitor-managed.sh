@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Checks of the repositories under managed: in the control file:
 # managed-missing, managed-settings, managed-behind (branches and, unless
-# tags is false, tags), rebase-pending, branch-undeclared and
-# settings-fork-approval. sync-failed runs once, in monitor-lists.sh.
+# tags is false, tags), rebase-pending, branch-undeclared, stale-branch (forks:
+# pull requests upstream) and settings-fork-approval. sync-failed runs once,
+# in monitor-lists.sh.
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
@@ -284,6 +285,7 @@ check_fork() {
     return 0
   fi
   paged managed-behind "$repo" "repos/$repo/branches?per_page=100" '{name, sha: .commit.sha}' "$tmp/tb" || return 0
+  check_stale_branches "$repo" "$default" "$up" "$tmp/tb"
   if [[ $(jq -r '.follow | length' <<<"$entry") -gt 0 ]]; then
     paged managed-behind "$repo" "repos/$up/branches?per_page=100" '{name}' "$tmp/ub" || return 0
   else

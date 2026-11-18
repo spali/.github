@@ -450,10 +450,10 @@ It checks five groups (archived repositories only by the Lists check):
 
 | Group | Repositories | Checks |
 |---|---|---|
-| Release flow and settings | central repositories (those that use this flow) | stale dev builds and `-next` pre-releases, orphan tags, several drafts, pin behind the latest release, merge/alert/PVR/Actions settings, rulesets |
-| Health | all non-fork, unmanaged repositories | red `main`, open Renovate pull requests, unanswered pull requests and issues, disabled workflows, Dependabot and code scanning alerts |
-| Forks | unmanaged forks | upstream commits missing, active workflows, delete candidates, old pull requests, branches with own commits |
-| Managed | forks and mirrors listed under `managed` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, undeclared branches with own commits, manual rebases pending |
+| Release flow and settings | central repositories (those that use this flow) | stale dev builds and `-next` pre-releases, orphan tags, several drafts, pin behind the latest release, alert/PVR/Actions settings, rulesets |
+| Health | all non-fork, unmanaged repositories | merge settings, red `main`, open Renovate pull requests, unanswered pull requests and issues, disabled workflows, Dependabot and code scanning alerts, branches of merged pull requests |
+| Forks | unmanaged forks | upstream commits missing, active workflows, delete candidates, old pull requests, branches with own commits, branches of merged upstream pull requests |
+| Managed | forks and mirrors listed under `managed` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, undeclared branches with own commits, branches of merged upstream pull requests, manual rebases pending |
 | Lists | all repositories, archived ones too | GitHub Lists that contradict the archive state, forks or mirrors (an archived repository belongs in an archive list of `lists.archived`, see [freeze a fork or mirror](docs/monitor-checks.md#freeze-a-fork-or-mirror); forks and managed repositories in a mirrors list, every repository in a `synced` mirrors list under `managed`; no own repositories in `lists.external`); repositories without the release flow; the last run of the control repository's sync failed |
 
 The pin check also covers the control repository's own pin of `monitor.yml`.
@@ -524,7 +524,7 @@ after 48 h.
 | `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `archived` (list of lists), `mirrors` (mapping: `synced` and `other`, each a list of lists), `external` (list of lists) |
 | `managed` | forks and mirrors kept in sync by [`sync.yml`](#fork-and-mirror-sync): `repo`, `upstream`, optional `branches`, `follow`, `tags`, `settings`, `private` |
 | `unanswered` | optional: `days` (positive integer, default 7): how long someone may wait for an answer in an open pull request or issue |
-| `ignores` | accepted findings: `repo`, `check` (an id from the AGENTS.md catalog, not `check-failed`), optional `item` (a pull request or issue number: ignores only that item), `reason` (required) |
+| `ignores` | accepted findings: `repo`, `check` (an id from the AGENTS.md catalog, not `check-failed`), optional `item` (only for `unanswered` and `stale-branch`: a pull request or issue number, ignores only that item), `reason` (required) |
 
 ```yaml
 version: 1
