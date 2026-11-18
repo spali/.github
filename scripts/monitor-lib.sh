@@ -269,8 +269,9 @@ json_out() {
 # a fork chooses its own runs-on (e.g. a self-hosted runner); requiring approval
 # for all external contributors is the only guard. The endpoint answers 422 for
 # private repositories, so they are skipped without a call (PRIVATE is "true";
-# anything else counts as public). Actions disabled is skipped too. Writes
-# findings only and always returns 0.
+# anything else counts as public). With Actions disabled no workflow can run:
+# no finding (like fork-workflows-active). Writes findings only and always
+# returns 0.
 check_fork_approval() {
   local repo=$1 private=$2 body out
   if [[ $private == true ]]; then
@@ -279,10 +280,7 @@ check_fork_approval() {
   fi
   body=$(fetch settings-fork-approval "$repo" "repos/$repo/actions/permissions") || return 0
   json_out settings-fork-approval "$repo" out -r '.enabled' <<<"$body" || return 0
-  if [[ $out == false ]]; then
-    finding skip settings-fork-approval "$repo" "Actions disabled"
-    return 0
-  fi
+  [[ $out != false ]] || return 0
   body=$(fetch settings-fork-approval "$repo" "repos/$repo/actions/permissions/fork-pr-contributor-approval") || return 0
   json_out settings-fork-approval "$repo" out -r '
     if .approval_policy == "all_external_contributors" then ""
