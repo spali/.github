@@ -13,7 +13,8 @@ MONITOR_CHECKS=(
   list-none list-contradiction list-archived list-external-own
   managed-missing managed-settings managed-behind branch-undeclared
   rebase-pending sync-failed contribution-stale unmanaged
-  adoption check-failed config-invalid ignore-unused
+  adoption billing-minutes billing-storage billing
+  check-failed config-invalid ignore-unused
 )
 
 # The TODO entry of each check in the overview issue (tests: one complete
@@ -22,7 +23,9 @@ MONITOR_CHECKS=(
 # explanation, and the overview areas (check groups) it can belong to, first
 # match wins: the first group that applies to the repository, else the first
 # one. check-failed takes the area of the check named before ":" in its
-# message; config-invalid and ignore-unused concern no repository.
+# message; config-invalid, ignore-unused and the billing checks concern no
+# repository. "todo": false keeps the info findings of a check out of the
+# TODO list (billing: one status line per run, nothing to do).
 # shellcheck disable=SC2016,SC2034 # Markdown backticks; used by monitor-report.sh
 MONITOR_TODO='{
   "devbuild-closed-pr": {"category": "cleanup", "areas": ["release"], "title": "Delete dev builds of closed pull requests",
@@ -95,6 +98,12 @@ MONITOR_TODO='{
     "text": "A repository in a synced mirrors List is not under `managed:`: add it to `managed:`, or ignore it."},
   "adoption": {"category": "decide", "areas": ["release"], "title": "Adopt the release flow?",
     "text": "An own repository does not use the central release flow: adopt it, or ignore the finding."},
+  "billing-minutes": {"category": "cleanup", "areas": [], "title": "Keep Actions minutes within the included quota",
+    "text": "Private repositories use up the included Actions minutes: move hosted jobs to a self-hosted runner or run them less often (the info line names the top repositories); raise `billing.minutes.threshold` if expected."},
+  "billing-storage": {"category": "cleanup", "areas": [], "title": "Keep Actions storage within the included quota",
+    "text": "Private repositories use up the included Actions storage: delete old artifacts and caches or shorten their retention (the info line names the top repositories); raise `billing.storage.threshold` if expected."},
+  "billing": {"category": "cleanup", "areas": [], "todo": false, "title": "Actions usage of the account",
+    "text": "The used and projected share of the included Actions minutes and storage, one line per run."},
   "check-failed": {"category": "cleanup", "areas": ["release", "settings", "health", "forks", "managed", "lists"], "title": "Fix checks that could not run",
     "text": "A check could not run (API error, missing access, bad response): read the detail and fix the cause; never ignore it."},
   "config-invalid": {"category": "cleanup", "areas": [], "title": "Fix the control file",
