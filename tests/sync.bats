@@ -249,6 +249,78 @@ steps() {
   grep -q 'push rejected, target unchanged' "$GITHUB_STEP_SUMMARY"
 }
 
+# default_switch NAME stubs a plan that moves the default branch to NAME and
+# a push that succeeds; spali/tool has the default branch master.
+default_switch() {
+  stub_step sync-git.sh "
+if [[ \$1 == plan ]]; then
+  : >\"\$WORK/plan.tsv\"
+  : >\"\$WORK/skipped.txt\"
+  echo '$1' >\"\$WORK/default.txt\"
+else
+  echo 'refs/heads/main 0000000..2222222 (ff)'
+fi"
+  # ahead of the response registered in setup
+  echo '{"full_name": "spali/tool", "default_branch": "master"}' >"$BATS_TEST_TMPDIR/tool.json"
+  printf 'respond\t%s\t%s\n' 'api repos/spali/tool' "$BATS_TEST_TMPDIR/tool.json" |
+    cat - "$GH_RESPONSES" >"$GH_RESPONSES.new"
+  mv "$GH_RESPONSES.new" "$GH_RESPONSES"
+}
+
+@test "default branch follows a renamed upstream default after the push" {
+  default_switch main
+  run --separate-stderr "$SYNC" repo spali/tool
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- '-X PATCH' "$GH_LOG")" -eq 1 ]
+  grep -qx 'api -X PATCH repos/spali/tool -f default_branch=main' "$GH_LOG"
+  [[ $output == *"default branch: master -> main"* ]]
+  grep -qx -- '- default branch: `master` -> `main`' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "default branch is not changed when it is already upstream's" {
+  default_switch master
+  run --separate-stderr "$SYNC" repo spali/tool
+  [ "$status" -eq 0 ]
+  ! grep -q -- '-X PATCH' "$GH_LOG"
+}
+
+@test "default branch is not changed without a switch in the plan" {
+  run --separate-stderr "$SYNC" repo spali/tool
+  [ "$status" -eq 0 ]
+  ! grep -q -- '-X PATCH' "$GH_LOG"
+  ! grep -q 'default branch' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "default branch is not changed when the push failed" {
+  default_switch main
+  stub_step sync-git.sh '
+if [[ $1 == plan ]]; then
+  : >"$WORK/plan.tsv"; : >"$WORK/skipped.txt"; echo main >"$WORK/default.txt"
+else
+  echo "error: push rejected, target unchanged" >&2; exit 1
+fi'
+  run --separate-stderr "$SYNC" repo spali/tool
+  [ "$status" -eq 1 ]
+  ! grep -q -- '-X PATCH' "$GH_LOG"
+}
+
+@test "default branch change failure fails the run" {
+  default_switch main
+  gh_fail_first 'api -X PATCH repos/spali/tool *' 'gh: Resource not accessible by integration (HTTP 403)'
+  run --separate-stderr "$SYNC" repo spali/tool
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"Resource not accessible by integration (HTTP 403)"* ]]
+  grep -qF -- '- ✗ default branch failed' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "invalid default branch name is refused" {
+  default_switch '-x'
+  run --separate-stderr "$SYNC" repo spali/tool
+  [ "$status" -eq 1 ]
+  ! grep -q -- '-X PATCH' "$GH_LOG"
+  grep -qF 'invalid default branch' "$GITHUB_STEP_SUMMARY"
+}
+
 @test "unmanaged repo is refused" {
   for mode in exists create repo; do
     run "$SYNC" "$mode" spali/other

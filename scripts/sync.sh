@@ -23,7 +23,12 @@
 #                        The git steps still run after a settings failure;
 #                        they are skipped when the kind check, the
 #                        contribution lookup or the committer lookup failed.
-#                        A failed plan skips the push. Refs the plan kept
+#                        A failed plan skips the push. After a successful
+#                        push it makes the branch of $WORK/default.txt (the
+#                        plan writes it when upstream renamed its default
+#                        branch) the default branch of REPO when it is not
+#                        (PATCH repos/REPO default_branch; the old branch
+#                        stays). Refs the plan kept
 #                        with own commits (skipped as undeclared or unique
 #                        commits) or stopped (upstream rewritten, upstream
 #                        moved tag; with the accept command per ref) fail
@@ -317,6 +322,27 @@ kept() {
   return 1
 }
 
+# set_default moves the default branch of REPO to the branch named in
+# $WORK/default.txt (none: nothing to do) unless it is the default already
+# (default_branch of $TMP/repo.json, read before the sync).
+set_default() {
+  local new old
+  [[ -s $WORK/default.txt ]] || return 0
+  new=$(head -n 1 "$WORK/default.txt")
+  old=$(jq -r '.default_branch // ""' "$TMP/repo.json")
+  [[ $new != "$old" ]] || return 0
+  if ! valid_branch "$new"; then
+    echo "error: invalid default branch: ${new//[^[:print:]]/?}" | tee "$TMP/err" >&2
+    return 1
+  fi
+  gh api -X PATCH "repos/$REPO" -f default_branch="$new" >/dev/null 2>"$TMP/err" || {
+    cat "$TMP/err" >&2
+    return 1
+  }
+  echo "default branch: $old -> $new"
+  note "- default branch: $(md "$old") -> $(md "$new")"
+}
+
 cmd_repo() {
   local status=0 git=1 ref why
   check_branch
@@ -376,6 +402,10 @@ cmd_repo() {
   fi
   if git_step push; then
     list_out "updated refs" "nothing to do"
+    if ! set_default; then
+      fail_note "default branch"
+      status=1
+    fi
   else
     fail_note push
     status=1

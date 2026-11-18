@@ -678,7 +678,23 @@ For each managed repository it
    their upstream branch, mirrors the upstream branches that match a
    `follow` pattern and all tags (unless `tags: false`); it deletes a
    followed branch or a tag that is gone upstream only when its commits are
-   still in an upstream ref.
+   still in an upstream ref;
+4. after the push, follows a renamed upstream default branch (see below).
+
+**Renamed default branch.** The upstream default branch is synced into the
+target's default branch. When upstream renamed it (e.g. `master` to
+`main`), the sync instead syncs it into the branch of upstream's name
+(created if missing) and then makes that branch the default branch of the
+repository (`PATCH repos/{owner}/{repo}` `default_branch`, needs
+Administration write; the summary shows `default branch: master -> main`).
+The old default branch is not deleted: the sync leaves it alone like any
+other unconfigured branch (only a `follow` pattern that matches it deletes
+it in a later run, once it is gone upstream and nothing is lost). The
+default stays when the old default branch is declared in `branches:`, has
+commits that are not in the upstream default branch, or when upstream's
+name is declared, or when the target branch of that name has own commits
+(it is skipped as `undeclared` and fails the run). Forks and mirrors are
+handled the same way.
 
 **Only the needed branches.** The sync fetches from upstream only the
 default branch, the `onto` of each declared branch, the branches matching a

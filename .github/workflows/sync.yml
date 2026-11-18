@@ -1,6 +1,7 @@
 # Reusable: sync the managed forks and mirrors (key `managed:` of the control
 # file) with their upstream: create a missing fork, enforce the settings,
-# fast-forward, rebase or mirror the refs.
+# fast-forward, rebase or mirror the refs, follow a renamed upstream default
+# branch.
 #
 # Call it from the PRIVATE control repository that holds the control file:
 #
