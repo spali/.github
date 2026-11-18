@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      ready: ${{ steps.matrix.outputs.ready }}
+      ready: ${{ steps.runner.outputs.ready }}
       runner: ${{ steps.matrix.outputs.runner }}
       release: ${{ steps.matrix.outputs.release }}
       settings: ${{ steps.matrix.outputs.settings }}
@@ -118,6 +118,16 @@ jobs:
           done
           echo "runner=$(jq -c '."runs-on"' <<<"$groups")" >>"$GITHUB_OUTPUT"
           echo "runs-on: $(jq -c '."runs-on"' <<<"$groups")"
+      # A self-hosted runner that is offline fails the run here (and GitHub
+      # notifies), instead of jobs waiting in the queue for a day.
+      - name: Runner online
+        id: runner
+        if: ${{ !cancelled() && steps.matrix.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RUNNER: ${{ steps.matrix.outputs.runner }}
+        run: |
+          .monitor/scripts/runner-online.sh "$RUNNER"
           echo "ready=true" >>"$GITHUB_OUTPUT"
       - name: Upload inventory
         if: ${{ !cancelled() && steps.matrix.outcome == 'success' }}

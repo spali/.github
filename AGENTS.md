@@ -88,6 +88,7 @@ pull request closed
 | `.github/workflows/profile-cards.yml` | reusable; jobs `card` (one per card) and `commit`; run by the private control repository |
 | `scripts/profile-cards.sh` | `check` (validates the card list), `commit` (writes the cards to the profile repository) |
 | `scripts/lib.sh` | `die`, `out`, `need_env` |
+| `scripts/runner-online.sh` | fails unless a self-hosted runner for `monitor.runs-on` is online (monitor Inventory, sync plan) |
 | `scripts/check-pr.sh` | title regex, release label present, warning on several |
 | `scripts/prepare.sh` | `next` / `release` / `pr`: decide kind, version, tag, sha |
 | `scripts/checksums.sh` | `checksums.txt` over the build files |
@@ -525,6 +526,13 @@ issue and the log of the failed step. Explanations for humans:
   artifacts `findings-<job>-<index>` plus `monitor-base` (config, inventory, archived);
   Report concatenates them. Inventory cannot use `monitor.runs-on`: the value
   comes from its own output.
+- Self-hosted `monitor.runs-on`: Inventory (monitor) and Managed repositories
+  (sync) run `scripts/runner-online.sh` on GitHub-hosted runners and fail when
+  no runner of the control repository with all labels is online. GitHub does
+  not notify about queued jobs, and Report itself would wait for the runner,
+  so the failure of that first job is the only alert. `ready` of Inventory is
+  set only after the check. No fallback to hosted runners (owner's decision,
+  2026-11-18).
 - `git ls-remote` on mirror targets only compares the refs of the source; extra
   refs in the target are fine (`managed-behind`).
 - Sync tokens (tested 2026-11-16): an installation token scoped

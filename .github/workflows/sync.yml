@@ -47,7 +47,9 @@
 # fails with the command to create it by hand. The caller owns the schedule and the
 # concurrency group; each repository also has its own group (sync-<repo>).
 #
-# Jobs: Managed repositories (control file, repository list) → Sync · <repo>
+# Jobs: Managed repositories (control file, repository list; with a
+# self-hosted monitor.runs-on a token with Administration read on the calling
+# repository checks that such a runner is online) → Sync · <repo>
 # (one per managed repository, at most 4 at a time).
 name: Sync
 
@@ -119,6 +121,24 @@ jobs:
           echo "runner=$(jq -c '."runs-on"' <<<"$matrix")" >>"$GITHUB_OUTPUT"
           jq -r '.repos[]' <<<"$matrix"
           echo "runs-on: $(jq -c '."runs-on"' <<<"$matrix")"
+      - name: Runner token
+        id: runner-token
+        if: ${{ contains(steps.matrix.outputs.runner, 'self-hosted') && steps.matrix.outputs.repos != '[]' }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-key }}
+          owner: spali
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: read
+      # A self-hosted runner that is offline fails the run here (and GitHub
+      # notifies), instead of the sync jobs waiting in the queue for a day.
+      - name: Runner online
+        if: ${{ steps.runner-token.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.runner-token.outputs.token }}
+          RUNNER: ${{ steps.matrix.outputs.runner }}
+        run: .sync/scripts/runner-online.sh "$RUNNER"
 
   sync:
     name: Sync · ${{ matrix.repo }}
