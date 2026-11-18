@@ -190,11 +190,11 @@ total() { jq -s length "$FINDINGS"; }
   [[ "$(info)" == 'Actions minutes 15 % (300 of 2000, '*'of 500 MB'* ]]
 }
 
-@test "config: plan pro gives 3000 minutes and 2 GB" {
+@test "config: plan pro gives 3000 minutes and 1 GB" {
   usage '[[17, "Actions Linux", 300, "private-a"]]'
   echo '{"plan": {"name": "pro"}}' | gh_respond "$PLAN" -
   run_script
-  [[ "$(info)" == 'Actions minutes 10 % (300 of 3000, '*'of 2000 MB'* ]]
+  [[ "$(info)" == 'Actions minutes 10 % (300 of 3000, '*'of 1000 MB'* ]]
 }
 
 @test "config: a full billing block needs no plan call" {
@@ -259,12 +259,18 @@ total() { jq -s length "$FINDINGS"; }
   [ "$(jq -c . "$FINDINGS")" = '{"level":"red","check":"check-failed","repo":null,"message":"billing: cannot parse API response"}' ]
 }
 
-@test "only Actions and Packages count, not Codespaces" {
+@test "only Actions counts, not Codespaces or Packages (own quotas)" {
   usage '[[17, "Actions Linux", 300, "private-a"], [17, "Codespaces compute 2-core", 5000, "private-a", 0.18, "codespaces"],
     [17, "Codespaces storage", 500, "private-a", 0.07, "codespaces"], [16, "Packages storage", 42, "private-a", 0.0008, "Packages"]]'
   run_script
-  [[ "$(info)" == 'Actions minutes 15 % (300 of 2000, projected 26 %) · storage 20 % (100 MB of 500 MB, '* ]]
+  [[ "$(info)" == 'Actions minutes 15 % (300 of 2000, projected 26 %) · storage 0 % (0 MB of 500 MB, '* ]]
   [ "$(total)" -eq 1 ]
+}
+
+@test "Actions storage counts" {
+  usage '[[16, "Actions storage", 42, "private-a"]]'
+  run_script
+  [[ "$(info)" == *'storage 20 % (100 MB of 500 MB, '* ]]
 }
 
 @test "no lookup for an unknown repository of a product that does not count" {

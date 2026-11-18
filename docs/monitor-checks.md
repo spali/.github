@@ -474,9 +474,9 @@ hold unsynced forks.
 # Billing
 
 The included Actions quota of the account (Settings → Billing), checked once
-per run, not per repository. Only the products Actions and Packages count
-(they share the included quota; Codespaces, Git LFS and others are left out),
-and only private repositories (public ones use Actions for free). A repository
+per run, not per repository. Only the product Actions counts (Actions
+minutes and Actions storage; Packages, Git LFS and Codespaces have included
+quotas of their own and are left out), and only private repositories (public ones use Actions for free). A repository
 of the usage that is not in the inventory (archived, created since) is looked
 up once per run with the app token: a public one is left out, an archived
 private one counts and is marked `(archived)`, one that no longer exists
@@ -495,7 +495,7 @@ storage at the level of yesterday (on day 1 the average so far) for the rest
 of the month. Yesterday is the UTC day before the run; shortly after midnight
 GitHub may still be filling in its usage, so the storage level can read low
 in an early run. Included values come from the plan (Free: 2000 minutes and
-0.5 GB, Pro: 3000 and 2 GB; other plans need the block), thresholds default
+0.5 GB, Pro: 3000 and 1 GB; other plans need the block), thresholds default
 to 75 %. Set any of them in the control file:
 
 ```yaml
@@ -504,7 +504,7 @@ billing:
     included: 2000   # included minutes per month
     threshold: 75    # percent
   storage:
-    included-gb: 0.5 # included storage (monthly average)
+    included-gb: 0.5 # included Actions storage (monthly average)
     threshold: 75    # percent
 ```
 

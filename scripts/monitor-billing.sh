@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Included Actions quota of the account (billing-minutes, billing-storage, and
-# one info line billing per run). Only usage of the products Actions and
-# Packages (the included quota) of private repositories counts. A repository
+# one info line billing per run). Only usage of the product Actions of private
+# repositories counts (Packages, Git LFS and Codespaces have quotas of their
+# own). A repository
 # of the usage that is not in the inventory (archived, created since) is looked
 # up once per run with the app token: public ones are left out, archived
 # private ones are marked (archived), a 404 (deleted, renamed) counts as
@@ -25,14 +26,14 @@ need_env FINDINGS INVENTORY CONFIG
 OWNER=spali
 
 # Included minutes and storage (GB) of the plans without `billing:`.
-PLANS='{"free": {"minutes": 2000, "gb": 0.5}, "pro": {"minutes": 3000, "gb": 2}}'
+PLANS='{"free": {"minutes": 2000, "gb": 0.5}, "pro": {"minutes": 3000, "gb": 1}}'
 
 # Prints the distinct names (one per line) of the counted usage items of
 # $month (YYYY-MM) that are neither empty nor in the inventory.
 UNKNOWN_JQ='
   ([$inv[0][] | .name | ascii_downcase] | map({key: ., value: true}) | from_entries) as $known |
   [.usageItems[] | select((.date // "") | startswith($month))
-    | select((.product // "") | ascii_downcase | . == "actions" or . == "packages")
+    | select((.product // "") | ascii_downcase == "actions")
     | .repositoryName // "" | select(. != "")
     | select(. as $n | $known | has("\($o)/\($n)" | ascii_downcase) | not)]
   | unique_by(ascii_downcase) | .[]'
@@ -59,7 +60,7 @@ BILLING_JQ='
   def proj($p): if $day >= 7 then "projected \($p | r) %" else "projection from day 7" end;
   [.usageItems[] | select((.date // "") | startswith($month))] as $items |
   (first($items[] | select(.sku == "Actions Linux") | .pricePerUnit | numbers | select(. > 0)) // 0.006) as $price |
-  [$items[] | select((.product // "") | ascii_downcase | . == "actions" or . == "packages")
+  [$items[] | select((.product // "") | ascii_downcase == "actions")
     | select($private["\($o)/\(.repositoryName // "")" | ascii_downcase] != false)] as $own |
   [$own[] | select(.unitType == "Minutes")] as $min_items |
   [$own[] | select(.unitType == "GigabyteHours")] as $gb_items |
