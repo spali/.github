@@ -546,8 +546,12 @@ Your own runner:
 - needs Linux with `bash`, GNU `date`, `git`, `gh` and `jq` (the actions bring
   their own Node.js); `yq` is only needed by Inventory;
 - runs jobs one after the other unless you register several runners, so
-  `per-repo` takes longer on a single runner; a job waits in the queue while no
-  runner is online and the run fails only when GitHub gives up on it;
+  `per-repo` takes longer on a single runner;
+- must be online when the run starts: with a `self-hosted` label, Inventory
+  checks that at least one runner of the control repository with all labels
+  is online (busy is fine) and otherwise fails the run, so GitHub notifies you
+  instead of the jobs waiting in the queue for a day; there is no fallback to
+  GitHub-hosted runners (the sync checks the same in Managed repositories);
 - gets the read-only app token and the issue token of each job: use it only
   for the private control repository.
 
@@ -809,7 +813,9 @@ jobs:
 ```
 
 **The run.** The job **Managed repositories** validates the control file and
-lists the repositories (only `repo` when dispatched with it). Then one job
+lists the repositories (only `repo` when dispatched with it); with a
+self-hosted `monitor.runs-on` it fails when no such runner is online (see
+"Jobs and runner"). Then one job
 **Sync · spali/name** per repository runs, at most 4 at a time, on
 `monitor.runs-on`; a failure in one does not stop the others, and each
 repository has its own concurrency group. Rebase a `rebase: manual` branch:
