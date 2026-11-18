@@ -19,6 +19,7 @@ to_json() {
 VALIDATE_JQ='
 def repo_ok: type == "string" and test("^spali/[A-Za-z0-9._-]+$");
 def posint: type == "number" and . == floor and . > 0;
+def pct: type == "number" and . >= 1 and . <= 100;
 def list_of($k): if has($k) then (.[$k] | if type == "array" then . else [] end) else [] end;
 def repo_err($path; $v):
   if ($v | repo_ok) then empty else "\($path): \($v | tostring) is not a spali repository" end;
@@ -35,7 +36,7 @@ def need($e; $k; $path; test_):
 
 if type != "object" then "top level must be a mapping" else
   (if .version != 1 then "version must be 1" else empty end),
-  (keys[] | select(IN("version", "monitor", "lists", "managed", "ignores", "mirrors", "forks", "unanswered") | not)
+  (keys[] | select(IN("version", "monitor", "lists", "managed", "ignores", "mirrors", "forks", "unanswered", "billing") | not)
     | "unknown key \(.)"),
   (if has("forks") then "`forks:` was removed: move the entry to `managed:`" else empty end),
   (if has("mirrors") then "`mirrors:` was removed: move the entry to `managed:`" else empty end),
@@ -54,6 +55,26 @@ if type != "object" then "top level must be a mapping" else
      (.unanswered | keys[] | select(. != "days") | "unanswered: unknown key \(.)"),
      (.unanswered | if has("days") and (.days | posint | not)
        then "unanswered.days must be a positive integer" else empty end)
+   else empty end),
+  (if has("billing") and (.billing | type) != "object" then "billing must be a mapping" else empty end),
+  (if (.billing | type) == "object" then
+     (.billing | keys[] | select(IN("minutes", "storage") | not) | "billing: unknown key \(.)"),
+     (.billing | if has("minutes") and (.minutes | type) != "object" then "billing.minutes must be a mapping" else empty end),
+     (.billing | if has("storage") and (.storage | type) != "object" then "billing.storage must be a mapping" else empty end),
+     (if (.billing.minutes | type) == "object" then
+        (.billing.minutes | keys[] | select(IN("included", "threshold") | not) | "billing.minutes: unknown key \(.)"),
+        (.billing.minutes | if has("included") and (.included | posint | not)
+          then "billing.minutes.included must be a positive integer" else empty end),
+        (.billing.minutes | if has("threshold") and (.threshold | pct | not)
+          then "billing.minutes.threshold must be a number from 1 to 100" else empty end)
+      else empty end),
+     (if (.billing.storage | type) == "object" then
+        (.billing.storage | keys[] | select(IN("included-gb", "threshold") | not) | "billing.storage: unknown key \(.)"),
+        (.billing.storage | if has("included-gb") and (.["included-gb"] | type == "number" and . > 0 | not)
+          then "billing.storage.included-gb must be a positive number" else empty end),
+        (.billing.storage | if has("threshold") and (.threshold | pct | not)
+          then "billing.storage.threshold must be a number from 1 to 100" else empty end)
+      else empty end)
    else empty end),
   (if has("lists") and (.lists | type) != "object" then "lists must be a mapping" else empty end),
   (if (.lists | type) == "object" then

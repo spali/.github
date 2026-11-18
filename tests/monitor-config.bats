@@ -440,6 +440,70 @@ YAML
   done
 }
 
+@test "billing: full and partial blocks are accepted" {
+  f=$(printf 'version: 1\nbilling:\n  minutes: {included: 2000, threshold: 75.5}\n  storage: {included-gb: 0.5, threshold: 100}\n' | mk ok.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  f=$(printf 'version: 1\nbilling: {minutes: {threshold: 80}}\n' | mk ok2.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+}
+
+@test "billing must be a mapping" {
+  f=$(printf 'version: 1\nbilling: 5\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"error: $f: billing must be a mapping"* ]]
+}
+
+@test "billing: unknown keys fail" {
+  f=$(printf 'version: 1\nbilling:\n  foo: 1\n  minutes: {bar: 1}\n  storage: {baz: 1}\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"error: $f: billing: unknown key foo"* ]]
+  [[ $stderr == *"error: $f: billing.minutes: unknown key bar"* ]]
+  [[ $stderr == *"error: $f: billing.storage: unknown key baz"* ]]
+}
+
+@test "billing.minutes and billing.storage must be mappings" {
+  f=$(printf 'version: 1\nbilling:\n  minutes: 1\n  storage: x\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"error: $f: billing.minutes must be a mapping"* ]]
+  [[ $stderr == *"error: $f: billing.storage must be a mapping"* ]]
+}
+
+@test "billing.minutes.included must be a positive integer" {
+  for v in 0 -1 1.5 abc; do
+    f=$(printf 'version: 1\nbilling:\n  minutes: {included: %s}\n' "$v" | mk bad.yml)
+    run --separate-stderr "$CONFIG" validate "$f"
+    [ "$status" -eq 1 ]
+    [[ $stderr == *"error: $f: billing.minutes.included must be a positive integer"* ]]
+  done
+}
+
+@test "billing thresholds must be a number from 1 to 100" {
+  for v in 0 0.5 101 abc; do
+    for k in minutes storage; do
+      f=$(printf 'version: 1\nbilling:\n  %s: {threshold: %s}\n' "$k" "$v" | mk bad.yml)
+      run --separate-stderr "$CONFIG" validate "$f"
+      [ "$status" -eq 1 ]
+      [[ $stderr == *"error: $f: billing.$k.threshold must be a number from 1 to 100"* ]]
+    done
+  done
+}
+
+@test "billing.storage.included-gb must be a positive number" {
+  for v in 0 -1 abc; do
+    f=$(printf 'version: 1\nbilling:\n  storage: {included-gb: %s}\n' "$v" | mk bad.yml)
+    run --separate-stderr "$CONFIG" validate "$f"
+    [ "$status" -eq 1 ]
+    [[ $stderr == *"error: $f: billing.storage.included-gb must be a positive number"* ]]
+  done
+}
+
 @test "ignores item must be a positive integer" {
   for v in 0 -2 1.5 abc; do
     f=$(printf 'version: 1\nignores:\n  - {repo: spali/x, check: unanswered, item: %s, reason: r}\n' "$v" | mk bad.yml)
