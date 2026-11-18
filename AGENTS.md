@@ -80,6 +80,7 @@ pull request closed
 |---|---|
 | `.github/release-drafter.yml` | autolabeler rules, categories, version rule, notes template |
 | `.github/workflows/pr.yml` | reusable; jobs `label`, `check`, `cleanup` |
+| `.github/workflows/image-cleanup.yml` | reusable; job `cleanup`; deletes `*-pr.*` and `*-next` image versions of a ghcr.io package, run by repositories with an image |
 | `.github/workflows/release-prepare.yml` | reusable; job `prepare`; outputs below |
 | `.github/workflows/release-publish.yml` | reusable; job `publish` |
 | `.github/workflows/monitor.yml` | reusable; job `monitor`; run by the private control repository |
@@ -94,6 +95,7 @@ pull request closed
 | `scripts/checksums.sh` | `checksums.txt` over the build files |
 | `scripts/publish.sh` | `release` / `next` / `pr`: create, replace, publish |
 | `scripts/cleanup-pr.sh` | delete `*-pr.<N>` releases and tags |
+| `scripts/image-cleanup.sh` | `tags=` output: tags of the existing `v*-pr.*` and `v*-next` releases without `v`, kept from deletion by the image cleanup |
 | `scripts/monitor*.sh` | maintenance monitor: `monitor.sh` runs `monitor-repos.sh` (inventory), the check scripts, `monitor-report.sh` and `monitor-issue.sh` (issue body plus one monitor comment, split at the report line `<!-- maintenance-monitor:details -->`); `monitor.sh PHASE` runs one of them (shared dir `MONITOR_WORK`); `monitor.sh matrix` prints the jobs per check group for the workflow matrix (`monitor.jobs`, `monitor.runs-on` of the control file), `MONITOR_REPO` limits a check phase to one repository (empty: all) |
 | `scripts/sync.sh` | fork and mirror sync: `matrix` (repositories, runner), `exists`, `create` (`sync-create.sh`), `repo` (kind check, `sync-settings.sh`, contribution branches, `sync-git.sh plan` and `push`); `scripts/managed-lib.sh` normalizes the `managed:` entries |
 | `docs/monitor-checks.md` | explanation of each monitor check, linked from the overview issue (one `## <check id>` section each, tested) |
@@ -127,6 +129,14 @@ Triggers of `release.yml`: push to `main`; push of tags
 `pr.yml` is called from `pull_request_target` with types `opened, reopened,
 edited, synchronize, labeled, unlabeled, closed` on base `main`, permissions
 `contents: write`, `pull-requests: write`.
+
+`image-cleanup.yml` (job `cleanup`) is called as a job after `publish` in
+`release.yml` (`needs: publish`) and after `pr` in `pr.yml` (`needs: pr`,
+`if: github.event.action == 'closed'`): input `package` (default: the
+repository name), caller permissions `contents: read`, `packages: write`. It
+deletes image tags `*-pr.*` and `*-next` that have no release any more,
+untagged and orphaned images; release tags are never touched. Repositories
+without an image do not call it.
 
 The reusable monitor workflows are part of the interface too.
 `monitor.yml` (job `monitor`): inputs `app-client-id` (required) and `config`
@@ -482,6 +492,9 @@ issue and the log of the failed step. Explanations for humans:
   `github.workflow_sha` describe the **caller**; `job.workflow_sha` /
   `job.workflow_ref` describe the called workflow. actionlint does not know the
   `job.workflow_*` properties yet (ignored in `.github/actionlint.yaml`).
+- Deleting ghcr.io package versions with `GITHUB_TOKEN` needs the repository to
+  have the Admin role in the package's "Manage Actions access"; otherwise the
+  `image-cleanup` job fails with 403.
 - Events caused by `GITHUB_TOKEN` (labels, tags created by API) start no new
   workflow runs.
 - Draft releases are not returned by the "release by tag" API; list releases.

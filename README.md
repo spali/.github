@@ -50,6 +50,7 @@ flowchart LR
 |---|---|
 | [`.github/release-drafter.yml`](.github/release-drafter.yml) | Labels, release note categories, version rule, notes template |
 | [`.github/workflows/pr.yml`](.github/workflows/pr.yml) | Reusable: label and check pull requests, delete dev builds of closed ones |
+| [`.github/workflows/image-cleanup.yml`](.github/workflows/image-cleanup.yml) | Reusable: delete the container images of closed pull requests and of superseded `-next` builds |
 | [`.github/workflows/release-prepare.yml`](.github/workflows/release-prepare.yml) | Reusable: update the draft, check a pushed tag, decide kind and version |
 | [`.github/workflows/release-publish.yml`](.github/workflows/release-publish.yml) | Reusable: checksums, attestation, publish |
 | [`.github/workflows/monitor.yml`](.github/workflows/monitor.yml), [`monitor-config.yml`](.github/workflows/monitor-config.yml) | Reusable: the [maintenance monitor](#maintenance-monitor) and the validation of its control file, called from a private control repository |
@@ -134,6 +135,16 @@ Started by hand on a pull request branch of this repository (not on forks):
 a pre-release `vX.Y.Z-pr.N` with the files, and a comment on the pull request
 with the link (updated on the next build). A new build for the same pull
 request replaces the old one; closing or merging the pull request deletes it.
+
+### Container images
+
+Repositories that publish a container image to ghcr.io can call
+[`image-cleanup.yml`](.github/workflows/image-cleanup.yml). It deletes the
+image tags `X.Y.Z-pr.N` and `X.Y.Z-next` once their pre-release is gone, plus
+untagged images that belong to no tagged image and orphaned attestations.
+Release images (`X.Y.Z`, `X.Y`, `X`, `latest`, exception versions) are never
+deleted. It is safe for multi-arch images. Repositories without an image need
+no change.
 
 ### Attestation
 
@@ -241,7 +252,7 @@ There is no bypass. Settings → Rules → Rulesets → `main` → Enforcement s
 
 ## Set up a new repository
 
-Works for any language. Steps 1–4 are files, 5–8 are settings.
+Works for any language. Steps 1–4 are files, 5–9 are settings.
 
 1. **Workflows:** copy [`examples/caller/pr.yml`](examples/caller/pr.yml) to
    `.github/workflows/pr.yml` and one of the release examples to
@@ -250,7 +261,9 @@ Works for any language. Steps 1–4 are files, 5–8 are settings.
      replace the `Build` step.
    - [`release-go.yml`](examples/caller/release-go.yml): Go with goreleaser.
 
-   Replace every `SHA # vX.Y.Z` with the commit and tag of the latest release
+   Repositories that publish a container image also add the two
+   `image-cleanup` jobs from the [interface](#interface). Replace every
+   `SHA # vX.Y.Z` with the commit and tag of the latest release
    of this repository:
    ```sh
    tag=$(gh release view --repo spali/.github --json tagName --jq .tagName)
@@ -323,6 +336,9 @@ Works for any language. Steps 1–4 are files, 5–8 are settings.
    ```
 8. **Renovate app:** make sure the Renovate GitHub app has access to the
    repository (GitHub → Settings → Applications → Renovate → Configure).
+9. **Image repositories only:** if the `image-cleanup` job cannot delete,
+   give the repository the Admin role in the package settings (Manage Actions
+   access).
 
 ## Interface
 
@@ -351,6 +367,28 @@ uploads all files to publish as the artifact **`release-assets`**
 **`release-publish.yml`** (needs `contents: write`, `pull-requests: write`,
 `id-token: write`, `attestations: write`, `artifact-metadata: write`): takes
 all outputs of `prepare` as inputs of the same name.
+
+**`image-cleanup.yml`** (needs `contents: read`, `packages: write`): input
+`package` (default: the repository name). Call it as a job `image-cleanup`:
+
+```yaml
+# release.yml
+  image-cleanup:
+    needs: publish
+    permissions:
+      contents: read
+      packages: write # delete image versions
+    uses: spali/.github/.github/workflows/image-cleanup.yml@SHA # vX.Y.Z
+
+# pr.yml
+  image-cleanup:
+    needs: pr
+    if: github.event.action == 'closed'
+    permissions:
+      contents: read
+      packages: write # delete image versions
+    uses: spali/.github/.github/workflows/image-cleanup.yml@SHA # vX.Y.Z
+```
 
 **`pr.yml`** (needs `contents: write`, `pull-requests: write`): called from
 `pull_request_target` with the types `opened, reopened, edited, synchronize,

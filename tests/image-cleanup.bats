@@ -30,7 +30,7 @@ releases() {
   [ "$(cat "$GITHUB_OUTPUT")" = "tags=" ]
 }
 
-@test "a draft next release is kept" {
+@test "the script lists draft releases too (gh release list includes them)" {
   echo '[{"tagName":"v1.3.0-next","isDraft":true},{"tagName":"v1.3.0","isDraft":false}]' |
     gh_respond 'release list *' -
   run "$SCRIPT"
