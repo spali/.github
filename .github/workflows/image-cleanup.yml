@@ -1,0 +1,73 @@
+# Reusable: delete the container images of closed pull requests and of
+# superseded main builds.
+#
+# Deletes the ghcr.io image tags matching *-pr.* and *-next, except those of
+# a release that still exists (the release flow deletes the pre-release of a
+# closed pull request and the older next releases), plus untagged and
+# orphaned images. Release images (X.Y.Z, X.Y, X, latest) are never deleted.
+#
+# Call it from the workflow that runs the pull request cleanup (closed) and
+# from the one that runs on pushes to main, after the release flow:
+#
+#   permissions:
+#     contents: read
+#     packages: write
+#   jobs:
+#     image-cleanup:
+#       uses: spali/.github/.github/workflows/image-cleanup.yml@v1
+#       with:
+#         package: my-image # default: the repository name
+#
+# The repository needs Admin access on the package (package settings, Manage
+# Actions access) to delete versions.
+name: Image cleanup
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: Name of the container package, defaults to the repository name
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-cleanup-${{ github.repository }}-${{ inputs.package || github.event.repository.name }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: cleanup
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write # delete image versions
+    steps:
+      - name: Checkout shared scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: spali/.github
+          ref: ${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
+          path: .release-flow
+          persist-credentials: false
+      - name: Tags to keep
+        id: keep
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: .release-flow/scripts/image-cleanup.sh
+      - name: Delete dev and next images
+        id: cleanup
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          token: ${{ github.token }}
+          owner: ${{ github.repository_owner }}
+          package: ${{ inputs.package || github.event.repository.name }}
+          delete-tags: "*-pr.*,*-next"
+          exclude-tags: ${{ steps.keep.outputs.tags }}
+          delete-untagged: true
+          delete-orphaned-images: true
