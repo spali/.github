@@ -68,17 +68,12 @@ run_script() {
 count() { jq -s --arg c "$1" 'map(select(.check == $c)) | length' "$FINDINGS"; }
 message() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | .[$i].message' "$FINDINGS"; }
 level() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | .[$i].level' "$FINDINGS"; }
-# A managed repository has Actions disabled by default: its fork approval
-# check is skipped, which is no finding of interest here.
-no_findings() { [ "$(jq -s 'map(select(.check != "settings-fork-approval" or .level != "skip")) | length' "$FINDINGS")" -eq 0 ]; }
 repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDINGS"; }
 
 @test "compliant managed fork has no findings" {
   run_script
-  no_findings
-  [ "$(count settings-fork-approval)" -eq 1 ]
-  [ "$(level settings-fork-approval)" = skip ]
-  [ "$(message settings-fork-approval)" = "Actions disabled" ]
+  [ ! -s "$FINDINGS" ]
+  run ! grep -q fork-pr-contributor-approval "$GH_LOG"
 }
 
 @test "records the checked repositories" {
@@ -130,7 +125,7 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
     has_issues: true, has_pull_requests: false, has_wiki: false, has_discussions: false, has_projects: false}'
   respond_jq "$ACT" '{enabled: true}'
   run_script
-  no_findings
+  [ ! -s "$FINDINGS" ]
 }
 
 @test "default branch behind upstream default is managed-behind" {
@@ -152,7 +147,7 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   respond_jq "$MAIN" "$(behind 1 2026-11-12T13:00:00Z)"
   respond_jq "$FEAT" "$(behind 1 2026-11-12T12:00:00Z)"
   run_script
-  no_findings
+  [ ! -s "$FINDINGS" ]
 }
 
 @test "behind more than 48 h is red, to the second" {
@@ -274,7 +269,7 @@ repo_of() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].repo' "$FINDIN
   respond_jq "$FEAT" "$(behind 2 2026-11-01T00:00:00Z)"
   run_script
   [ "$(count managed-behind)" -eq 0 ]
-  no_findings
+  [ ! -s "$FINDINGS" ]
 }
 
 @test "a PR head of another repository is still managed-behind" {
@@ -370,7 +365,7 @@ follow() {
   follow
   respond_jq '*compare/*...other' "$(behind 2 2026-11-01T00:00:00Z)"
   run_script
-  no_findings
+  [ ! -s "$FINDINGS" ]
   run ! grep -F 'other' "$GH_LOG"
 }
 
@@ -449,7 +444,7 @@ no_commit() { gh_fail "$MCMP$1" 'gh: Not Found (HTTP 404)'; }
   refs refs/heads/main:1 refs/tags/v1:2 refs/heads/extra:7 | git_respond "$TGT" -
   respond_jq "${MCMP}main...extra" '{ahead_by: 0}'
   run_script
-  no_findings
+  [ ! -s "$FINDINGS" ]
   run ! grep -vE '^api repos/spali/m(/actions/permissions|/compare/([0-9]{40}\.\.\.[0-9]{40}|main\.\.\.extra))?$' "$GH_LOG"
 }
 
@@ -471,7 +466,7 @@ no_commit() { gh_fail "$MCMP$1" 'gh: Not Found (HTTP 404)'; }
   refs refs/heads/main:1 refs/tags/v1:2 | git_respond "$SRC" -
   refs refs/heads/main:1 | git_respond "$TGT" -
   run_script
-  no_findings
+  [ ! -s "$FINDINGS" ]
 }
 
 @test "mirror pushed exactly 48 h ago is no finding" {
@@ -480,7 +475,7 @@ no_commit() { gh_fail "$MCMP$1" 'gh: Not Found (HTTP 404)'; }
   refs refs/heads/main:1 refs/tags/v1:2 | git_respond "$SRC" -
   refs refs/heads/main:1 | git_respond "$TGT" -
   run_script
-  no_findings
+  [ ! -s "$FINDINGS" ]
 }
 
 @test "mirror pushed 48 h and a second ago is red" {
@@ -628,7 +623,7 @@ behind_mirror() {
   : >"$GIT_LOG"
   jq '.managed[0].tags = false' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
   run_script
-  no_findings
+  [ ! -s "$FINDINGS" ]
   [ ! -s "$GIT_LOG" ]
 }
 

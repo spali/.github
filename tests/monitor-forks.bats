@@ -330,12 +330,10 @@ pr_aged() {
   [ "$(message settings-fork-approval)" = 'approval_policy: got "first_time_contributors", want "all_external_contributors"' ]
 }
 
-@test "fork with Actions disabled skips fork approval" {
+@test "fork with Actions disabled has no fork approval finding" {
   respond_jq "$PERMS" '{enabled: false}'
   run_script
-  [ "$(count settings-fork-approval)" -eq 1 ]
-  [ "$(level settings-fork-approval)" = skip ]
-  [ "$(message settings-fork-approval)" = "Actions disabled" ]
+  [ "$(count settings-fork-approval)" -eq 0 ]
   run ! grep -q fork-pr-contributor-approval "$GH_LOG"
 }
 

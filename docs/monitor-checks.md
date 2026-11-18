@@ -103,9 +103,9 @@ requests.
 
 🔴 Workflows of pull requests from forks run without approval. A fork pull
 request chooses its own `runs-on`, so it can pick a self-hosted runner.
-⚪ Not checked for private repositories and when Actions is disabled. Checked
-on all owned repositories (shown under Settings for central ones, else under
-their group).
+⚪ Not checked for private repositories. No finding when Actions is disabled
+(no workflow can run). Checked on all owned repositories (shown under Settings
+for central ones, else under their group).
 
 **Fix:** Settings → Actions → General → "Approval for running fork pull
 request workflows from contributors": *Require approval for all external

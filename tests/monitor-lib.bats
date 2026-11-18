@@ -249,10 +249,10 @@ gh_fail_raw() {
   [ ! -s "$GH_LOG" ]
 }
 
-@test "fork approval: Actions disabled is skipped" {
+@test "fork approval: Actions disabled is no finding" {
   echo '{"enabled":false}' | gh_respond '*actions/permissions' -
   check_fork_approval spali/x false
-  [ "$(jq -c . "$FINDINGS")" = '{"level":"skip","check":"settings-fork-approval","repo":"spali/x","message":"Actions disabled"}' ]
+  [ ! -s "$FINDINGS" ]
   ! grep -q fork-pr-contributor-approval "$GH_LOG"
 }
 
