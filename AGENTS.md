@@ -493,6 +493,9 @@ issue and the log of the failed step. Explanations for humans:
 | `contribution-stale` (info) | an open upstream pull request from a fork is older than 90 days (unmanaged forks) | follow up or close it |
 | `unmanaged` (info) | a non-archived repository in a synced mirrors list (`lists.mirrors.synced`) is not under `managed:` | add it to `managed:` or ignore |
 | `adoption` (info) | a repository (not a fork, not under `managed:`) does not use the release flow (one finding per repository) | adopt it (4.6) or ignore |
+| `billing-minutes` | private repositories (and repositories not in the inventory) used `billing.minutes.threshold` % (default 75) of the included Actions minutes (price-weighted, in Linux minutes; included from `billing:` or the plan), or from day 7 (UTC) the month-end projection reaches 100 % (account level) | move hosted jobs of the top repositories (`billing` line) to the self-hosted runner or run them less often; raise the threshold if expected |
+| `billing-storage` | the same for the average Actions storage (GB-hours; projection at yesterday's level) against `billing.storage` | delete old artifacts and caches or shorten their retention; raise the threshold if expected |
+| `billing` (info) | one status line per run: used and projected share of minutes and storage, top repositories; not a TODO entry; not checked without an account token | none |
 | `check-failed` | a check could not run (API error, rate limit, bad response, empty inventory) | read the detail, fix access or the script; never ignore |
 | `config-invalid` | the control file is missing or invalid, or names an unknown list/check | fix the file |
 | `ignore-unused` (info) | an ignore matched no finding | remove it, or fix the typo |

@@ -1,0 +1,8 @@
+{
+  "usageItems": [
+    {"date": "2026-11-16T00:00:00Z", "product": "actions", "sku": "Actions Linux", "quantity": 100.0, "unitType": "Minutes", "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0.6, "netAmount": 0.0, "repositoryName": "private-a"},
+    {"date": "2026-11-17T00:00:00Z", "product": "actions", "sku": "Actions Linux", "quantity": 200.0, "unitType": "Minutes", "pricePerUnit": 0.006, "grossAmount": 1.2, "discountAmount": 1.2, "netAmount": 0.0, "repositoryName": "private-a"},
+    {"date": "2026-11-17T00:00:00Z", "product": "actions", "sku": "Actions Linux", "quantity": 5000.0, "unitType": "Minutes", "pricePerUnit": 0.006, "grossAmount": 30.0, "discountAmount": 30.0, "netAmount": 0.0, "repositoryName": "public-b"},
+    {"date": "2026-11-17T00:00:00Z", "product": "actions", "sku": "Actions storage", "quantity": 0.1, "unitType": "GigabyteHours", "pricePerUnit": 0.00033602, "grossAmount": 0.000033602, "discountAmount": 0.000033602, "netAmount": 0.0, "repositoryName": "private-a"}
+  ]
+}

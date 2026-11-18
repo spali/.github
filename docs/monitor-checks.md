@@ -19,7 +19,8 @@ and sentence of each entry are in `MONITOR_TODO` in `scripts/monitor-lib.sh`.
 
 Groups: [Release flow](#release-flow) · [Settings](#settings) ·
 [Health](#health) · [Forks](#forks) · [Lists](#lists) ·
-[Managed repositories](#managed-repositories) · [Monitor](#monitor)
+[Managed repositories](#managed-repositories) · [Billing](#billing) ·
+[Monitor](#monitor)
 
 # Release flow
 
@@ -447,6 +448,65 @@ stopped ref: check upstream, then in the control repository run
 hold unsynced forks.
 
 **Fix:** add it to `managed:`, or ignore the finding with a reason.
+
+# Billing
+
+The included Actions quota of the account (Settings → Billing), checked once
+per run, not per repository. Only private repositories count (public ones use
+Actions for free); a repository of the usage that is not in the inventory
+(deleted, renamed, archived) counts as private and is marked
+`(not in inventory)`. The checks need an account token with Plan read access;
+without one the run lists ⚪ `billing` "no account token: billing not
+checked".
+
+Minutes weigh by price: the cost of all minutes (macOS and Windows cost more)
+divided by the price of a Linux minute, so the numbers read like GitHub's.
+Storage is a monthly average: GB-hours so far against the included GB over
+the elapsed hours. Projections (UTC month): minutes at the pace so far;
+storage at the level of yesterday (on day 1 the average so far) for the rest
+of the month. Included values come from the plan (Free: 2000 minutes and
+0.5 GB, Pro: 3000 and 2 GB; other plans need the block), thresholds default
+to 75 %. Set any of them in the control file:
+
+```yaml
+billing:
+  minutes:
+    included: 2000   # included minutes per month
+    threshold: 75    # percent
+  storage:
+    included-gb: 0.5 # included storage (monthly average)
+    threshold: 75    # percent
+```
+
+## billing-minutes
+
+🔴 The private repositories used `billing.minutes.threshold` percent of the
+included minutes, or (from day 7 of the month) the projection to month end
+reaches 100 % (`Actions minutes at 80 % of the included 2000 (1600),
+projected 137 % by month end`).
+
+**Fix:** the `billing` line names the top repositories: move their hosted
+jobs to a self-hosted runner or run them less often. Raise
+`billing.minutes.threshold` if the usage is expected.
+
+## billing-storage
+
+🔴 The average Actions storage (artifacts and caches) of the private
+repositories reached `billing.storage.threshold` percent of the included
+storage, or (from day 7) the projection to month end reaches 100 %.
+
+**Fix:** the `billing` line names the top repositories: delete old artifacts
+and caches or shorten their retention. Raise `billing.storage.threshold` if
+the usage is expected.
+
+## billing
+
+🔵 One line per run with the numbers, also without a red finding, to see the
+trend: `Actions minutes 15 % (300 of 2000, projected 26 %) · storage 0 %
+(<1 MB of 500 MB, projected 0 %) · top: private-a 300 min · top storage:
+private-a <1 MB`. Not a TODO entry. ⚪ Not checked without an account token.
+
+**Fix:** nothing to do; act on `billing-minutes` or `billing-storage`.
 
 # Monitor
 
