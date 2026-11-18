@@ -20,7 +20,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 # $docs (URL of the check explanations), $control (URL of the control file,
 # may be empty), $todo (MONITOR_TODO), $now (time of the summary line), $run
 # (URL of the run, may be empty). Prints {markdown, red}.
-# Layout: summary line, TODO (one entry per check and category), Overview
+# Layout: summary line, TODO (one entry per check and category, without the
+# checks marked "todo": false), Overview
 # (repository × area; only with an inventory), Red, Info, Clean, Not checked.
 # Each section has an explicit anchor on its own line above the heading, then
 # <br> and an empty line (keeps the heading clear of the sticky issue header):
@@ -113,9 +114,10 @@ $cfg[0] as $cfg | . as $f
          | join("\n")) + "\n";
   # TODO: one entry per check with red findings (Fix now) and per check with
   # info findings (category of MONITOR_TODO, Clean up if unknown), in the
-  # order Fix now, Decide, Clean up, then by check.
+  # order Fix now, Decide, Clean up, then by check. A check whose entry has
+  # "todo": false (a status line, nothing to do) stays out of the TODO.
   ({fix: ["🔴", "Fix now", 0], decide: ["🤔", "Decide", 1], cleanup: ["🧹", "Clean up", 2]}) as $cats
-| ($listed | group_by(.level, .check)
+| ($listed | map(select($todo[.check].todo != false)) | group_by(.level, .check)
     | map(.[0] as $x | ($todo[$x.check] // {}) as $t
         | {check: $x.check, rows: map(del(.anchor)), title: ($t.title // $x.check), text: ($t.text // ""),
            cat: (if $x.level == "red" then "fix" elif $t.category == "decide" then "decide" else "cleanup" end)})

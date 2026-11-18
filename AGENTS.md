@@ -335,6 +335,16 @@ a red finding is open. Code: `scripts/monitor*.sh` in `spali/.github`.
    required. Remove an ignore that is reported as `ignore-unused`.
 5. Re-run: `gh workflow run monitor.yml` in the control repository.
 
+Billing findings (`billing-minutes`, `billing-storage`, `billing`) have no
+repository: they concern the whole account and come from the phase `billing`
+in the Lists job. It reads with the optional secret `account-token` of
+`monitor.yml` (fine-grained token of the owner, account permission Plan:
+read), passed to the script as `BILLING_TOKEN`; without it `billing` is not
+checked. Locally: `BILLING_TOKEN=<that token>` with the phases `config`,
+`inventory`, `billing` (the API answers only for the owner's own token). A
+`check-failed` "billing: …" with HTTP 401/403 means the token expired or lacks
+Plan: read: renew it in the control repository.
+
 Never weaken or delete a check, widen a threshold, or add a "not applicable"
 answer just to get green. A check that cannot run is `check-failed`, not a
 pass.
@@ -356,6 +366,15 @@ pass.
   select different repositories; never change it to pass, fix the selection.
 - A new check id needs its entry in `MONITOR_TODO` (`scripts/monitor-lib.sh`:
   category of its info findings, TODO title, one sentence, areas); tested.
+  `"todo": false` keeps a pure status line (like `billing`) out of the TODO;
+  it is still listed under Info.
+- Account-level checks (`lists`, `billing`) are phases in the Lists job, one
+  step each (`monitor.sh <phase>`), not matrix jobs: they see the whole
+  inventory, and `MONITOR_REPO` with them is a usage error (exit 2). A new one
+  needs its name in `PHASES` and `CHECKS` of `scripts/monitor.sh`, the same
+  usage error, and a step in the Lists job. A token it needs beyond the app
+  token is an optional secret of `monitor.yml` (as `account-token`), passed to
+  that step only; never put it into the job env.
 - Never add a second workflow for another job layout.
 
 ### 4.11 Add or change a managed repository

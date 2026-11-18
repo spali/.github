@@ -52,7 +52,7 @@ BILLING_JQ='
   (if $day == 1 then $avg
    else [$gb_items[] | select(.date[0:10] == $yesterday) | .quantity] | add // 0 | . / 24 end) as $level |
   (div($gbh * 100; $gb * $e)) as $gb_pct |
-  (($gbh + $level * ($month_h - $e)) * 100 / ($gb * $month_h)) as $gb_proj |
+  (div(($gbh + $level * ($month_h - $e)) * 100; $gb * $month_h)) as $gb_proj |
   def top(f; unit): group_by(shown) | map({n: .[0] | shown, v: (map(f) | add)}) |
     sort_by(-.v) | .[:3] | map("\(.n) \(.v | unit)") | join(", ");
   (if ($min_pct | r) >= $min_threshold or ($day >= 7 and ($min_proj | r) >= 100) then
