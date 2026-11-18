@@ -11,6 +11,15 @@
 #                     reasons ff, rebase, mirror, delete, backup, record) and
 #                     $WORK/skipped.txt (<ref> <why>). Fails without a plan on
 #                     a conflict, a missing onto or an empty source.
+#                     The upstream default branch goes to the target default
+#                     branch. When their names differ (upstream renamed it)
+#                     and the target default is neither declared nor a
+#                     contribution branch and has no commit beyond the
+#                     upstream default (upstream's name neither), it goes to
+#                     the branch of upstream's name instead, the old default
+#                     branch is left alone, and when that branch is at
+#                     upstream after the push $WORK/default.txt holds its
+#                     name: the caller makes it the default branch.
 #                     A record (${RECORD_PREFIX}<branch>) holds the upstream
 #                     sha a synced branch sits on: the upstream sha of a
 #                     fast-forwarded, mirrored or already equal default or
@@ -153,6 +162,15 @@ default_branch() {
   name=${name#refs/heads/}
   [[ -z $name ]] || valid_branch "$name" || die "invalid default branch of $2"
   printf '%s\n' "$name"
+}
+
+# aligns TDEF UDEF succeeds when the upstream default UDEF may replace the
+# target default TDEF: neither is declared or a contribution branch and TDEF
+# is missing or has no commit beyond the upstream default.
+aligns() {
+  local old=${TGR[heads/$1]:-}
+  [[ -z ${DECL[$1]:-}${CONTRIB[$1]:-}${DECL[$2]:-}${CONTRIB[$2]:-} ]] || return 1
+  [[ -z $old ]] || is_ancestor "$old" "${UPR[heads/$2]}"
 }
 
 wants_rebase() {
@@ -382,7 +400,7 @@ in_scope() {
 }
 
 plan() {
-  local name onto how key up tg tdef udef n u sha fol
+  local name onto how key up tg tdef udef def n u sha fol
   local -a keys
   need_env ENTRY TARGET_URL UPSTREAM_URL WORK GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
   [[ -d $WORK ]] || die "WORK $WORK is not a directory"
@@ -395,7 +413,7 @@ plan() {
 
   REPO=$WORK/repo
   PLAN_TMP=$WORK/plan.tsv.tmp
-  rm -f "$WORK/plan.tsv" "$PLAN_TMP"
+  rm -f "$WORK/plan.tsv" "$WORK/default.txt" "$PLAN_TMP"
   trap 'rm -f "$PLAN_TMP"' EXIT
   : >"$PLAN_TMP"
   : >"$WORK/skipped.txt"
@@ -476,28 +494,38 @@ plan() {
     | map((. // "") | tostring | explode | map(if . < 32 or . == 127 then 63 else . end) | implode) | join("\u001f")' <<<"$ENTRY")
 
   [[ -n $udef && -n ${UPR[heads/$udef]:-} ]] || die "upstream default branch missing"
-  if [[ -n ${DECL[$tdef]:-} ]]; then
+  # def: the target branch the upstream default goes to; upstream's name
+  # when upstream renamed its default branch and nothing is lost
+  def=$tdef
+  if [[ $udef != "$tdef" ]] && aligns "$tdef" "$udef"; then
+    def=$udef
+  fi
+  if [[ -n ${DECL[$def]:-} ]]; then
     :
-  elif [[ -n ${CONTRIB[$tdef]:-} ]]; then
-    skip "refs/heads/$tdef" contribution
+  elif [[ -n ${CONTRIB[$def]:-} ]]; then
+    skip "refs/heads/$def" contribution
   else
     up=${UPR[heads/$udef]}
-    tg=${TGR[heads/$tdef]:-$ZERO}
+    tg=${TGR[heads/$def]:-$ZERO}
     if [[ $tg == "$ZERO" ]] || { [[ $tg != "$up" ]] && is_ancestor "$tg" "$up"; }; then
-      add "refs/heads/$tdef" "$tg" "$up" ff
-      record_line "$tdef" "$up"
-    elif [[ $tg != "$up" ]] && rewritten "$tdef" "$up"; then
-      rewrite_branch "$tdef" "$up" "$tg" ff
+      add "refs/heads/$def" "$tg" "$up" ff
+      record_line "$def" "$up"
+    elif [[ $tg != "$up" ]] && rewritten "$def" "$up"; then
+      rewrite_branch "$def" "$up" "$tg" ff
     elif [[ $tg != "$up" ]]; then
-      skip "refs/heads/$tdef" undeclared
+      skip "refs/heads/$def" undeclared
     else
-      record_line "$tdef" "$up"
+      record_line "$def" "$up"
     fi
+  fi
+  # the new default branch, unless it was skipped (it stays where it is)
+  if [[ $def != "$tdef" ]] && ! awk -F'\t' -v r="refs/heads/$def" '$1 == r { f = 1 } END { exit !f }' "$WORK/skipped.txt"; then
+    printf '%s\n' "$def" >"$WORK/default.txt"
   fi
   # followed branches: fast-forward or create by name
   mapfile -t keys < <(sorted_keys FOL)
   for name in "${keys[@]}"; do
-    [[ $name != "$tdef" && -z ${DECL[$name]:-} ]] || continue
+    [[ $name != "$def" && -z ${DECL[$name]:-} ]] || continue
     up=${UPR[heads/$name]:-}
     tg=${TGR[heads/$name]:-$ZERO}
     [[ -n $up ]] || continue
@@ -516,10 +544,11 @@ plan() {
       record_line "$name" "$up"
     fi
   done
-  # followed target branches gone upstream (the default branch never)
+  # followed target branches gone upstream (the default branch never, nor
+  # the old one in the run that moves the default)
   mapfile -t keys < <(sorted_keys SCOPE)
   for name in "${keys[@]}"; do
-    [[ $name != "$tdef" && -z ${DECL[$name]:-} && -z ${UPR[heads/$name]:-} && -n ${TGR[heads/$name]:-} ]] || continue
+    [[ $name != "$tdef" && $name != "$def" && -z ${DECL[$name]:-} && -z ${UPR[heads/$name]:-} && -n ${TGR[heads/$name]:-} ]] || continue
     if [[ -n ${CONTRIB[$name]:-} ]]; then
       skip "refs/heads/$name" contribution
     elif contained "${TGR[heads/$name]}"; then

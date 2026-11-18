@@ -362,8 +362,14 @@ REC=refs/sync/upstream
   entry fork
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ "$(synced)" = "$(printf 'refs/heads/master\t%s\t%s\tff' "$A" "$B")" ]
-  # diverged: skipped, upstream main is not created
+  # renamed upstream default: main is created, master stays, the default
+  # moves to main after the push
+  [ "$(synced)" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$ZERO" "$B")" ]
+  [ "$(plan_line "$REC/main")" = "$(printf '%s\t%s\trecord' "$ZERO" "$B")" ]
+  no_record master
+  [ ! -s "$WORK/skipped.txt" ]
+  [ "$(cat "$WORK/default.txt")" = main ]
+  # diverged: skipped, upstream main is not created, the default stays
   fresh_work
   set_ref "$TG" refs/heads/master "$(commit "$A" o own)"
   run "$SCRIPT" plan
@@ -371,6 +377,89 @@ REC=refs/sync/upstream
   [ -z "$(synced)" ]
   no_record master
   [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/master\tundeclared')" ]
+  [ ! -e "$WORK/default.txt" ]
+}
+
+@test "same default branch writes no default switch" {
+  set_ref "$TG" refs/heads/main "$A"
+  entry fork
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(synced)" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$A" "$B")" ]
+  [ ! -e "$WORK/default.txt" ]
+  # also not for an empty target (no default branch yet)
+  fresh_work
+  del_ref "$TG" refs/heads/main
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(synced)" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$ZERO" "$B")" ]
+  [ ! -e "$WORK/default.txt" ]
+}
+
+@test "renamed upstream default: existing target branch is fast-forwarded" {
+  git -C "$TG" symbolic-ref HEAD refs/heads/master
+  set_ref "$TG" refs/heads/master "$B"
+  set_ref "$TG" refs/heads/main "$A"
+  entry mirror
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(synced)" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$A" "$B")" ]
+  [ "$(cat "$WORK/default.txt")" = main ]
+}
+
+@test "renamed upstream default: target branch with own commits keeps the default" {
+  git -C "$TG" symbolic-ref HEAD refs/heads/master
+  set_ref "$TG" refs/heads/master "$A"
+  set_ref "$TG" refs/heads/main "$(commit "$A" o own)"
+  entry mirror
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ -z "$(synced)" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/main\tundeclared')" ]
+  [ ! -e "$WORK/default.txt" ]
+}
+
+@test "declared target default branch keeps the default" {
+  git -C "$TG" symbolic-ref HEAD refs/heads/master
+  set_ref "$TG" refs/heads/master "$A"
+  entry fork '[{"name": "master", "onto": "main", "rebase": "auto"}]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(plan_line refs/heads/master)" = "$(printf '%s\t%s\trebase' "$A" "$B")" ]
+  [ -z "$(plan_line refs/heads/main)" ]
+  [ ! -e "$WORK/default.txt" ]
+}
+
+@test "declared upstream default name keeps the target default" {
+  git -C "$TG" symbolic-ref HEAD refs/heads/master
+  set_ref "$TG" refs/heads/master "$A"
+  set_ref "$TG" refs/heads/main "$A"
+  entry fork '[{"name": "main", "onto": "main", "rebase": "manual"}]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(synced)" = "$(printf 'refs/heads/master\t%s\t%s\tff' "$A" "$B")" ]
+  [ ! -e "$WORK/default.txt" ]
+}
+
+@test "old default branch still upstream and followed is synced by name" {
+  set_ref "$UP" refs/heads/master "$A"
+  git -C "$TG" symbolic-ref HEAD refs/heads/master
+  set_ref "$TG" refs/heads/master "$A"
+  entry mirror '[]' '[".*"]'
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ "$(synced)" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$ZERO" "$B")" ]
+  [ "$(plan_line "$REC/master")" = "$(printf '%s\t%s\trecord' "$ZERO" "$A")" ]
+  [ "$(cat "$WORK/default.txt")" = main ]
+}
+
+@test "stale default switch of an earlier plan is removed" {
+  set_ref "$TG" refs/heads/main "$A"
+  echo old >"$WORK/default.txt"
+  entry fork
+  run "$SCRIPT" plan
+  [ "$status" -eq 0 ]
+  [ ! -e "$WORK/default.txt" ]
 }
 
 @test "contribution branches are never planned without follow" {
@@ -1159,8 +1248,10 @@ up_refs() {
   entry fork '[]' '["master"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ -z "$(synced)" ]
+  # the default moves to main; the old default master is kept in this run
+  [ "$(synced)" = "$(printf 'refs/heads/main\t%s\t%s\tff' "$ZERO" "$B")" ]
   [ ! -s "$WORK/skipped.txt" ]
+  [ "$(cat "$WORK/default.txt")" = main ]
 }
 
 @test "invalid follow pattern fails without plan" {

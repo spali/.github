@@ -410,6 +410,14 @@ The workflow `sync.yml` runs daily (04:47 UTC) and on every change of
    (e.g. release branches), add a pattern to `follow:`; all branches:
    `follow: ['.*']`. `tags: false` leaves the tags alone (neither fetched
    nor touched). The key `refs` no longer exists (`unknown key refs`).
+11. A renamed upstream default branch (e.g. `master` to `main`) is synced
+   into the branch of upstream's name and, after the push, made the
+   default branch (log and summary: `default branch: master -> main`); the
+   old branch is not deleted. It stays the default (and gets upstream's
+   default as before) when it is declared or has commits beyond the
+   upstream default; delete or declare it with the owner first. A failed
+   change (`default branch failed`) fails the run; re-run after the cause
+   (e.g. missing Administration write) is fixed.
 
 ## 5. Error catalog
 
