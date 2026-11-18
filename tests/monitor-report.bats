@@ -334,6 +334,7 @@ J
 {"level":"red","check":"renovate-stale","repo":"o/r","message":"m"}
 {"level":"info","check":"list-none","repo":"o/r","message":"m"}
 {"level":"info","check":"fork-behind","repo":"o/r","message":"m"}
+{"level":"red","check":"settings-fork-approval","repo":"o/fa","message":"m"}
 J
   run "$REPORT"
   [[ $output == *"[Releases](https://github.com/o/r/releases)"* ]]
@@ -341,6 +342,7 @@ J
   [[ $output == *"[Renovate PRs](https://github.com/o/r/pulls?q=is%3Apr+is%3Aopen+author%3Aapp%2Frenovate)"* ]]
   [[ $output == *"[Security settings](https://github.com/o/r/settings/security_analysis)"* ]]
   [[ $output == *"[Actions settings](https://github.com/o/r/settings/actions)"* ]]
+  [[ $output == *"[Actions settings](https://github.com/o/fa/settings/actions)"* ]]
   [[ $output == *"[Rulesets](https://github.com/o/r/settings/rules)"* ]]
   [[ $output == *"[Actions](https://github.com/o/r/actions)"* ]]
   [[ $output == *"[Dependabot](https://github.com/o/r/security/dependabot)"* ]]

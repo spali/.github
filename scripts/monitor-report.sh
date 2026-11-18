@@ -54,7 +54,7 @@ $cfg[0] as $cfg | . as $f
       elif $c == "pin-behind" or $c == "renovate-stale" then ["Renovate PRs", "\($r | gh)/pulls?q=is%3Apr+is%3Aopen+author%3Aapp%2Frenovate"]
       elif $c == "settings-merge" then ["Settings", "\($r | gh)/settings"]
       elif $c == "settings-alerts" or $c == "settings-pvr" then ["Security settings", "\($r | gh)/settings/security_analysis"]
-      elif $c == "settings-actions" then ["Actions settings", "\($r | gh)/settings/actions"]
+      elif $c == "settings-actions" or $c == "settings-fork-approval" then ["Actions settings", "\($r | gh)/settings/actions"]
       elif $c == "ruleset-main" or $c == "ruleset-tags" then ["Rulesets", "\($r | gh)/settings/rules"]
       elif $c == "main-red" or $c == "workflow-disabled" or $c == "fork-workflows-active" then ["Actions", "\($r | gh)/actions"]
       elif $c == "unanswered" then ["Issues", "\($r | gh)/issues"]
