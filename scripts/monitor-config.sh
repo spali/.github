@@ -18,6 +18,8 @@ to_json() {
 # shellcheck disable=SC2016 # jq program, no shell expansion wanted
 VALIDATE_JQ='
 def repo_ok: type == "string" and test("^spali/[A-Za-z0-9._-]+$");
+# an IANA time zone name (no path tricks); that it exists is checked in the shell
+def tz_ok: type == "string" and test("^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$");
 def posint: type == "number" and . == floor and . > 0;
 def pct: type == "number" and . >= 1 and . <= 100;
 def list_of($k): if has($k) then (.[$k] | if type == "array" then . else [] end) else [] end;
@@ -36,7 +38,7 @@ def need($e; $k; $path; test_):
 
 if type != "object" then "top level must be a mapping" else
   (if .version != 1 then "version must be 1" else empty end),
-  (keys[] | select(IN("version", "monitor", "lists", "forks", "ignores", "unanswered", "billing") | not)
+  (keys[] | select(IN("version", "monitor", "lists", "forks", "ignores", "unanswered", "billing", "report") | not)
     | "unknown key \(.)"),
   (if has("monitor") and (.monitor | type) != "object" then "monitor must be a mapping" else empty end),
   (if (.monitor | type) == "object" then
@@ -53,6 +55,12 @@ if type != "object" then "top level must be a mapping" else
      (.unanswered | keys[] | select(. != "days") | "unanswered: unknown key \(.)"),
      (.unanswered | if has("days") and (.days | posint | not)
        then "unanswered.days must be a positive integer" else empty end)
+   else empty end),
+  (if has("report") and (.report | type) != "object" then "report must be a mapping" else empty end),
+  (if (.report | type) == "object" then
+     (.report | keys[] | select(. != "timezone") | "report: unknown key \(.)"),
+     (.report | if has("timezone") and (.timezone | tz_ok | not)
+       then "report.timezone must be a time zone name like UTC or Europe/Zurich" else empty end)
    else empty end),
   (if has("billing") and (.billing | type) != "object" then "billing must be a mapping" else empty end),
   (if (.billing | type) == "object" then
@@ -152,6 +160,16 @@ if type != "object" then "top level must be a mapping" else
     | "\(.repo) \(.check)\(if has("item") then " \(.item)" else "" end)"] | group_by(.)[] | select(length > 1) | "duplicate ignore \(.[0])")
 end'
 
+# tz_problem JSON prints a problem line if report.timezone has a valid form but
+# is no time zone of the system's zoneinfo database (date would silently use UTC).
+tz_problem() {
+  local tz
+  tz=$(jq -r '.report.timezone? // empty | strings
+    | select(test("^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$"))' <<<"$1" 2>/dev/null) || return 0
+  [[ -z $tz || $tz == UTC || -f /usr/share/zoneinfo/$tz ]] && return 0
+  printf '\nreport.timezone: unknown time zone %s' "$tz"
+}
+
 cmd_validate() {
   local file=${1:-} json problems
   [[ -n $file ]] || die "usage: validate FILE"
@@ -159,6 +177,8 @@ cmd_validate() {
   problems=$(jq -r \
     --argjson checks "$(printf '%s\n' "${MONITOR_CHECKS[@]}" | jq -R . | jq -sc .)" \
     "$VALIDATE_JQ" <<<"$json")
+  problems+=$(tz_problem "$json")
+  problems=${problems#$'\n'}
   [[ -z $problems ]] && return 0
   while IFS= read -r line; do
     printf 'error: %s: %s\n' "$file" "$line" >&2

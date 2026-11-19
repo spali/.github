@@ -9,6 +9,7 @@
 # is no overview and no section of clean repositories), MONITOR_NOW (epoch,
 # default now: the time in the summary line), GITHUB_SERVER_URL,
 # GITHUB_REPOSITORY, GITHUB_RUN_ID (optional, all three: link to the run),
+# report.timezone of CONFIG (default UTC: the time zone of the summary line),
 # FORK_KINDS (optional: JSON lines of monitor-forks.sh record_kind, the kind
 # of each fork or mirror; without it there is no section of forks).
 # Exit status: 1 if a red finding is left, else 0.
@@ -230,7 +231,7 @@ $cfg[0] as $cfg | . as $f
 
 main() {
   need_env FINDINGS CONFIG
-  local result now run='' inv=(--argjson inv '[]') kinds='[]'
+  local result now tz run='' inv=(--argjson inv '[]') kinds='[]'
   # a missing or broken inventory means none: no section of clean repositories
   if [[ -n ${INVENTORY:-} ]] && jq -e 'type == "array"' "$INVENTORY" >/dev/null 2>&1; then
     inv=(--slurpfile inv "$INVENTORY")
@@ -239,7 +240,9 @@ main() {
   if [[ -n ${FORK_KINDS:-} && -r $FORK_KINDS ]]; then
     kinds=$(jq -cs '[.[] | objects]' "$FORK_KINDS" 2>/dev/null) || kinds='[]'
   fi
-  now=$(date -u -d "@${MONITOR_NOW:-$(date -u +%s)}" '+%Y-%m-%d %H:%M UTC')
+  # the time zone of the summary line (validated by monitor-config.sh), else UTC
+  tz=$(jq -r '.report.timezone? // "UTC" | strings' "$CONFIG" 2>/dev/null) || tz=''
+  now=$(TZ=${tz:-UTC} date -d "@${MONITOR_NOW:-$(date -u +%s)}" '+%Y-%m-%d %H:%M %Z')
   if [[ -n ${GITHUB_SERVER_URL:-} && -n ${GITHUB_REPOSITORY:-} && -n ${GITHUB_RUN_ID:-} ]]; then
     run=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
   fi
