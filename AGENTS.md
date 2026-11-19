@@ -493,13 +493,14 @@ issue and the log of the failed step. Explanations for humans:
 | `devbuild-closed-pr` | a `-pr.N` pre-release exists for a closed pull request | `gh release delete <tag> --cleanup-tag --yes` |
 | `orphan-tag` | a `-next`/`-pr.N` tag without release | delete the tag (`git push --delete origin <tag>`) |
 | `several-drafts` | more than one draft release | ask the owner which to delete |
-| `next-stale` | `-next` pre-release older than the latest release | re-run the build on `main`, or delete it |
+| `next-stale` | `-next` pre-release published before the latest release | re-run the build on `main`, or delete it |
 | `pin-behind` | a caller (including the control repository's monitor pin) pins a `spali/.github` release older than a newer one (older than 7 days) | merge or fix the Renovate PR |
 | `settings-merge` | merge options differ from README "Set up", step 6 (all own repositories that are neither forks nor under `forks:`) | fix the setting (owner approval) |
 | `settings-alerts` | Dependabot alerts are off | enable them (owner approval) |
 | `settings-pvr` | private vulnerability reporting is off (public repo) | enable it (owner approval) |
 | `settings-actions` | default workflow permissions are not read-only, or Actions may approve PRs | fix the setting (owner approval) |
 | `settings-fork-approval` | fork pull request workflows of outside contributors run without approval (public repository with Actions on; all owned repositories) | require approval for all external contributors (owner approval) |
+| `funding` (info) | the sponsor button does not match: off in an own repository with a `FUNDING.yml`, or on in a fork or mirror (its `FUNDING.yml` is the upstream's) | turn *Sponsorships* on or off (owner approval) |
 | `ruleset-main` | the `main` ruleset is missing or differs (README step 7); not checked on private repositories under the Free plan | restore it (owner approval) |
 | `ruleset-tags` | the tag ruleset is missing or differs; not checked on private repositories under the Free plan | restore it (owner approval) |
 | `main-red` | the latest run of a workflow on the default branch failed (the monitor's own workflow in the control repository is not checked) | fix the cause, re-run |

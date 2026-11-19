@@ -30,6 +30,7 @@ REPO='*api repos/spali/f'
 ACT='*repos/spali/f/actions/permissions'
 APPROVAL='*repos/spali/f/actions/permissions/fork-pr-contributor-approval'
 UP='*api repos/up/f'
+FUNDING='*graphql*fundingLinks*owner=spali*name=f'
 TB='*repos/spali/f/branches?per_page=100 --paginate'
 UB='*repos/up/f/branches?per_page=100 --paginate'
 # open pulls are looked up per target branch: PRS answers every branch,
@@ -52,6 +53,7 @@ run_script() {
     has_issues: false, has_pull_requests: false, has_wiki: false, has_discussions: false, has_projects: false}'
   respond_jq "$ACT" '{enabled: false}'
   respond_jq "$APPROVAL" '{approval_policy: "all_external_contributors"}'
+  respond_jq "$FUNDING" '{data: {repository: {hasSponsorshipsEnabled: false, fundingLinks: [{platform: "GITHUB"}]}}}'
   respond_jq "$UP" '{default_branch: "dev"}'
   jq -nc --arg a "$(sha 1)" --arg b "$(sha 2)" --arg c "$(sha 3)" \
     '[{name: "main", commit: {sha: $a}}, {name: "feat", commit: {sha: $b}}, {name: "wip", commit: {sha: $c}}]' |
@@ -363,7 +365,7 @@ no_commit() { gh_fail "$MCMP$1" 'gh: Not Found (HTTP 404)'; }
   respond_jq "${MCMP}main...extra" '{ahead_by: 0}'
   run_script
   [ ! -s "$FINDINGS" ]
-  run ! grep -vE '^api repos/spali/m(/actions/permissions|/compare/([0-9]{40}\.\.\.[0-9]{40}|main\.\.\.extra))?$' "$GH_LOG"
+  run ! grep -vE '^api (repos/spali/m(/actions/permissions|/compare/([0-9]{40}\.\.\.[0-9]{40}|main\.\.\.extra))?|graphql -f query=.*fundingLinks.* -f owner=spali -f name=m)$' "$GH_LOG"
 }
 
 @test "mirror tags behind is red" {
@@ -725,10 +727,10 @@ kinds() { jq -sc 'map([.repo, .kind, .pinned, .own, .pulls, .upstream])' "$FORK_
   run_script
   # a mirror: own commits and past pull requests are not known
   [ "$(jq -sc 'map([.repo, .kind, .pinned, .own, .merged, .closed])' "$FORK_KINDS")" = '[["spali/m","unknown",false,null,null,null]]' ]
-  run ! grep -q graphql "$GH_LOG"
+  run ! grep -q -- '-f merged=' "$GH_LOG"
 }
 
-PAST='*api graphql -f query=*'
+PAST='*api graphql -f query=* -f merged=*'
 
 @test "a fork records the past pull requests of its owner upstream" {
   export FORK_KINDS="$BATS_TEST_TMPDIR/kinds.jsonl"
@@ -736,7 +738,7 @@ PAST='*api graphql -f query=*'
   run_script
   [ "$(jq -sc 'map([.kind, .merged, .closed])' "$FORK_KINDS")" = '[["unchanged",3,1]]' ]
   # one call, two searches by the owner of the fork in its parent
-  [ "$(grep -c 'api graphql' "$GH_LOG")" -eq 1 ]
+  [ "$(grep -c -- '-f merged=' "$GH_LOG")" -eq 1 ]
   grep -qF -- '-f merged=repo:up/f is:pr author:spali is:merged -f closed=repo:up/f is:pr author:spali is:closed is:unmerged' "$GH_LOG"
 }
 
@@ -759,6 +761,22 @@ PAST='*api graphql -f query=*'
 @test "without FORK_KINDS nothing is recorded" {
   run_script
   # nor are the past pull requests looked up
-  run ! grep -q graphql "$GH_LOG"
+  run ! grep -q -- '-f merged=' "$GH_LOG"
   [ ! -e "$BATS_TEST_TMPDIR/kinds.jsonl" ]
+}
+
+@test "funding: the sponsor button on in a fork is info" {
+  respond_jq "$FUNDING" '{data: {repository: {hasSponsorshipsEnabled: true, fundingLinks: []}}}'
+  run_script
+  [ "$(count funding)" -eq 1 ]
+  [ "$(level funding)" = info ]
+  [ "$(message funding)" = "the sponsor button is on in a fork or mirror" ]
+  [ "$(repo_of funding)" = spali/f ]
+}
+
+@test "funding: a pinned mirror is checked too" {
+  echo '{"version": 1, "forks": [{"repo": "spali/f", "upstream": "https://example.org/f.git", "pinned": true}]}' >"$CONFIG"
+  respond_jq "$FUNDING" '{data: {repository: {hasSponsorshipsEnabled: true, fundingLinks: []}}}'
+  run_script
+  [ "$(count funding)" -eq 1 ]
 }

@@ -2,7 +2,7 @@
 # Checks of the forks and mirrors (fork_entries: the entries of `forks:` and
 # the inventory forks). Synced ones: fork-missing, fork-settings, fork-behind
 # (branches and, unless tags is false, tags), rebase-pending; pinned ones are
-# not synced and get none of these. All: settings-fork-approval, and forks on
+# not synced and get none of these. All: settings-fork-approval, funding, and forks on
 # GitHub stale-branch (pull requests upstream), fork-delete-candidate and
 # contribution-stale. sync-failed runs once, in monitor-lists.sh.
 # Writes findings, and the kind of each fork or mirror to FORK_KINDS (see
@@ -416,6 +416,7 @@ check_repo() {
     return 0
   fi
   check_fork_approval "$repo" "$PRIVATE"
+  check_funding "$repo" fork
   if ! entry=$(with_upstream "$entry" "$info"); then
     finding red check-failed "$repo" 'fork-behind: no upstream: not a fork on GitHub, set upstream under `forks:`'
     return 0
