@@ -74,7 +74,7 @@ mk() {
 }
 
 @test "lists are allowed" {
-  f=$(printf 'version: 1\nlists: {archived: [a]}\n' | mk ok.yml)
+  f=$(printf 'version: 1\nlists: {external: [a]}\n' | mk ok.yml)
   run "$CONFIG" validate "$f"
   [ "$status" -eq 0 ]
 }
@@ -110,7 +110,7 @@ version: 1
 lists:
   mirror: x
   exclusiv: []
-  archived: x
+  archived: [a]
   external: x
   exclusive: [[a, b], [c], [d, 1], x]
 YAML
@@ -119,7 +119,7 @@ YAML
   [ "$status" -eq 1 ]
   [[ $stderr == *"error: $f: lists: unknown key mirror"* ]]
   [[ $stderr == *"lists: unknown key exclusiv"* ]]
-  [[ $stderr == *"lists.archived must be a list of strings"* ]]
+  [[ $stderr == *"lists: unknown key archived"* ]]
   [[ $stderr == *"lists.external must be a list of strings"* ]]
   [[ $stderr == *"lists.exclusive[1] must be a pair of strings"* ]]
   [[ $stderr == *"lists.exclusive[2] must be a pair of strings"* ]]
@@ -347,49 +347,17 @@ YAML
   [ -z "$stderr" ]
 }
 
-@test "forks key was removed" {
-  f=$(printf 'version: 1\nforks: []\n' | mk bad.yml)
+@test "removed keys are unknown keys" {
+  f=$(printf 'version: 1\nforks: []\nmirrors: []\nlists: {archived: [a], archive: a, forks: [a], mirrors: x}\n' | mk bad.yml)
   run --separate-stderr "$CONFIG" validate "$f"
   [ "$status" -eq 1 ]
-  [[ $stderr == *'`forks:` was removed: move the entry to `managed:`'* ]]
-}
-
-@test "mirrors key was removed" {
-  f=$(printf 'version: 1\nmirrors: []\n' | mk bad.yml)
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 1 ]
-  [[ $stderr == *'`mirrors:` was removed: move the entry to `managed:`'* ]]
-}
-
-@test "lists.archive was removed" {
-  f=$(printf 'version: 1\nlists: {archive: a}\n' | mk bad.yml)
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 1 ]
-  [[ $stderr == *'`lists.archive` was removed: use `lists.archived`'* ]]
-}
-
-@test "lists.archived must be a list of strings" {
-  f=$(printf 'version: 1\nlists: {archived: "x"}\n' | mk bad.yml)
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 1 ]
-  [[ $stderr == *"lists.archived must be a list of strings"* ]]
-  f=$(printf 'version: 1\nlists: {archived: ["a", "b"]}\n' | mk ok.yml)
-  run "$CONFIG" validate "$f"
-  [ "$status" -eq 0 ]
-}
-
-@test "lists.mirrors as a string is rejected" {
-  f=$(printf 'version: 1\nlists: {mirrors: x}\n' | mk bad.yml)
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 1 ]
-  [[ $stderr == *'`lists.mirrors` is now a mapping: put the List under `lists.mirrors.synced`'* ]]
-}
-
-@test "lists.forks was removed" {
-  f=$(printf 'version: 1\nlists: {forks: [a]}\n' | mk bad.yml)
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 1 ]
-  [[ $stderr == *'`lists.forks` was removed: put the Lists under `lists.mirrors.other`'* ]]
+  [[ $stderr == *"error: $f: unknown key forks"* ]]
+  [[ $stderr == *"error: $f: unknown key mirrors"* ]]
+  [[ $stderr == *"lists: unknown key archived"* ]]
+  [[ $stderr == *"lists: unknown key archive"* ]]
+  [[ $stderr == *"lists: unknown key forks"* ]]
+  [[ $stderr == *"lists.mirrors must be a mapping"* ]]
+  [[ $stderr != *"was removed"* ]]
 }
 
 @test "lists.mirrors mapping with synced and other is valid" {

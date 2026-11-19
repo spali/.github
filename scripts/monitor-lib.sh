@@ -10,7 +10,7 @@ MONITOR_CHECKS=(
   ruleset-main ruleset-tags main-red renovate-stale workflow-disabled
   dependabot-alert code-scanning-alert unanswered stale-branch
   fork-behind fork-workflows-active fork-delete-candidate
-  list-none list-contradiction list-archived list-external-own
+  list-none list-contradiction list-external-own
   managed-missing managed-settings managed-behind branch-undeclared
   rebase-pending sync-failed contribution-stale unmanaged
   adoption billing-minutes billing-storage billing
@@ -73,11 +73,9 @@ MONITOR_TODO='{
   "fork-delete-candidate": {"category": "decide", "areas": ["forks"], "title": "Delete forks without own work?",
     "text": "No own commits and no open pull request upstream: delete it, archive it to freeze the state you reference, or add it to `managed:` to keep it synced."},
   "list-none": {"category": "cleanup", "areas": ["lists"], "title": "Add repositories to a List",
-    "text": "The repository is in no List, a fork or managed repository is in none of the mirrors Lists, or an archived repository is in none of the archive Lists: add it to the right List."},
+    "text": "The repository is in no List, or a fork or managed repository is in none of the mirrors Lists: add it to the right List."},
   "list-contradiction": {"category": "decide", "areas": ["lists"], "title": "Choose one of two exclusive Lists",
     "text": "The repository is in both Lists of an exclusive pair: decide which one fits and remove it from the other."},
-  "list-archived": {"category": "cleanup", "areas": ["lists"], "title": "Move archived repositories to an archive List",
-    "text": "An archived repository is still in a List that is not an archive List: move it to an archive List."},
   "list-external-own": {"category": "cleanup", "areas": ["lists"], "title": "Move own repositories out of external Lists",
     "text": "Lists in lists.external are for repositories of others: move own work to your stack List and own forks to a mirrors List."},
   "managed-missing": {"category": "cleanup", "areas": ["managed"], "title": "Create missing managed repositories",

@@ -299,12 +299,13 @@ YML
 }
 
 @test "archived repos go to MONITOR_ARCHIVED only" {
-  user_repos "$(repo spali/b)" "$(repo spali/a false false true)"
+  user_repos "$(repo spali/b)" "$(repo spali/c false true true)" "$(repo spali/a false false true)"
   MONITOR_ARCHIVED="$BATS_TEST_TMPDIR/archived.json" run --separate-stderr "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$(jq -c 'map(.name)' <<<"$output")" = '["spali/b"]' ]
-  [ "$(jq -c . "$BATS_TEST_TMPDIR/archived.json")" = '["spali/a"]' ]
+  [ "$(jq -c . "$BATS_TEST_TMPDIR/archived.json")" = '[{"name":"spali/a","fork":false},{"name":"spali/c","fork":true}]' ]
   [[ "$(gh_calls)" != *spali/a* ]]
+  [[ "$(gh_calls)" != *spali/c* ]]
 }
 
 @test "MONITOR_ARCHIVED is an empty array without archived repos" {

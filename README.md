@@ -455,7 +455,7 @@ It checks five groups (archived repositories only by the Lists check):
 | Health | all non-fork, unmanaged repositories | merge settings, red `main`, open Renovate pull requests, unanswered pull requests and issues, disabled workflows, Dependabot and code scanning alerts, branches of merged pull requests |
 | Forks | unmanaged forks | upstream commits missing, active workflows, delete candidates, old pull requests, branches with own commits, branches of merged upstream pull requests |
 | Managed | forks and mirrors listed under `managed` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, undeclared branches with own commits, branches of merged upstream pull requests, manual rebases pending |
-| Lists | all repositories, archived ones too | GitHub Lists that contradict the archive state, forks or mirrors (an archived repository belongs in an archive list of `lists.archived`, see [freeze a fork or mirror](docs/monitor-checks.md#freeze-a-fork-or-mirror); forks and managed repositories in a mirrors list, every repository in a `synced` mirrors list under `managed`; no own repositories in `lists.external`); repositories without the release flow; the last run of the control repository's sync failed |
+| Lists | all repositories, archived ones too | GitHub Lists that contradict forks or mirrors (archived repositories stay in the normal lists, see [freeze a fork or mirror](docs/monitor-checks.md#freeze-a-fork-or-mirror); forks and managed repositories in a mirrors list, every repository not archived in a `synced` mirrors list under `managed`; no own repositories in `lists.external`); repositories without the release flow; the last run of the control repository's sync failed |
 
 Once per run, for the whole account, the **billing** check (in the Lists job)
 compares the Actions minutes and storage used by private repositories with
@@ -531,7 +531,7 @@ after 48 h.
 |---|---|
 | `version` | must be `1` |
 | `monitor` | optional: `jobs` (`per-group`, the default: one job per check group; `per-repo`: one job per check group and repository) and `runs-on` (a runner label or a list of labels, default `ubuntu-latest`) |
-| `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `archived` (list of lists), `mirrors` (mapping: `synced` and `other`, each a list of lists), `external` (list of lists) |
+| `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `mirrors` (mapping: `synced` and `other`, each a list of lists), `external` (list of lists) |
 | `managed` | forks and mirrors kept in sync by [`sync.yml`](#fork-and-mirror-sync): `repo`, `upstream`, optional `branches`, `follow`, `tags`, `settings`, `private` |
 | `billing` | optional: `minutes` (`included`, `threshold`) and `storage` (`included-gb`, `threshold`) of the [billing check](docs/monitor-checks.md#billing); missing values come from the plan (Free, Pro), thresholds default to 75 |
 | `unanswered` | optional: `days` (positive integer, default 7): how long someone may wait for an answer in an open pull request or issue |
@@ -544,8 +544,7 @@ monitor:
   runs-on: ubuntu-latest
 lists:
   exclusive:
-    - ["Active", "Archive"]
-  archived: ["Archive"]
+    - ["Contribution forks", "Customization forks"]
   mirrors:
     synced: ["Mirrors"]
     other: ["Contribution forks", "Customization forks"]

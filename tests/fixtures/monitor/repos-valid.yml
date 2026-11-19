@@ -1,9 +1,7 @@
 version: 1
 lists:
   exclusive:
-    - ["🚀 My stack", "🗃️ My stack Archive"]
     - ["▶️ Contribution forks", "♻️ Customization forks"]
-  archived: ["🗃️ My stack Archive"]
   mirrors:
     synced: ["👀  Mirrors"]
     other: ["▶️ Contribution forks", "♻️ Customization forks"]
