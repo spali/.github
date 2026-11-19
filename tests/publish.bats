@@ -187,3 +187,48 @@ draft_state() { # draft tag_name main_sha
     [[ $output == *"::warning::pull request #77 is ${state,,}, deleted the dev build v1.0.0-pr.77"* ]]
   done
 }
+
+@test "release without assets: publishes the draft, uploads nothing" {
+  draft_state true v1.0.0 abc
+  rm -rf "$ASSETS_DIR"
+  ASSETS=false ASSETS_DIR= TAG=v1.0.0 VERSION=1.0.0 DRAFT_ID=42 run "$PUBLISH" release
+  [ "$status" -eq 0 ]
+  [ -z "$(calls_matching 'release upload')" ]
+  [ "$(calls_matching 'api -X PATCH')" = "api -X PATCH repos/spali/sandbox/releases/42 -F draft=false -f tag_name=v1.0.0 -F prerelease=false -f make_latest=true" ]
+  [ "$(calls_matching 'release delete')" = $'release delete v1.0.0-next --cleanup-tag --yes\nrelease delete v0.9.0-next --cleanup-tag --yes' ]
+}
+
+@test "next without assets: creates the pre-release without files" {
+  printf 'notes\n' | gh_respond 'api repos/spali/sandbox/releases/42 --jq .body' -
+  rm -rf "$ASSETS_DIR"
+  ASSETS=false ASSETS_DIR= TAG=v1.1.0-next VERSION=1.1.0-next DRAFT_ID=42 run "$PUBLISH" next
+  [ "$status" -eq 0 ]
+  [[ $(calls_matching 'release create') == "release create v1.1.0-next --target abc --prerelease --latest=false --title v1.1.0-next --notes-file "* ]]
+}
+
+@test "pr without assets: creates the dev pre-release without files" {
+  rm -rf "$ASSETS_DIR"
+  ASSETS=false ASSETS_DIR= TAG=v1.0.0-pr.77 VERSION=1.0.0-pr.77 PR=77 run "$PUBLISH" pr
+  [ "$status" -eq 0 ]
+  [ "$(calls_matching 'release create')" = "release create v1.0.0-pr.77 --target abc --prerelease --latest=false --title v1.0.0-pr.77 --notes Dev build of #77 at abc, not for production use." ]
+}
+
+@test "without assets: ignores files in the assets directory" {
+  ASSETS=false TAG=v1.0.0-pr.77 VERSION=1.0.0-pr.77 PR=77 run "$PUBLISH" pr
+  [ "$status" -eq 0 ]
+  [[ $(calls_matching 'release create') == "release create v1.0.0-pr.77 --target abc "* ]]
+}
+
+@test "with assets: requires the assets directory" {
+  ASSETS_DIR= TAG=v1.0.0-pr.77 VERSION=1.0.0-pr.77 PR=77 run --separate-stderr "$PUBLISH" pr
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: ASSETS_DIR is required" ]
+  [ -z "$(cat "$GH_LOG")" ]
+}
+
+@test "fails on an invalid ASSETS value and publishes nothing" {
+  ASSETS=no TAG=v1.0.0-pr.77 VERSION=1.0.0-pr.77 PR=77 run --separate-stderr "$PUBLISH" pr
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: ASSETS must be true or false, not 'no'" ]
+  [ -z "$(cat "$GH_LOG")" ]
+}

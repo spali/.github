@@ -123,6 +123,11 @@ paragraph below):
    `attestations: write`, `artifact-metadata: write`; passes all `prepare`
    outputs as inputs with the same names.
 
+A repository without files to release (e.g. a library) has no `build` job:
+`publish` has `needs: prepare` and input `assets: false` (default `true`).
+Its releases carry only the notes and the tag; no `checksums.txt`, no
+attestation (`examples/caller/release-library.yml`).
+
 Triggers of `release.yml`: push to `main`; push of tags
 `v[0-9]+.[0-9]+.[0-9]+`, `v[0-9]+.[0-9]+.[0-9]+-*`, excluding `!v*-next`,
 `!v*-pr.*`; `workflow_dispatch` with input `version`. Concurrency group
@@ -255,11 +260,12 @@ resets the draft; repeat.
 ### 4.6 Set up the flow in a new repository (any language)
 
 1. Copy `examples/caller/pr.yml` and `examples/caller/release-generic.yml`
-   (or `release-go.yml`) into `.github/workflows/` as `pr.yml` and `release.yml`.
+   (or `release-go.yml`, or `release-library.yml` when nothing is built) into
+   `.github/workflows/` as `pr.yml` and `release.yml`.
 2. Pin: `tag=$(gh release view --repo spali/.github --json tagName --jq .tagName)`;
    `gh api repos/spali/.github/commits/$tag --jq .sha`; replace every
    `SHA # vX.Y.Z` with `<sha> # <tag>`.
-3. Write the `build` job (section 2 interface). Verify locally that the build
+3. Write the `build` job (section 2 interface; none with `release-library.yml`). Verify locally that the build
    puts only files (no directories) into the upload path.
    Go/goreleaser: `release --snapshot --clean`, env `VERSION`, and in the
    goreleaser config `snapshot.version_template: "{{ .Env.VERSION }}"`,
