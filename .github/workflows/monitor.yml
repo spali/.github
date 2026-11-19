@@ -150,7 +150,10 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: findings-${{ github.job }}-${{ strategy.job-index }}
-          path: .monitor-work/findings.jsonl
+          # fork-kinds.jsonl: only the forks jobs write it
+          path: |
+            .monitor-work/findings.jsonl
+            .monitor-work/fork-kinds.jsonl
           retention-days: 1
           include-hidden-files: true
           if-no-files-found: error
@@ -265,7 +268,9 @@ jobs:
           pattern: findings-*
           path: .monitor-findings
       - name: Collect findings
-        run: cat .monitor-findings/*/findings.jsonl >.monitor-work/findings.jsonl
+        run: |
+          cat .monitor-findings/*/findings.jsonl >.monitor-work/findings.jsonl
+          cat .monitor-findings/*/fork-kinds.jsonl >.monitor-work/fork-kinds.jsonl 2>/dev/null || true
       - name: Report
         env:
           MONITOR_DOCS_URL: ${{ github.server_url }}/spali/.github/blob/${{ job.workflow_sha }}/docs/monitor-checks.md

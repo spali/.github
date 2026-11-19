@@ -108,9 +108,14 @@ phase_matrix() {
 # MONITOR_REPO the script sees only that repository (and its `forks:` entry).
 phase_check() {
   local name=$1 script=monitor-$1.sh from checked_file rows inv=$INVENTORY cfg=$CONFIG
-  local archived=
+  local archived='' kinds=''
   # only the lists check looks at the archived repositories
   [[ $name != lists ]] || archived="$WORK/archived.json"
+  # only the forks check records the kind of each fork for the report
+  if [[ $name == forks ]]; then
+    kinds="$WORK/fork-kinds.jsonl"
+    : >"$kinds"
+  fi
   checked_file="$WORK/checked-$name"
   : >"$checked_file"
   from=$(wc -l <"$FINDINGS")
@@ -122,7 +127,7 @@ phase_check() {
       "$CONFIG" >"$cfg"
   fi
   if ! MONITOR_CHECKED=$checked_file LISTS_TOKEN=${LISTS_TOKEN:-${GH_TOKEN:-}} \
-    ARCHIVED=$archived INVENTORY=$inv CONFIG=$cfg "$DIR/$script" >/dev/null 2>&1; then
+    ARCHIVED=$archived FORK_KINDS=$kinds INVENTORY=$inv CONFIG=$cfg "$DIR/$script" >/dev/null 2>&1; then
     finding red check-failed - "$script crashed"
   fi
   rows=$(new_findings "$from")
@@ -160,7 +165,7 @@ phase_check() {
 # crashed, else 0 (the check phases already failed for red findings).
 phase_report() {
   local rc=0 counts title='Maintenance monitor'
-  "$DIR/monitor-report.sh" >"$WORK/report.md" 2>/dev/null || rc=$?
+  FORK_KINDS="$WORK/fork-kinds.jsonl" "$DIR/monitor-report.sh" >"$WORK/report.md" 2>/dev/null || rc=$?
   if ((rc > 1)); then
     echo "error: monitor-report.sh crashed" >&2
     printf '## Maintenance monitor\n\nThe report script crashed, see the run log.\n' >"$WORK/report.md"

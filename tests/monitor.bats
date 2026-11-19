@@ -311,6 +311,24 @@ EOS
   [ "$(jq -c . "$BATS_TEST_TMPDIR/archived.seen")" = '[{"name":"spali/old","fork":false}]' ]
 }
 
+@test "the forks phase writes the fork kinds, the report reads them" {
+  printf '#!/usr/bin/env bash\necho "{\\"repo\\":\\"o/f\\",\\"kind\\":\\"customized\\",\\"pinned\\":false,\\"own\\":1,\\"pulls\\":[],\\"upstream\\":\\"up/f\\"}" >>"$FORK_KINDS"\n' \
+    >"$MONITOR_SCRIPTS_DIR/monitor-forks.sh"
+  phase config
+  phase inventory
+  echo stale >"$BATS_TEST_TMPDIR/work/fork-kinds.jsonl"
+  phase forks
+  [ "$status" -eq 0 ]
+  # the phase starts a new file
+  [ "$(jq -c '[.repo, .kind]' "$BATS_TEST_TMPDIR/work/fork-kinds.jsonl")" = '["o/f","customized"]' ]
+  phase settings
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$BATS_TEST_TMPDIR/work/fork-kinds.jsonl")" -eq 1 ]
+  phase report
+  [ "$status" -eq 0 ]
+  grep -qF '| [o/f](https://github.com/o/f) | ✏️ 1 own commit | [up/f](https://github.com/up/f) |' "$BATS_TEST_TMPDIR/work/report.md"
+}
+
 @test "billing phase runs the billing script with the whole inventory and the account token" {
   check_stub billing 'jq -c "[.[].name]" "$INVENTORY" >"'"$BATS_TEST_TMPDIR"'/seen"
 printf "%s\n" "${BILLING_TOKEN:-}" >"'"$BATS_TEST_TMPDIR"'/token"

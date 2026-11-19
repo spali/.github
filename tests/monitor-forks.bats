@@ -15,7 +15,7 @@ setup() {
   echo '[]' >"$INVENTORY"
   export MONITOR_NOW
   MONITOR_NOW=$(date -u -d 2026-11-14T12:00:00Z +%s)
-  unset MONITOR_CHECKED
+  unset MONITOR_CHECKED FORK_KINDS
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/monitor-forks.sh"
   # a fork: default branch main (upstream default dev), feat rebased
   # automatically onto main, wip rebased by hand onto dev
@@ -681,4 +681,51 @@ only_main() {
   respond_jq "$REPO" '{archived: true, default_branch: "main", private: false}'
   run_script
   [ ! -s "$FINDINGS" ]
+}
+
+# --- the kind of each fork or mirror (FORK_KINDS) ------------------------
+
+kinds() { jq -sc 'map([.repo, .kind, .pinned, .own, .pulls, .upstream])' "$FORK_KINDS"; }
+
+@test "a fork without own commits or pull requests is unchanged" {
+  export FORK_KINDS="$BATS_TEST_TMPDIR/kinds.jsonl"
+  run_script
+  [ "$(kinds)" = '[["spali/f","unchanged",false,0,[],"up/f"]]' ]
+  # one comparison of the default branch serves the kind and the delete candidate
+  [ "$(grep -c 'compare/dev...spali:f:main' "$GH_LOG")" -eq 1 ]
+}
+
+@test "own commits make a fork customized, an open pull request a contribution" {
+  export FORK_KINDS="$BATS_TEST_TMPDIR/kinds.jsonl"
+  respond_jq "$OWN" '{ahead_by: 2}'
+  run_script
+  [ "$(kinds)" = '[["spali/f","customized",false,2,[],"up/f"]]' ]
+  : >"$FORK_KINDS"
+  : >"$GH_RESPONSES"
+  respond_jq "$OWN" '{ahead_by: 2}'
+  open_on feat '[{number: 5, created_at: "2026-11-10T00:00:00Z", html_url: "u", head: {repo: {full_name: "spali/f"}, ref: "feat"}},
+    {number: 6, created_at: "2026-11-10T00:00:00Z", html_url: "u", head: {repo: {full_name: "o/f"}, ref: "feat"}}]'
+  run_script
+  [ "$(kinds)" = '[["spali/f","contribution",false,2,[5],"up/f"]]' ]
+}
+
+@test "a pinned fork and a mirror record their kind too" {
+  export FORK_KINDS="$BATS_TEST_TMPDIR/kinds.jsonl"
+  jq '.forks[0].pinned = true' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  only_main
+  run_script
+  [ "$(kinds)" = '[["spali/f","unchanged",true,0,[],"up/f"]]' ]
+  : >"$FORK_KINDS"
+  : >"$GH_RESPONSES"
+  mirror
+  mirror_repo false 2026-11-01T00:00:00Z
+  refs refs/heads/main:1 | git_respond "$SRC" -
+  refs refs/heads/main:1 | git_respond "$TGT" -
+  run_script
+  [ "$(jq -sc 'map([.repo, .kind, .pinned, .own])' "$FORK_KINDS")" = '[["spali/m","mirror",false,null]]' ]
+}
+
+@test "without FORK_KINDS nothing is recorded" {
+  run_script
+  [ ! -e "$BATS_TEST_TMPDIR/kinds.jsonl" ]
 }
