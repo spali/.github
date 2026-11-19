@@ -534,7 +534,7 @@ after 48 h.
 | `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `forks` (list of lists for forks and mirrors), `external` (list of lists) |
 | `forks` | exceptions for the forks and mirrors the [`sync.yml`](#fork-and-mirror-sync) keeps in sync (every own fork is synced without an entry): `repo`, optional `upstream`, `branches`, `follow`, `tags`, `settings`, `private`, `pinned` |
 | `billing` | optional: `minutes` (`included`, `threshold`) and `storage` (`included-gb`, `threshold`) of the [billing check](docs/monitor-checks.md#billing); missing values come from the plan (Free, Pro), thresholds default to 75 |
-| `report` | optional: `timezone` (a time zone name like `Europe/Zurich`, default `UTC`): the time zone of the "updated" time in the report |
+| `report` | optional: `timezone` (a time zone name like `Europe/Zurich`, default `UTC`): the time zone of the times in the report (the "updated" time and the times in the findings, e.g. the last push of `fork-behind`) |
 | `unanswered` | optional: `days` (positive integer, default 7): how long someone may wait for an answer in an open pull request or issue |
 | `ignores` | accepted findings: `repo`, `check` (an id from the AGENTS.md catalog, not `check-failed`), optional `item` (only for `unanswered` and `stale-branch`: a pull request or issue number, ignores only that item), `reason` (required) |
 

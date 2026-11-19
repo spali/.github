@@ -18,11 +18,15 @@ set -euo pipefail
 # shellcheck source=scripts/monitor-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 
+# An ISO 8601 UTC time in a message (jq regex, no capture group).
+TIME_RE='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?Z'
+
 # JQ program, run with -s over $FINDINGS, after $MONITOR_GROUPS_JQ.
 # Arguments: $cfg (slurped config), $inv (slurped inventory, [] without one),
 # $kinds (the fork kinds, [] without them),
 # $docs (URL of the check explanations), $control (URL of the control file,
-# may be empty), $todo (MONITOR_TODO), $now (time of the summary line), $run
+# may be empty), $todo (MONITOR_TODO), $now (time of the summary line),
+# $times (UTC time in a message -> the same time in the report time zone), $run
 # (URL of the run, may be empty). Prints {markdown, red}.
 # Layout: summary line, TODO (one entry per check and category, without the
 # checks marked "todo": false), Overview
@@ -38,7 +42,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 # f-<check>-<slug>[-n] that the overview icons link to.
 # shellcheck disable=SC2016 # jq program, no shell expansion wanted
 REPORT_JQ='
-$cfg[0] as $cfg | . as $f
+# UTC times in messages (2024-10-28T06:59:24Z) in the time zone of the report
+def local_times: gsub("(?<t>'"$TIME_RE"')"; $times[.t] // .t);
+$cfg[0] as $cfg
+| map(if (.message | type) == "string" then .message |= local_times else . end) as $f
 | def gh: "https://github.com/\(.)";
   def repo_link: "[\(.)](\(gh))";
   def cell: tostring | gsub("\\|"; "\\|") | gsub("[\\r\\n]+"; " ");
@@ -243,13 +250,20 @@ main() {
   # the time zone of the summary line (validated by monitor-config.sh), else UTC
   tz=$(jq -r '.report.timezone? // "UTC" | strings' "$CONFIG" 2>/dev/null) || tz=''
   now=$(TZ=${tz:-UTC} date -d "@${MONITOR_NOW:-$(date -u +%s)}" '+%Y-%m-%d %H:%M %Z')
+  # the times in the messages, converted by date (jq's %Z ignores daylight saving)
+  local t times='{}'
+  while IFS= read -r t; do
+    [[ -n $t ]] || continue
+    times=$(jq -c --arg t "$t" --arg l "$(TZ=${tz:-UTC} date -d "$t" '+%Y-%m-%d %H:%M %Z' 2>/dev/null)" \
+      'if $l == "" then . else .[$t] = $l end' <<<"$times")
+  done < <(jq -rs '[.[] | objects | .message | strings | scan("'"$TIME_RE"'")] | unique[]' "$FINDINGS" 2>/dev/null || true)
   if [[ -n ${GITHUB_SERVER_URL:-} && -n ${GITHUB_REPOSITORY:-} && -n ${GITHUB_RUN_ID:-} ]]; then
     run=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
   fi
   result=$(jq -s --slurpfile cfg "$CONFIG" "${inv[@]}" --argjson kinds "$kinds" \
     --arg docs "${MONITOR_DOCS_URL:-https://github.com/spali/.github/blob/main/docs/monitor-checks.md}" \
     --arg control "${MONITOR_CONFIG_URL:-}" --argjson todo "$MONITOR_TODO" \
-    --arg now "$now" --arg run "$run" "$MONITOR_GROUPS_JQ$REPORT_JQ" "$FINDINGS")
+    --arg now "$now" --argjson times "$times" --arg run "$run" "$MONITOR_GROUPS_JQ$REPORT_JQ" "$FINDINGS")
   jq -r '.markdown' <<<"$result"
   [[ $(jq '.red' <<<"$result") -eq 0 ]]
 }
