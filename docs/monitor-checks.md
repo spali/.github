@@ -427,10 +427,12 @@ Without forks lists, forks and entries get the plain `in no list` rule.
 
 🔵 An own repository (archived ones too) is in a list of `lists.external`,
 such as "🔍 Interesting and related", which is for repositories of others
-(`own repository in "<list>"`).
+(`own repository in "<list>"`). Forks and `forks:` entries (archived ones
+too) are not reported: they follow a repository of others, so listing one
+there is a way to watch the upstream. They still belong in a forks list
+(`list-none`).
 
-**Fix:** move own work to your stack list and own forks to a forks list
-(`lists.forks`).
+**Fix:** move own work to your stack list.
 
 ## adoption
 

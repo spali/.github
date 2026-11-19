@@ -213,6 +213,27 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(jq -sc 'map([.check, .repo, .message])' "$FINDINGS")" = '[["list-external-own","spali/old","own repository in \"🔍 Interesting and related\""]]' ]
 }
 
+@test "fork in an external list is no list-external-own" {
+  inv spali/f false true true
+  all_lists '(.[2].items = [["spali/f", false]]) | (.[6].items = [["spali/f", false]])'
+  run_script
+  [ "$(jq -sc 'map(.check) - ["sync-failed"]' "$FINDINGS")" = '[]' ]
+}
+
+@test "archived fork in an external list is no list-external-own" {
+  archived '[{"name": "spali/oldf", "fork": true}]'
+  all_lists '(.[0].items = [["spali/a", false]]) | (.[5].items = [["spali/oldf", true]]) | (.[6].items = [["spali/oldf", true]])'
+  run_script
+  [ "$(count list-external-own)" -eq 0 ]
+}
+
+@test "forks: entry in an external list is no list-external-own" {
+  config '.forks = [{repo: "spali/a", upstream: "https://salsa.example/x.git"}]'
+  all_lists '(.[2].items = [["spali/a", false]]) | (.[6].items = [["spali/a", false]])'
+  run_script
+  [ "$(count list-external-own)" -eq 0 ]
+}
+
 @test "missing external list is config-invalid, no list-external-own" {
   config '.lists.external = ["🔍 Interesting and related", "🔍 Gone"]'
   all_lists '(.[0].items = [["spali/a", false]]) | (.[6].items = [["spali/a", false]])'
@@ -233,7 +254,7 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   source "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
   [[ " ${MONITOR_CHECKS[*]} " != *" list-mirror-missing "* ]]
   [[ " ${MONITOR_CHECKS[*]} " == *" list-external-own "* ]]
-  [ "$(jq -c '."list-external-own" | [.category, .areas, .title, .text]' <<<"$MONITOR_TODO")" = '["cleanup",["lists"],"Move own repositories out of external Lists","Lists in lists.external are for repositories of others: move own work to your stack List and own forks to the forks List."]' ]
+  [ "$(jq -c '."list-external-own" | [.category, .areas, .title, .text]' <<<"$MONITOR_TODO")" = '["cleanup",["lists"],"Move own repositories out of external Lists","Lists in lists.external are for repositories of others (forks and mirrors may be there): move own work to your stack List."]' ]
   [ "$(jq -c 'has("list-mirror-missing")' <<<"$MONITOR_TODO")" = false ]
 }
 
