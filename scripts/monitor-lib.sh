@@ -80,7 +80,7 @@ MONITOR_TODO='{
   "list-contradiction": {"category": "decide", "areas": ["lists"], "title": "Choose one of two exclusive Lists",
     "text": "The repository is in both Lists of an exclusive pair: decide which one fits and remove it from the other."},
   "list-external-own": {"category": "cleanup", "areas": ["lists"], "title": "Move own repositories out of external Lists",
-    "text": "Lists in lists.external are for repositories of others: move own work to your stack List and own forks to the forks List."},
+    "text": "Lists in lists.external are for repositories of others (forks and mirrors may be there): move own work to your stack List."},
   "rebase-pending": {"category": "decide", "areas": ["forks"], "title": "Rebase manual branches?",
     "text": "A `rebase: manual` branch is behind its upstream: run the sync for this branch when you are ready."},
   "sync-failed": {"category": "cleanup", "areas": ["forks"], "title": "Fix failed syncs",

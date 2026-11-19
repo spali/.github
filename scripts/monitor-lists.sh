@@ -4,7 +4,8 @@
 # sync-failed (forks-lib.sh; here because it runs once). Archived
 # repositories (snapshots) go in the same Lists as active ones and get the
 # same checks. Forks and repositories under `forks:` belong in a forks List
-# (lists.forks); own repositories do not belong in lists.external. Writes
+# (lists.forks); own repositories do not belong in lists.external (forks
+# and `forks:` entries may: they follow a repository of others). Writes
 # findings only. Env:
 # FINDINGS INVENTORY CONFIG (file paths), optional ARCHIVED (JSON array of
 # the archived repositories as {name, fork}; missing, empty or unreadable:
@@ -85,7 +86,9 @@ list_findings() {
       $repos[] | .name as $r | inlists($r) as $in |
       select(($in | index($a)) != null and ($in | index($b)) != null) |
       row("info"; "list-contradiction"; $r; "in \"\($a)\" and \"\($b)\"")),
+    ([$repos[] | select(.fork) | .name | ascii_downcase] + $known) as $forks |
     ($el | unique[] | select(ok(.)) | . as $e | items($e) |
+      select(ascii_downcase | IN($forks[]) | not) |
       row("info"; "list-external-own"; .; "own repository in \"\($e)\""))
   ' "$1"
 }
