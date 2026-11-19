@@ -240,7 +240,7 @@ gh_fail_raw() {
   run jq -r '."fork-behind".text' <<<"$MONITOR_TODO"
   [ "$output" = 'A synced fork or mirror misses upstream commits or tags for too long: read the sync run.' ]
   run jq -r '."fork-delete-candidate".text' <<<"$MONITOR_TODO"
-  [ "$output" = 'No own commits and no open pull request upstream: delete it, or archive or pin it to keep the state you reference.' ]
+  [ "$output" = 'No own commits and no open pull request upstream: delete it, archive or pin it to keep the state you reference, or put it in a List of lists.external to keep following the upstream.' ]
 }
 
 @test "fork approval: private repository is skipped without a call" {

@@ -7,7 +7,8 @@
 # contribution-stale. sync-failed runs once, in monitor-lists.sh.
 # Writes findings, and the kind of each fork or mirror to FORK_KINDS (see
 # record_kind). Env: FINDINGS INVENTORY CONFIG (file paths), optional
-# FORK_KINDS (file path).
+# FORK_KINDS (file path), LISTS_TOKEN (GraphQL token for the Lists, read only
+# for a delete candidate when lists.external is set; default GH_TOKEN).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
 # shellcheck source=scripts/forks-lib.sh
@@ -261,12 +262,34 @@ fork_kind() {
   printf '%s\n' "$n"
 }
 
+# in_external_list REPO: true when REPO is in a List of lists.external (a
+# fork kept on purpose to follow its upstream). Reads the lists at most once
+# per run, only when lists.external is set. Returns 1 when it is not, 2 after
+# a check-failed finding (lists unavailable).
+in_external_list() {
+  local ext
+  json_out fork-delete-candidate "$1" ext -c '.lists.external // []' "$CONFIG" || return 2
+  [[ $ext != '[]' ]] || return 1
+  if [[ -z ${EXTERNAL_LISTS:-} ]]; then
+    EXTERNAL_LISTS=$(mktemp)
+    if ! fetch_lists fork-delete-candidate "$EXTERNAL_LISTS" "$1"; then
+      rm -f "$EXTERNAL_LISTS"
+      EXTERNAL_LISTS=
+      return 2
+    fi
+  fi
+  jq -e --argjson e "$ext" --arg r "$1" \
+    'any(.[] | select(.name | IN($e[])) | .items[]; .repo | ascii_downcase == ($r | ascii_downcase))' \
+    "$EXTERNAL_LISTS" >/dev/null 2>&1
+}
+
 # check_delete_candidate REPO OWN PARENT PRS_FILE FB_FILE: no own commits
 # (OWN, from fork_kind) on the default branch, no open upstream PR from the
 # fork, and every fork branch also exists upstream or was the head of a closed
 # or merged upstream PR from the fork (contribution done). PRS_FILE: the open
 # upstream pulls of the fork branches, [{head_repo, head_ref, number,
-# created_at, html_url}]; FB_FILE: the fork branches, [{name}].
+# created_at, html_url}]; FB_FILE: the fork branches, [{name}]. A fork in a
+# List of lists.external is kept on purpose and no candidate.
 check_delete_candidate() {
   local repo=$1 n=$2 parent=$3 prs=$4 fb=$5 mine pb cl extra
   [[ $n == 0 ]] || return 0
@@ -287,6 +310,9 @@ check_delete_candidate() {
        [$e[] | select(IN($done[]) | not)] | length' "$cl" || return 0
     [[ $extra == 0 ]] || return 0
   fi
+  local rc=0
+  in_external_list "$repo" || rc=$?
+  ((rc == 1)) || return 0
   finding info fork-delete-candidate "$repo" "no own commits, no open pull request upstream"
 }
 

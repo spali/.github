@@ -21,29 +21,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/forks-lib.sh"
 
 need_env FINDINGS INVENTORY CONFIG
 
-OWNER=spali
-QUERY='query { user(login: "spali") { lists(first: 50) { pageInfo { hasNextPage } nodes { name items(first: 100) { pageInfo { hasNextPage } nodes { ... on Repository { nameWithOwner isArchived } } } } } } }'
-
-# Reads the lists once into FILE as [{name, items: [{repo, archived}]}], own
-# repositories only. Returns 1 when the lists are unavailable.
-fetch_lists() {
-  local body trimmed
-  body=$(GH_TOKEN="${LISTS_TOKEN:-${GH_TOKEN:-}}" fetch list-none - graphql -f query="$QUERY") || return 1
-  if jq -e '[.data.user.lists | .pageInfo.hasNextPage, (.nodes[].items.pageInfo.hasNextPage)] | any(. == true)' \
-    >/dev/null 2>&1 <<<"$body"; then
-    finding red check-failed - "lists: more than 50 lists or 100 items in a list, not all read"
-    return 1
-  fi
-  if ! trimmed=$(jq --arg o "$OWNER/" '
-      [.data.user.lists.nodes[] | {name, items: [.items.nodes[] |
-        select((.nameWithOwner // "") | startswith($o)) |
-        {repo: .nameWithOwner, archived: (.isArchived // false)}]}]' 2>/dev/null <<<"$body"); then
-    parse_failed list-none -
-    return 1
-  fi
-  printf '%s\n' "$trimmed" >"$1"
-}
-
 # archived_repos prints the repositories in $ARCHIVED as one JSON array of
 # {name, fork}, [] when the file is unset, missing, empty or not a JSON array.
 archived_repos() {
@@ -110,7 +87,7 @@ check_adoption() {
 main() {
   local tmp rows level check repo message
   tmp=$(mktemp)
-  if fetch_lists "$tmp"; then
+  if fetch_lists list-none "$tmp"; then
     [[ -z ${LISTS:-} ]] || cp "$tmp" "$LISTS"
     if rows=$(list_findings "$tmp" 2>/dev/null); then
       while IFS=$'\t' read -r level check repo message; do
