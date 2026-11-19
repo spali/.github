@@ -8,7 +8,9 @@
 # optional), INVENTORY (the inventory JSON array, optional: without it there
 # is no overview and no section of clean repositories), MONITOR_NOW (epoch,
 # default now: the time in the summary line), GITHUB_SERVER_URL,
-# GITHUB_REPOSITORY, GITHUB_RUN_ID (optional, all three: link to the run).
+# GITHUB_REPOSITORY, GITHUB_RUN_ID (optional, all three: link to the run),
+# FORK_KINDS (optional: JSON lines of monitor-forks.sh record_kind, the kind
+# of each fork or mirror; without it there is no section of forks).
 # Exit status: 1 if a red finding is left, else 0.
 set -euo pipefail
 
@@ -17,12 +19,14 @@ source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 
 # JQ program, run with -s over $FINDINGS, after $MONITOR_GROUPS_JQ.
 # Arguments: $cfg (slurped config), $inv (slurped inventory, [] without one),
+# $kinds (the fork kinds, [] without them),
 # $docs (URL of the check explanations), $control (URL of the control file,
 # may be empty), $todo (MONITOR_TODO), $now (time of the summary line), $run
 # (URL of the run, may be empty). Prints {markdown, red}.
 # Layout: summary line, TODO (one entry per check and category, without the
 # checks marked "todo": false), Overview
-# (repository × area; only with an inventory), Red, Info, Clean, Not checked.
+# (repository × area; only with an inventory), Red, Info, Forks and mirrors
+# (only with fork kinds), Clean, Not checked.
 # Each section has an explicit anchor on its own line above the heading, then
 # <br> and an empty line (keeps the heading clear of the sticky issue header):
 # GitHub issues give headings no ids, but keep <a name="x"> as id/name
@@ -132,6 +136,21 @@ $cfg[0] as $cfg | . as $f
   (level_rows("red") | length) as $nred
 | (level_rows("info") | length) as $ninfo
 | (level_rows("skip") | length) as $nskip
+  # the kind of each fork or mirror, the last record per repository, by kind
+| ($kinds | map(select(type == "object" and (.repo | type) == "string"))
+    | group_by(.repo | ascii_downcase) | map(last)
+    | sort_by((.kind | {"contribution": 0, "customized": 1, "unchanged": 2, "mirror": 3}[.] // 4), (.repo | ascii_downcase))) as $forks
+| def upstream_link:
+    (.upstream // "") as $u
+    | if $u | test("^https://") then "[\($u | cell)](\($u))"
+      elif $u == "" then "–" else $u | repo_link end;
+  def kind_label:
+    (.upstream // "") as $u
+    | if .kind == "contribution" then "🤝 contribution: " + (.pulls | map("[#\(.)](https://github.com/\($u)/pull/\(.))") | join(", "))
+      elif .kind == "customized" then "✏️ \(count(.own; "own commit"; "own commits"))"
+      elif .kind == "mirror" then "🪞 mirror"
+      else "⚪ unchanged" end;
+  .
 | ($inv[0] | if type == "array" and length > 0 then . else null end) as $inventory
   # ignore-unused and findings without a repository concern no repository;
   # an empty inventory counts as none
@@ -188,6 +207,14 @@ $cfg[0] as $cfg | . as $f
       section("info"; "🔵 Info"),
       (if $ninfo == 0 then "Nothing to note.\n" else checks("info") end),
       (if $applies then "[↑ overview](#user-content-overview)\n" else empty end),
+      (if ($forks | length) > 0 then
+        section("forks"; "🍴 Forks and mirrors"),
+        "What each fork or mirror holds: 🤝 open pull requests upstream, ✏️ own commits on the default branch (the sync rebases them), ⚪ nothing of its own, 🪞 a mirror of a repository outside GitHub; 📌 pinned: not synced.\n",
+        "<details><summary>\(count($forks | length; "fork or mirror"; "forks and mirrors")), click to show</summary>\n",
+        "| Repository | Kind | Upstream |\n| --- | --- | --- |\n"
+          + ($forks | map("| \(.repo | repo_link) | \(kind_label)\(if .pinned then " · 📌 pinned" else "" end) | \(upstream_link) |") | join("\n")) + "\n",
+        "</details>\n"
+       else empty end),
       (if $clean then
         section("clean"; "✅ Clean"),
         (if ($clean | length) == 0 then "No repository without findings.\n"
@@ -203,16 +230,20 @@ $cfg[0] as $cfg | . as $f
 
 main() {
   need_env FINDINGS CONFIG
-  local result now run='' inv=(--argjson inv '[]')
+  local result now run='' inv=(--argjson inv '[]') kinds='[]'
   # a missing or broken inventory means none: no section of clean repositories
   if [[ -n ${INVENTORY:-} ]] && jq -e 'type == "array"' "$INVENTORY" >/dev/null 2>&1; then
     inv=(--slurpfile inv "$INVENTORY")
+  fi
+  # broken or missing fork kinds mean none
+  if [[ -n ${FORK_KINDS:-} && -r $FORK_KINDS ]]; then
+    kinds=$(jq -cs '[.[] | objects]' "$FORK_KINDS" 2>/dev/null) || kinds='[]'
   fi
   now=$(date -u -d "@${MONITOR_NOW:-$(date -u +%s)}" '+%Y-%m-%d %H:%M UTC')
   if [[ -n ${GITHUB_SERVER_URL:-} && -n ${GITHUB_REPOSITORY:-} && -n ${GITHUB_RUN_ID:-} ]]; then
     run=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
   fi
-  result=$(jq -s --slurpfile cfg "$CONFIG" "${inv[@]}" \
+  result=$(jq -s --slurpfile cfg "$CONFIG" "${inv[@]}" --argjson kinds "$kinds" \
     --arg docs "${MONITOR_DOCS_URL:-https://github.com/spali/.github/blob/main/docs/monitor-checks.md}" \
     --arg control "${MONITOR_CONFIG_URL:-}" --argjson todo "$MONITOR_TODO" \
     --arg now "$now" --arg run "$run" "$MONITOR_GROUPS_JQ$REPORT_JQ" "$FINDINGS")

@@ -8,7 +8,7 @@ setup() {
   export FINDINGS="$FIX/findings.jsonl"
   export CONFIG="$FIX/config.json"
   export MONITOR_DOCS_URL=https://docs.example/checks.md
-  unset MONITOR_CONFIG_URL INVENTORY GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID
+  unset MONITOR_CONFIG_URL INVENTORY GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID FORK_KINDS
   export MONITOR_NOW
   MONITOR_NOW=$(date -u -d 2026-11-16T19:45:30Z +%s)
 }
@@ -785,4 +785,46 @@ J
   config <<<'{}'
   run "$REPORT"
   [[ $output == *"| [Issues](https://github.com/spali/a/issues) |"* ]]
+}
+
+# --- forks and mirrors (FORK_KINDS) --------------------------------------
+
+@test "forks section: each fork or mirror once, by kind, with its upstream" {
+  cat >"$BATS_TEST_TMPDIR/kinds.jsonl" <<'J'
+{"repo":"o/plain","kind":"unchanged","pinned":false,"own":0,"pulls":[],"upstream":"up/plain"}
+{"repo":"o/mirror","kind":"mirror","pinned":false,"own":null,"pulls":[],"upstream":"https://gitlab.example/m.git"}
+{"repo":"o/custom","kind":"customized","pinned":false,"own":1,"pulls":[],"upstream":"up/custom"}
+{"repo":"o/b","kind":"customized","pinned":true,"own":3,"pulls":[],"upstream":"up/b"}
+{"repo":"o/contrib","kind":"contribution","pinned":false,"own":1,"pulls":[2,7],"upstream":"up/contrib"}
+{"repo":"O/Plain","kind":"customized","pinned":false,"own":2,"pulls":[],"upstream":"up/plain"}
+J
+  export FORK_KINDS="$BATS_TEST_TMPDIR/kinds.jsonl"
+  run "$REPORT"
+  anchored forks "🍴 Forks and mirrors"
+  run grep '^| ' <<<"$(section "🍴 Forks and mirrors")"
+  [ "${lines[0]}" = '| Repository | Kind | Upstream |' ]
+  [ "${lines[2]}" = '| [o/contrib](https://github.com/o/contrib) | 🤝 contribution: [#2](https://github.com/up/contrib/pull/2), [#7](https://github.com/up/contrib/pull/7) | [up/contrib](https://github.com/up/contrib) |' ]
+  [ "${lines[3]}" = '| [o/b](https://github.com/o/b) | ✏️ 3 own commits · 📌 pinned | [up/b](https://github.com/up/b) |' ]
+  [ "${lines[4]}" = '| [o/custom](https://github.com/o/custom) | ✏️ 1 own commit | [up/custom](https://github.com/up/custom) |' ]
+  # the last record of a repository wins (case-insensitive)
+  [ "${lines[5]}" = '| [O/Plain](https://github.com/O/Plain) | ✏️ 2 own commits | [up/plain](https://github.com/up/plain) |' ]
+  [ "${lines[6]}" = '| [o/mirror](https://github.com/o/mirror) | 🪞 mirror | [https://gitlab.example/m.git](https://gitlab.example/m.git) |' ]
+  [ "${#lines[@]}" -eq 7 ]
+  run "$REPORT"
+  [[ "$(section "🍴 Forks and mirrors")" == *'<details><summary>5 forks and mirrors, click to show</summary>'* ]]
+  # in the monitor comment, below the details marker
+  [[ ${output%%<!-- maintenance-monitor:details -->*} != *"Forks and mirrors"* ]]
+}
+
+@test "forks section: none without fork kinds, broken ones are ignored" {
+  run "$REPORT"
+  [[ $output != *"Forks and mirrors"* ]]
+  export FORK_KINDS="$BATS_TEST_TMPDIR/missing.jsonl"
+  run "$REPORT"
+  [[ $output != *"Forks and mirrors"* ]]
+  printf '{not json\n' >"$BATS_TEST_TMPDIR/bad.jsonl"
+  export FORK_KINDS="$BATS_TEST_TMPDIR/bad.jsonl"
+  run "$REPORT"
+  [ "$status" -le 1 ]
+  [[ $output == *"## Maintenance monitor"* && $output != *"Forks and mirrors"* ]]
 }

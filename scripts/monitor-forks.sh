@@ -5,7 +5,9 @@
 # not synced and get none of these. All: settings-fork-approval, and forks on
 # GitHub stale-branch (pull requests upstream), fork-delete-candidate and
 # contribution-stale. sync-failed runs once, in monitor-lists.sh.
-# Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
+# Writes findings, and the kind of each fork or mirror to FORK_KINDS (see
+# record_kind). Env: FINDINGS INVENTORY CONFIG (file paths), optional
+# FORK_KINDS (file path).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
 # shellcheck source=scripts/forks-lib.sh
@@ -195,17 +197,48 @@ check_branches() {
   done <<<"$list"
 }
 
-# check_delete_candidate REPO BRANCH PARENT PARENT_BRANCH PRS_FILE FB_FILE: no
-# own commits on the default branch, no open upstream PR from the fork, and
-# every fork branch also exists upstream or was the head of a closed or merged
-# upstream PR from the fork (contribution done). PRS_FILE: the open upstream
-# pulls of the fork branches, [{head_repo, head_ref, number, created_at,
-# html_url}]; FB_FILE: the fork branches, [{name}].
-check_delete_candidate() {
-  local repo=$1 branch=$2 parent=$3 pbranch=$4 prs=$5 fb=$6 body n mine pb cl extra
+# record_kind REPO KIND PINNED OWN PULLS_JSON UPSTREAM appends the kind of a
+# fork or mirror to $FORK_KINDS (if set) as one JSON line {repo, kind
+# (contribution, customized, unchanged or mirror), pinned, own (own commits on
+# the default branch, null for a mirror), pulls (numbers of the open upstream
+# pull requests from it), upstream}: the report lists them.
+record_kind() {
+  [[ -n ${FORK_KINDS:-} ]] || return 0
+  jq -cn --arg repo "$1" --arg kind "$2" --argjson pinned "$3" --argjson own "$4" \
+    --argjson pulls "$5" --arg upstream "$6" \
+    '{repo: $repo, kind: $kind, pinned: $pinned, own: $own, pulls: $pulls, upstream: $upstream}' >>"$FORK_KINDS"
+}
+
+# fork_kind REPO BRANCH PARENT PARENT_BRANCH PRS_FILE PINNED prints the number
+# of own commits of the default BRANCH against PARENT_BRANCH and records the
+# kind of the fork: contribution (an open upstream pull request from it, in
+# PRS_FILE), customized (own commits) or unchanged. Prints nothing when the
+# comparison is not available (a check-failed finding on an API error).
+fork_kind() {
+  local repo=$1 branch=$2 parent=$3 pbranch=$4 prs=$5 pinned=$6 body n pulls kind=unchanged
   body=$(fetch fork-delete-candidate "$repo" \
     "repos/$parent/compare/$(uri "$pbranch")...${repo%%/*}:${repo#*/}:$(uri "$branch")") || return 0
   json_out fork-delete-candidate "$repo" n -r '.ahead_by // "x"' <<<"$body" || return 0
+  [[ $n =~ ^[0-9]+$ ]] || return 0
+  json_out fork-delete-candidate "$repo" pulls -c --arg r "$repo" \
+    '[.[] | select(.head_repo | ascii_downcase == ($r | ascii_downcase)) | .number] | unique' "$prs" || return 0
+  if [[ $pulls != '[]' ]]; then
+    kind=contribution
+  elif ((n > 0)); then
+    kind=customized
+  fi
+  record_kind "$repo" "$kind" "$pinned" "$n" "$pulls" "$parent"
+  printf '%s\n' "$n"
+}
+
+# check_delete_candidate REPO OWN PARENT PRS_FILE FB_FILE: no own commits
+# (OWN, from fork_kind) on the default branch, no open upstream PR from the
+# fork, and every fork branch also exists upstream or was the head of a closed
+# or merged upstream PR from the fork (contribution done). PRS_FILE: the open
+# upstream pulls of the fork branches, [{head_repo, head_ref, number,
+# created_at, html_url}]; FB_FILE: the fork branches, [{name}].
+check_delete_candidate() {
+  local repo=$1 n=$2 parent=$3 prs=$4 fb=$5 mine pb cl extra
   [[ $n == 0 ]] || return 0
   json_out fork-delete-candidate "$repo" mine --arg r "$repo" \
     '[.[] | select(.head_repo | ascii_downcase == ($r | ascii_downcase))] | length' "$prs" || return 0
@@ -283,7 +316,7 @@ check_fork() {
   fi
   check_branches "$repo" "$entry" "$default" "$up" "$updef" "$contrib" "$tmp/tb" "$tmp/ub" "$pushed"
   if ((pulls)); then
-    check_delete_candidate "$repo" "$default" "$up" "$updef" "$prs" "$tmp/tb"
+    check_delete_candidate "$repo" "$(fork_kind "$repo" "$default" "$up" "$updef" "$prs" false)" "$up" "$prs" "$tmp/tb"
     check_contributions "$repo" "$prs"
   fi
 }
@@ -303,7 +336,7 @@ check_pinned_fork() {
     parse_failed fork-delete-candidate "$repo"
     return 0
   fi
-  check_delete_candidate "$repo" "$default" "$up" "$updef" "$prs" "$tmp/tb"
+  check_delete_candidate "$repo" "$(fork_kind "$repo" "$default" "$up" "$updef" "$prs" true)" "$up" "$prs" "$tmp/tb"
   check_contributions "$repo" "$prs"
 }
 
@@ -323,6 +356,7 @@ check_mirror() {
   heads_json "$tmp/tgt" >"$tmp/tb"
   heads_json "$tmp/src" >"$tmp/ub"
   check_branches "$repo" "$entry" "$default" "" "$updef" '[]' "$tmp/tb" "$tmp/ub" "$pushed"
+  record_kind "$repo" mirror false null '[]' "$upstream"
 }
 
 # with_upstream ENTRY INFO prints ENTRY with the parent of the repository
@@ -358,7 +392,11 @@ check_repo() {
   fi
   tmp=$(mktemp -d)
   if [[ $pinned == true ]]; then
-    [[ $(jq -r .kind <<<"$entry") != fork ]] || check_pinned_fork "$repo" "$entry" "$default" "$prs" "$tmp"
+    if [[ $(jq -r .kind <<<"$entry") == fork ]]; then
+      check_pinned_fork "$repo" "$entry" "$default" "$prs" "$tmp"
+    else
+      record_kind "$repo" mirror true null '[]' "$(jq -r .upstream <<<"$entry")"
+    fi
   else
     check_settings "$repo" "$(jq -c .settings <<<"$entry")" "$info"
     if [[ $(jq -r .kind <<<"$entry") == fork ]]; then

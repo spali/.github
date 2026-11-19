@@ -639,12 +639,17 @@ category, 🔴 Fix now for red findings (open), 🤔 Decide and 🧹 Clean up fo
 info findings (collapsed), each with one sentence of explanation, an ℹ️ link and the rows of that check
 (the `billing` status line is only listed under Info).
 📋 Overview is a matrix of the repositories with a red or info finding (red
-first) and the areas Release, Settings, Health, Fork / Mirror, Sync and Lists:
+first) and the areas Release, Settings, Health, Fork / Mirror and Lists:
 one icon per finding that jumps to its row below, ⚪ if a check of that area
 did not run there, ✅ if the area applies and is clean, – if it does not apply
 (without an inventory the overview is left out; findings without a repository
 are only in TODO and the details). 🔴 Red and 🔵 Info have one table per
-check: the repository, the details and a link to where to fix it. ✅ Clean
+check: the repository, the details and a link to where to fix it. 🍴 Forks
+and mirrors (collapsed) lists every fork and mirror the forks check looked at
+with what it holds: 🤝 contribution (its open pull requests upstream), ✏️
+customized (the number of own commits on its default branch, which the sync
+rebases), ⚪ unchanged, 🪞 mirror (upstream outside GitHub), and 📌 when it
+is pinned. ✅ Clean
 (collapsed) lists the repositories of the inventory without a red or info
 finding (ignored and not checked findings count as clean; without an
 inventory, in a local report, the section is left out). ⚪ Not checked
@@ -653,7 +658,7 @@ or the feature is not available there, and lists, per check, one line per
 reason with its repositories. Each check title has an ℹ️ link to its
 explanation in [`docs/monitor-checks.md`](docs/monitor-checks.md). The
 issue body holds the summary line, 📝 TODO and 📋 Overview; 🔴 Red, 🔵 Info,
-✅ Clean and ⚪ Not checked are in the monitor comment right below it (the
+🍴 Forks and mirrors, ✅ Clean and ⚪ Not checked are in the monitor comment right below it (the
 report is split at the line `<!-- maintenance-monitor:details -->`). The
 monitor comment is the oldest comment of the issue by `github-actions[bot]`
 (the author with the workflow's `GITHUB_TOKEN`; env `MONITOR_COMMENT_AUTHOR`

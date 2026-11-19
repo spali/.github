@@ -189,7 +189,7 @@ reason here needs the owner's decision.
 | `job.workflow_sha` with a fallback that fails checkout | Pinned scripts; never silently run the default branch | `github.workflow_sha` (that is the caller's) |
 | The monitor runs in a **private control repository** that calls reusable workflows; `spali/.github` only provides code | Private repository names can appear in logs, summary and issue without masking; the control file stays private | Cron in this public repository with masking and a private file merged in |
 | The overview issue is written with the caller's `GITHUB_TOKEN`, everything else read with the read-only app token | The app can never write; the only write is scoped to one repository | An app with `issues: write` on all repositories |
-| The overview issue holds summary, TODO and overview; Red, Info, Clean and Not checked go into one fixed monitor comment (the oldest comment starting with `<!-- maintenance-monitor:details -->`, edited in place) | The full report outgrew the 64 KB issue body; one edited comment adds no notifications or timeline entries, the anchor links still work on the same page | Everything in the body (cut); a new comment per run; a dynamic number of comments |
+| The overview issue holds summary, TODO and overview; Red, Info, Forks and mirrors, Clean and Not checked go into one fixed monitor comment (the oldest comment starting with `<!-- maintenance-monitor:details -->`, edited in place) | The full report outgrew the 64 KB issue body; one edited comment adds no notifications or timeline entries, the anchor links still work on the same page | Everything in the body (cut); a new comment per run; a dynamic number of comments |
 | The monitor runs as **matrix jobs**, the control file chooses `monitor.jobs` (`per-group` default, `per-repo`) and `monitor.runs-on` | One workflow and one set of scripts for both: a job per repository only changes the matrix (`MONITOR_REPO`), so the variants cannot drift; `per-repo` costs about 55 billed minutes per run on hosted runners, so it is opt-in (own runner) | Two workflows (steps in one job vs. matrix); one job with steps only |
 
 ## 4. Procedures
@@ -578,7 +578,9 @@ issue and the log of the failed step. Explanations for humans:
   (`MONITOR_REPO` empty = all repositories of the group), so job names use
   `matrix.repo || 'all repositories'`. An empty group gives `[]` and the job is
   skipped by its `if` (an empty matrix would be an error). Findings travel as
-  artifacts `findings-<job>-<index>` plus `monitor-base` (config, inventory, archived);
+  artifacts `findings-<job>-<index>` (findings, and in the forks jobs the
+  fork kinds `fork-kinds.jsonl` for the report section 🍴 Forks and mirrors)
+  plus `monitor-base` (config, inventory, archived);
   Report concatenates them. Inventory cannot use `monitor.runs-on`: the value
   comes from its own output.
 - Self-hosted `monitor.runs-on`: Inventory (monitor) and Repositories
