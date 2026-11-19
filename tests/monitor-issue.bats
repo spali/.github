@@ -2,6 +2,9 @@
 
 bats_require_minimum_version 1.5.0
 
+# 62 x, built once: a subshell per generated line makes the big reports slow
+PAD62=$(printf '%062d' 0 | tr 0 x)
+
 setup() {
   load helpers/gh-stub
   stub_gh
@@ -118,7 +121,7 @@ sent() { cat "$GH_INPUTS/$1"; }
 # long_report LINES writes a report of numbered lines of 80 bytes each.
 long_report() {
   { echo '## Maintenance monitor'; echo
-    for i in $(seq 1 "$1"); do printf 'line %06d %s\n' "$i" "$(head -c 62 /dev/zero | tr '\0' x)"; done; } >"$REPORT"
+    for i in $(seq 1 "$1"); do printf 'line %06d %s\n' "$i" "$PAD62"; done; } >"$REPORT"
 }
 
 @test "a report above GitHub's limit is cut at a line boundary with a note" {
@@ -145,7 +148,7 @@ long_report() {
   { echo '## Maintenance monitor'; echo
     echo '<details open><summary>s</summary>'; echo
     echo '| Repository | Details | Fix at |'; echo '| --- | --- | --- |'
-    for i in $(seq 1 1000); do printf '| r%06d | %s | |\n' "$i" "$(head -c 62 /dev/zero | tr '\0' x)"; done
+    for i in $(seq 1 1000); do printf '| r%06d | %s | |\n' "$i" "$PAD62"; done
     echo; echo '</details>'; } >"$REPORT"
   run "$SCRIPT" "$REPORT" "$TITLE"
   [ "$status" -eq 0 ]
@@ -336,9 +339,9 @@ comments() { gh_respond "*repos/spali/ctl/issues/$1/comments?per_page=100 --pagi
 
 @test "text and comment are each cut to GitHub's limit" {
   { echo '## Maintenance monitor'; echo
-    for i in $(seq 1 1000); do printf 'text %06d %s\n' "$i" "$(head -c 62 /dev/zero | tr '\0' x)"; done
+    for i in $(seq 1 1000); do printf 'text %06d %s\n' "$i" "$PAD62"; done
     echo "$MARK"
-    for i in $(seq 1 1000); do printf 'det %06d %s\n' "$i" "$(head -c 62 /dev/zero | tr '\0' x)"; done; } >"$REPORT"
+    for i in $(seq 1 1000); do printf 'det %06d %s\n' "$i" "$PAD62"; done; } >"$REPORT"
   issues '[{"number":7}]'
   comments 7 '[]'
   run --separate-stderr "$SCRIPT" "$REPORT" "$TITLE"
@@ -451,7 +454,7 @@ comments() { gh_respond "*repos/spali/ctl/issues/$1/comments?per_page=100 --pagi
 
 @test "a cut issue text keeps the pointer to the comment and stays within the limit" {
   { echo '## Maintenance monitor'; echo
-    for i in $(seq 1 1000); do printf 'text %06d %s\n' "$i" "$(head -c 62 /dev/zero | tr '\0' x)"; done
+    for i in $(seq 1 1000); do printf 'text %06d %s\n' "$i" "$PAD62"; done
     echo; echo "$MARK"; echo 'det'; } >"$REPORT"
   issues '[{"number":7}]'
   comments 7 '[]'

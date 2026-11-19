@@ -419,7 +419,8 @@ The release workflow must keep the tag filters of the examples: `-next` and
 
 ## Maintenance
 
-- **Change something here:** pull request with tests (`bats tests/`,
+- **Change something here:** pull request with tests
+  (`bats --jobs "$(nproc)" --no-parallelize-within-files tests/`,
   `shellcheck -x scripts/*.sh tests/helpers/*.bash`, `actionlint`), merge, then
   tag a new version and create a release:
   ```sh

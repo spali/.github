@@ -34,9 +34,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install bats
-        run: sudo apt-get update -q && sudo apt-get install -y -q bats
+        run: sudo apt-get update -q && sudo apt-get install -y -q bats parallel
       - name: Run tests
-        run: bats tests/
+        # one file per job; tests within a file run in order
+        run: bats --jobs "$(nproc)" --no-parallelize-within-files tests/
 
   actionlint:
     name: actionlint
