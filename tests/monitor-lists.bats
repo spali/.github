@@ -11,7 +11,7 @@ setup() {
   export FINDINGS INVENTORY CONFIG
   : >"$FINDINGS"
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/monitor-lists.sh"
-  unset GITHUB_REPOSITORY ARCHIVED
+  unset GITHUB_REPOSITORY ARCHIVED LISTS
   STACK="🚀 My stack"
   ARCH="🗃️ My stack Archive"
   MIRR="👀  Mirrors"
@@ -424,6 +424,22 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(message check-failed)" = "list-none: gh: Resource not accessible (HTTP 403)" ]
   [ "$(count list-none)" -eq 0 ]
   [ "$(count adoption)" -eq 1 ]
+}
+
+@test "LISTS gets the lists that were read, own repositories only" {
+  export LISTS="$BATS_TEST_TMPDIR/lists.json"
+  all_lists '(.[0].items = [["spali/a", false], ["other/x", false]]) | (.[5].items = [["spali/old", true]])'
+  run_script
+  [ "$(jq -c '.[0]' "$LISTS")" = '{"name":"🚀 My stack","items":[{"repo":"spali/a","archived":false}]}' ]
+  [ "$(jq -c '.[5].items' "$LISTS")" = '[{"repo":"spali/old","archived":true}]' ]
+  [ "$(jq length "$LISTS")" -eq 7 ]
+}
+
+@test "LISTS stays unwritten when the lists are unavailable" {
+  export LISTS="$BATS_TEST_TMPDIR/lists.json"
+  gh_fail '*graphql*' 'gh: Resource not accessible (HTTP 403)'
+  run_script
+  [ ! -e "$LISTS" ]
 }
 
 @test "LISTS_TOKEN is used for the GraphQL call" {

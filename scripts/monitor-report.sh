@@ -11,7 +11,9 @@
 # GITHUB_REPOSITORY, GITHUB_RUN_ID (optional, all three: link to the run),
 # report.timezone of CONFIG (default UTC: the time zone of the summary line),
 # FORK_KINDS (optional: JSON lines of monitor-forks.sh record_kind, the kind
-# of each fork or mirror; without it there is no section of forks).
+# of each fork or mirror; without it there is no section of forks), LISTS
+# (optional: the GitHub Lists of monitor-lists.sh; with them the forks section
+# shows the lists of each fork or mirror, without the lists.forks of CONFIG).
 # Exit status: 1 if a red finding is left, else 0.
 set -euo pipefail
 
@@ -23,7 +25,8 @@ TIME_RE='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?Z'
 
 # JQ program, run with -s over $FINDINGS, after $MONITOR_GROUPS_JQ.
 # Arguments: $cfg (slurped config), $inv (slurped inventory, [] without one),
-# $kinds (the fork kinds, [] without them),
+# $kinds (the fork kinds, [] without them), $lists (the GitHub Lists, null
+# without them),
 # $docs (URL of the check explanations), $control (URL of the control file,
 # may be empty), $todo (MONITOR_TODO), $now (time of the summary line),
 # $times (UTC time in a message -> the same time in the report time zone), $run
@@ -158,6 +161,13 @@ $cfg[0] as $cfg
       elif .kind == "customized" then "✏️ \(count(.own; "own commit"; "own commits"))"
       elif .kind == "mirror" then "🪞 mirror"
       else "⚪ unchanged" end;
+  # the other lists of the repository (without lists.forks), null without lists
+  def other_lists:
+    (.repo | ascii_downcase) as $r
+    | if $lists == null then null
+      else [$lists[] | select(.name | IN(($cfg.lists.forks // [])[]) | not)
+          | select(any(.items[]?; (.repo? | strings | ascii_downcase) == $r)) | .name | cell]
+        | if length == 0 then "–" else join(", ") end end;
   .
 | ($inv[0] | if type == "array" and length > 0 then . else null end) as $inventory
   # ignore-unused and findings without a repository concern no repository;
@@ -218,27 +228,24 @@ $cfg[0] as $cfg
       (if ($forks | length) > 0 then
         section("forks"; "🍴 Forks and mirrors"),
         "What each fork or mirror holds: 🤝 open pull requests upstream, ✏️ own commits on the default branch (the sync rebases them), ⚪ nothing of its own, 🪞 a mirror of a repository outside GitHub; 📌 pinned: not synced.\n",
-        "<details><summary>\(count($forks | length; "fork or mirror"; "forks and mirrors")), click to show</summary>\n",
-        "| Repository | Kind | Upstream |\n| --- | --- | --- |\n"
-          + ($forks | map("| \(.repo | repo_link) | \(kind_label)\(if .pinned then " · 📌 pinned" else "" end) | \(upstream_link) |") | join("\n")) + "\n",
-        "</details>\n"
+        "| Repository | Upstream | Kind |\(if $lists then " Lists |" else "" end)\n| --- | --- | --- |\(if $lists then " --- |" else "" end)\n"
+          + ($forks | map("| \(.repo | repo_link) | \(upstream_link) | \(kind_label)\(if .pinned then " · 📌 pinned" else "" end) |\(other_lists | if . then " \(.) |" else "" end)") | join("\n")) + "\n"
        else empty end),
       (if $clean then
         section("clean"; "✅ Clean"),
         (if ($clean | length) == 0 then "No repository without findings.\n"
-         else "<details><summary>\(count($clean | length; "repository"; "repositories")), click to show</summary>\n",
-           ($clean | map(repo_link) | join(", ")) + "\n", "</details>\n" end)
+         else ($clean | map(repo_link) | join(", ")) + "\n" end)
        else empty end),
       section("not-checked"; "⚪ Not checked"),
       (if $nskip == 0 then "Every check ran.\n"
        else "Checks that did not run in these repositories because they do not apply or the feature is not available there; the repositories were checked otherwise. Each line gives the reason.\n",
-         "<details><summary>\(count($nskip; "entry"; "entries")), click to show</summary>\n", reasons(level_rows("skip")), "</details>\n" end)
+         reasons(level_rows("skip")) end)
     ] | join("\n"))
   }'
 
 main() {
   need_env FINDINGS CONFIG
-  local result now tz run='' inv=(--argjson inv '[]') kinds='[]'
+  local result now tz run='' inv=(--argjson inv '[]') kinds='[]' lists='null'
   # a missing or broken inventory means none: no section of clean repositories
   if [[ -n ${INVENTORY:-} ]] && jq -e 'type == "array"' "$INVENTORY" >/dev/null 2>&1; then
     inv=(--slurpfile inv "$INVENTORY")
@@ -246,6 +253,11 @@ main() {
   # broken or missing fork kinds mean none
   if [[ -n ${FORK_KINDS:-} && -r $FORK_KINDS ]]; then
     kinds=$(jq -cs '[.[] | objects]' "$FORK_KINDS" 2>/dev/null) || kinds='[]'
+  fi
+  # broken or missing lists mean none: no lists column
+  if [[ -n ${LISTS:-} && -r $LISTS ]]; then
+    lists=$(jq -c 'if type == "array" then map(objects | select(.name | type == "string")) else null end' "$LISTS" 2>/dev/null) || lists='null'
+    [[ -n $lists ]] || lists='null'
   fi
   # the time zone of the summary line (validated by monitor-config.sh), else UTC
   tz=$(jq -r '.report.timezone? // "UTC" | strings' "$CONFIG" 2>/dev/null) || tz=''
@@ -260,7 +272,7 @@ main() {
   if [[ -n ${GITHUB_SERVER_URL:-} && -n ${GITHUB_REPOSITORY:-} && -n ${GITHUB_RUN_ID:-} ]]; then
     run=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
   fi
-  result=$(jq -s --slurpfile cfg "$CONFIG" "${inv[@]}" --argjson kinds "$kinds" \
+  result=$(jq -s --slurpfile cfg "$CONFIG" "${inv[@]}" --argjson kinds "$kinds" --argjson lists "$lists" \
     --arg docs "${MONITOR_DOCS_URL:-https://github.com/spali/.github/blob/main/docs/monitor-checks.md}" \
     --arg control "${MONITOR_CONFIG_URL:-}" --argjson todo "$MONITOR_TODO" \
     --arg now "$now" --argjson times "$times" --arg run "$run" "$MONITOR_GROUPS_JQ$REPORT_JQ" "$FINDINGS")

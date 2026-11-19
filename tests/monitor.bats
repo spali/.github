@@ -326,7 +326,26 @@ EOS
   [ "$(wc -l <"$BATS_TEST_TMPDIR/work/fork-kinds.jsonl")" -eq 1 ]
   phase report
   [ "$status" -eq 0 ]
-  grep -qF '| [o/f](https://github.com/o/f) | ✏️ 1 own commit | [up/f](https://github.com/up/f) |' "$BATS_TEST_TMPDIR/work/report.md"
+  grep -qF '| [o/f](https://github.com/o/f) | [up/f](https://github.com/up/f) | ✏️ 1 own commit |' "$BATS_TEST_TMPDIR/work/report.md"
+}
+
+@test "the lists phase writes the lists, the report shows them for the forks" {
+  printf '#!/usr/bin/env bash\necho "{\\"repo\\":\\"o/f\\",\\"kind\\":\\"unchanged\\",\\"pinned\\":false,\\"own\\":0,\\"pulls\\":[],\\"upstream\\":\\"up/f\\"}" >>"$FORK_KINDS"\n' \
+    >"$MONITOR_SCRIPTS_DIR/monitor-forks.sh"
+  printf '#!/usr/bin/env bash\necho "[{\\"name\\":\\"Home\\",\\"items\\":[{\\"repo\\":\\"o/f\\",\\"archived\\":false}]}]" >"$LISTS"\n' \
+    >"$MONITOR_SCRIPTS_DIR/monitor-lists.sh"
+  phase config
+  phase inventory
+  echo stale >"$BATS_TEST_TMPDIR/work/lists.json"
+  phase forks
+  [ "$status" -eq 0 ]
+  # only the lists phase writes the lists
+  [ "$(cat "$BATS_TEST_TMPDIR/work/lists.json")" = stale ]
+  phase lists
+  [ "$status" -eq 0 ]
+  phase report
+  [ "$status" -eq 0 ]
+  grep -qF '| [o/f](https://github.com/o/f) | [up/f](https://github.com/up/f) | ⚪ unchanged | Home |' "$BATS_TEST_TMPDIR/work/report.md"
 }
 
 @test "billing phase runs the billing script with the whole inventory and the account token" {

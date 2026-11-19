@@ -9,7 +9,10 @@
 # FINDINGS INVENTORY CONFIG (file paths), optional ARCHIVED (JSON array of
 # the archived repositories as {name, fork}; missing, empty or unreadable:
 # none), LISTS_TOKEN (used as GH_TOKEN for the GraphQL call only),
-# GITHUB_REPOSITORY (the control repository, for sync-failed).
+# GITHUB_REPOSITORY (the control repository, for sync-failed), LISTS
+# (optional file path: gets the lists that were read, own repositories only,
+# as [{name, items: [{repo, archived}]}]; stays unwritten when they are
+# unavailable).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
 # shellcheck source=scripts/forks-lib.sh
@@ -105,6 +108,7 @@ main() {
   local tmp rows level check repo message
   tmp=$(mktemp)
   if fetch_lists "$tmp"; then
+    [[ -z ${LISTS:-} ]] || cp "$tmp" "$LISTS"
     if rows=$(list_findings "$tmp" 2>/dev/null); then
       while IFS=$'\t' read -r level check repo message; do
         [[ -n $level ]] || continue
