@@ -19,9 +19,7 @@ setup() {
   F2="♻️ Customization forks"
   PIN="📌 Pinned snapshots"
   EXT="🔍 Interesting and related"
-  jq -n '{lists: {exclusive: [["🚀 My stack", "🗃️ My stack Archive"],
-      ["▶️ Contribution forks", "♻️ Customization forks"]],
-      archived: ["🗃️ My stack Archive", "📌 Pinned snapshots"],
+  jq -n '{lists: {exclusive: [["▶️ Contribution forks", "♻️ Customization forks"]],
       mirrors: {synced: ["👀  Mirrors"], other: ["▶️ Contribution forks", "♻️ Customization forks"]},
       external: ["🔍 Interesting and related"]}}' >"$CONFIG"
   inv spali/a false false true
@@ -39,9 +37,9 @@ lists() {
     (.items | map({nameWithOwner: .[0], isArchived: .[1]}))}})}}}}" | gh_respond '*graphql*' -
 }
 
-# all_lists JQ_ITEMS: all seven lists (0 stack, 1 archive, 2 synced mirrors,
-# 3 and 4 other mirrors lists, 5 pinned snapshots, 6 external), JQ_ITEMS sets
-# the items of some.
+# all_lists JQ_ITEMS: all seven lists on GitHub (0 stack, 1 archive and 5
+# pinned snapshots, both not configured, 2 synced mirrors, 3 and 4 other
+# mirrors lists, 6 external), JQ_ITEMS sets the items of some.
 all_lists() {
   lists "[\"$STACK\", \"$ARCH\", \"$MIRR\", \"$F1\", \"$F2\", \"$PIN\", \"$EXT\"] | map({name: ., items: []}) | $1"
 }
@@ -51,7 +49,8 @@ config() {
   jq "$1" "$CONFIG" >"$CONFIG.n" && mv "$CONFIG.n" "$CONFIG"
 }
 
-# archived JSON_ARRAY: the archived repositories of the inventory phase.
+# archived JSON_ARRAY: the archived repositories of the inventory phase
+# ({name, fork}).
 archived() {
   printf '%s\n' "$1" >"$BATS_TEST_TMPDIR/archived.json"
   export ARCHIVED="$BATS_TEST_TMPDIR/archived.json"
@@ -125,12 +124,12 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
 }
 
 @test "list-contradiction: repo in both lists of an exclusive pair" {
-  all_lists '(.[0].items = [["spali/a", false]]) | (.[1].items = [["spali/a", false]])'
+  all_lists '(.[3].items = [["spali/a", false]]) | (.[4].items = [["spali/a", false]])'
   run_script
   [ "$(count list-contradiction)" -eq 1 ]
   [ "$(level list-contradiction)" = info ]
   [ "$(repo list-contradiction)" = spali/a ]
-  [ "$(message list-contradiction)" = 'in "🚀 My stack" and "🗃️ My stack Archive"' ]
+  [ "$(message list-contradiction)" = 'in "▶️ Contribution forks" and "♻️ Customization forks"' ]
 }
 
 @test "managed non-fork mirror in no mirrors list is list-none, not list-mirror-missing" {
@@ -219,7 +218,7 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
 }
 
 @test "unmanaged is reported per synced list" {
-  config '.lists.mirrors.synced = ["👀  Mirrors", "📌 Pinned snapshots"] | .lists.archived = ["🗃️ My stack Archive"]'
+  config '.lists.mirrors.synced = ["👀  Mirrors", "📌 Pinned snapshots"]'
   all_lists '(.[2].items = [["spali/x", false]]) | (.[5].items = [["spali/x", false]])'
   run_script
   [ "$(count unmanaged)" -eq 2 ]
@@ -261,14 +260,11 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(message list-external-own)" = 'own repository in "🔍 Interesting and related"' ]
 }
 
-@test "archived own repository in an external list is only list-archived" {
-  archived '["spali/old"]'
-  all_lists '(.[0].items = [["spali/a", false]]) | (.[1].items = [["spali/old", true]]) | (.[6].items = [["spali/old", true]])'
+@test "archived own repository in an external list is list-external-own" {
+  archived '[{"name": "spali/old", "fork": false}]'
+  all_lists '(.[0].items = [["spali/a", false], ["spali/old", true]]) | (.[6].items = [["spali/old", true]])'
   run_script
-  [ "$(count list-external-own)" -eq 0 ]
-  [ "$(count list-archived)" -eq 1 ]
-  [ "$(message list-archived)" = 'archived, still in "🔍 Interesting and related"' ]
-  [ "$(jq -sc 'map(.check)' "$FINDINGS")" = '["list-archived"]' ]
+  [ "$(jq -sc 'map([.check, .repo, .message])' "$FINDINGS")" = '[["list-external-own","spali/old","own repository in \"🔍 Interesting and related\""]]' ]
 }
 
 @test "missing external list is config-invalid, no list-external-own" {
@@ -295,76 +291,66 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(jq -c 'has("list-mirror-missing")' <<<"$MONITOR_TODO")" = false ]
 }
 
-@test "list-archived: archived repo outside the archive list" {
-  all_lists '(.[0].items = [["spali/a", false], ["spali/old", true]]) | (.[3].items = [["spali/old", true]]) | (.[1].items = [["spali/old", true]])'
+@test "archived repo in a normal list is clean" {
+  archived '[{"name": "spali/old", "fork": false}]'
+  all_lists '(.[0].items = [["spali/a", false], ["spali/old", true]])'
   run_script
-  [ "$(count list-archived)" -eq 1 ]
-  [ "$(level list-archived)" = info ]
-  [ "$(repo list-archived)" = spali/old ]
-  [ "$(message list-archived)" = 'archived, still in "🚀 My stack", "▶️ Contribution forks"' ]
+  [ ! -s "$FINDINGS" ]
 }
 
 @test "archived repo in no list is list-none" {
-  archived '["spali/old"]'
+  archived '[{"name": "spali/old", "fork": false}]'
   all_lists '(.[0].items = [["spali/a", false]])'
   run_script
   [ "$(count list-none)" -eq 1 ]
   [ "$(level list-none)" = info ]
   [ "$(repo list-none)" = spali/old ]
-  [ "$(message list-none)" = "archived, in none of the archive lists" ]
+  [ "$(message list-none)" = "in no list" ]
 }
 
-@test "archived repo in Pinned snapshots is clean" {
-  archived '["spali/old"]'
-  all_lists '(.[0].items = [["spali/a", false]]) | (.[5].items = [["spali/old", true]])'
+@test "archived fork outside the mirrors lists is list-none" {
+  archived '[{"name": "spali/oldfork", "fork": true}, {"name": "spali/gone", "fork": true}]'
+  all_lists '(.[0].items = [["spali/a", false], ["spali/oldfork", true]])'
+  run_script
+  [ "$(jq -rs 'map(select(.check == "list-none") | "\(.repo) \(.message)") | join(",")' "$FINDINGS")" = "spali/oldfork in none of the mirrors lists,spali/gone in none of the mirrors lists" ]
+}
+
+@test "archived fork in a mirrors list is clean, also in the synced one" {
+  archived '[{"name": "spali/f1", "fork": true}, {"name": "spali/f2", "fork": true}]'
+  all_lists '(.[0].items = [["spali/a", false]]) | (.[2].items = [["spali/f1", true]]) | (.[3].items = [["spali/f2", true]])'
   run_script
   [ ! -s "$FINDINGS" ]
 }
 
-@test "archived fork in an archive list is clean" {
-  archived '["spali/oldfork"]'
-  all_lists '(.[0].items = [["spali/a", false]]) | (.[1].items = [["spali/oldfork", true]])'
+@test "archived repo in both lists of an exclusive pair is list-contradiction" {
+  archived '[{"name": "spali/oldfork", "fork": true}]'
+  all_lists '(.[0].items = [["spali/a", false]]) | (.[3].items = [["spali/oldfork", true]]) | (.[4].items = [["spali/oldfork", true]])'
+  run_script
+  [ "$(jq -sc 'map([.check, .repo])' "$FINDINGS")" = '[["list-contradiction","spali/oldfork"]]' ]
+}
+
+@test "lists not named in the control file are plain lists" {
+  archived '[{"name": "spali/old", "fork": false}]'
+  all_lists '(.[0].items = [["spali/a", false]]) | (.[1].items = [["spali/old", true]]) | (.[5].items = [["spali/a", false]])'
   run_script
   [ ! -s "$FINDINGS" ]
 }
 
-@test "archived repo in a normal list is list-archived" {
-  archived '["spali/old"]'
-  all_lists '(.[0].items = [["spali/a", false], ["spali/old", true]])'
-  run_script
-  [ "$(count list-archived)" -eq 1 ]
-  [ "$(repo list-archived)" = spali/old ]
-  [ "$(message list-archived)" = 'archived, still in "🚀 My stack"' ]
-  # in none of the archive lists either: both findings, one fix
-  [ "$(count list-none)" -eq 1 ]
-  [ "$(message list-none)" = "archived, in none of the archive lists" ]
-}
-
-@test "unknown archive list is config-invalid and no archived list-none" {
-  archived '["spali/old"]'
-  lists "[\"$STACK\", \"$ARCH\", \"$MIRR\", \"$F1\", \"$F2\", \"$EXT\"] | map({name: ., items: []}) | (.[0].items = [[\"spali/a\", false], [\"spali/old\", true]])"
-  run_script
-  [ "$(count config-invalid)" -eq 1 ]
-  [ "$(message config-invalid)" = 'list "📌 Pinned snapshots" not found on GitHub' ]
-  [ "$(count list-none)" -eq 0 ]
-}
-
-@test "without lists.archived archived repos get no list-none" {
-  jq '.lists |= del(.archived)' "$CONFIG" >"$CONFIG.n" && mv "$CONFIG.n" "$CONFIG"
-  archived '["spali/old"]'
-  all_lists '(.[0].items = [["spali/a", false]])'
-  run_script
-  [ ! -s "$FINDINGS" ]
+@test "no list-archived check is registered" {
+  source "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
+  [[ " ${MONITOR_CHECKS[*]} " != *" list-archived "* ]]
+  [ "$(jq -c 'has("list-archived")' <<<"$MONITOR_TODO")" = false ]
 }
 
 @test "no ARCHIVED file means no archived findings" {
   local a
-  for a in unset "$BATS_TEST_TMPDIR/missing.json" empty garbage; do
+  for a in unset "$BATS_TEST_TMPDIR/missing.json" empty garbage names; do
     : >"$FINDINGS"
     case $a in
       unset) unset ARCHIVED ;;
       empty) archived '' ;;
       garbage) archived '{not json' ;;
+      names) archived '["spali/old", {"fork": true}]' ;;
       *) export ARCHIVED=$a ;;
     esac
     all_lists '(.[0].items = [["spali/a", false]])'
@@ -382,11 +368,11 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
 @test "missing list name is config-invalid and dependent checks are skipped" {
   lists '[{name: "🚀 My stack", items: [["spali/a", false]]}, {name: "🗃️ My stack Archive", items: [["spali/a", false]]}]'
   run_script
-  [ "$(count config-invalid)" -eq 5 ]
+  [ "$(count config-invalid)" -eq 4 ]
   [ "$(level config-invalid)" = red ]
   [ "$(repo config-invalid)" = null ]
   jq -rs 'map(select(.check == "config-invalid") | .message) | index("list \"👀  Mirrors\" not found on GitHub")' "$FINDINGS" | grep -qx '[0-9]*'
-  [ "$(count list-contradiction)" -eq 1 ]
+  [ "$(count list-contradiction)" -eq 0 ]
   [ "$(count list-none)" -eq 0 ]
 }
 
@@ -519,7 +505,7 @@ GHEND
     '{data: {user: {lists: {nodes: [{name: "🚀 My stack", pad: $pad,
       items: {nodes: [{nameWithOwner: "spali/a", isArchived: false}]}}]}}}}' |
     gh_respond '*graphql*' -
-  echo '{"lists": {"archived": ["🚀 My stack"]}}' >"$CONFIG"
+  echo '{"lists": {"external": ["🚀 My stack"]}}' >"$CONFIG"
   run_script
   [ ! -s "$FINDINGS" ]
 }

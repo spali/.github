@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Builds the monitor's repository inventory: prints a JSON array to stdout.
-# Env: FINDINGS, MONITOR_ARCHIVED (optional file path: when set, the sorted
-# JSON array of the owned archived repository names is written there, `[]` if
-# there are none or the listing failed; archived repositories get no further
-# calls and are not part of the printed inventory). In Actions
+# Env: FINDINGS, MONITOR_ARCHIVED (optional file path: when set, the owned
+# archived repositories are written there as a JSON array of {name, fork},
+# sorted by name, `[]` if there are none or the listing failed; archived
+# repositories get no further calls and are not part of the printed
+# inventory). In Actions
 # (GITHUB_ACTIONS=true) the app's installation is listed; locally the user
 # token lists all owned repositories. A repository is central when it pins a
 # shared workflow other than the maintenance ones (monitor, its config check
@@ -75,7 +76,7 @@ main() {
   fi
   if [[ -n ${MONITOR_ARCHIVED:-} ]]; then
     jq -c --arg owner "$OWNER" \
-      '[.[] | select(.owner.login == $owner and .archived == true) | .full_name] | sort' \
+      '[.[] | select(.owner.login == $owner and .archived == true) | {name: .full_name, fork: (.fork == true)}] | sort_by(.name)' \
       <<<"$repos" >"$MONITOR_ARCHIVED"
   fi
   repos=$(jq -c --arg owner "$OWNER" \

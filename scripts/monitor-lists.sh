@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# GitHub Lists drift (list-none, list-contradiction, list-archived,
-# list-external-own, unmanaged, config-invalid for unknown list names) and
-# release-flow adoption, and sync-failed (managed-lib.sh; here because it runs
-# once). Archived repositories are judged only by the archive Lists
-# (lists.archived). Forks and repositories under `managed:` belong in a
-# mirrors List (lists.mirrors.synced or .other); every repository in a synced
-# List must be under `managed:`; own repositories do not belong in
-# lists.external. Writes findings only. Env: FINDINGS INVENTORY CONFIG (file
-# paths), optional ARCHIVED (JSON array of the archived repository names;
-# missing, empty or unreadable: none), LISTS_TOKEN (used as GH_TOKEN for the
-# GraphQL call only), GITHUB_REPOSITORY (the control repository, for
-# sync-failed).
+# GitHub Lists drift (list-none, list-contradiction, list-external-own,
+# unmanaged, config-invalid for unknown list names) and release-flow
+# adoption, and sync-failed (managed-lib.sh; here because it runs once).
+# Archived repositories (snapshots) go in the same Lists as active ones and
+# get the same list checks, except unmanaged. Forks and repositories under
+# `managed:` belong in a mirrors List (lists.mirrors.synced or .other); every
+# repository (not archived) in a synced List must be under `managed:`; own
+# repositories do not belong in lists.external. Writes findings only. Env:
+# FINDINGS INVENTORY CONFIG (file paths), optional ARCHIVED (JSON array of
+# the archived repositories as {name, fork}; missing, empty or unreadable:
+# none), LISTS_TOKEN (used as GH_TOKEN for the GraphQL call only),
+# GITHUB_REPOSITORY (the control repository, for sync-failed).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
 # shellcheck source=scripts/managed-lib.sh
@@ -41,13 +41,13 @@ fetch_lists() {
   printf '%s\n' "$trimmed" >"$1"
 }
 
-# archived_names prints the names in $ARCHIVED as one JSON array, [] when the
-# file is unset, missing, empty or not a JSON array.
-archived_names() {
-  local names
+# archived_repos prints the repositories in $ARCHIVED as one JSON array of
+# {name, fork}, [] when the file is unset, missing, empty or not a JSON array.
+archived_repos() {
+  local repos
   if [[ -n ${ARCHIVED:-} && -r $ARCHIVED ]] &&
-    names=$(jq -ce 'select(type == "array") | map(strings)' "$ARCHIVED" 2>/dev/null); then
-    printf '%s\n' "$names"
+    repos=$(jq -ce 'select(type == "array") | map(objects | select(.name | type == "string") | {name, fork: (.fork == true)})' "$ARCHIVED" 2>/dev/null); then
+    printf '%s\n' "$repos"
   else
     echo '[]'
   fi
@@ -56,50 +56,41 @@ archived_names() {
 # Prints TSV lines "level check repo message" for every list finding.
 list_findings() {
   local arch
-  arch=$(archived_names)
+  arch=$(archived_repos)
   jq -r --slurpfile inv "$INVENTORY" --slurpfile cfg "$CONFIG" --argjson arch "$arch" '
     ($cfg[0].lists // {}) as $cl |
-    ($cl.archived // []) as $al |
     (($cl.mirrors | objects) // {}) as $mc |
     ($mc.synced // []) as $sl |
     ((($mc.other // []) + $sl) | unique) as $ml |
     ($cl.external // []) as $el |
     [($cfg[0].managed // [])[].repo | ascii_downcase] as $known |
+    ([$inv[0][] | {name, fork}] + $arch) as $repos |
     . as $lists |
     ([$lists[].name]) as $have |
-    ([($cl.exclusive // [])[][], $al[], $ml[], $el[]] | unique) as $used |
+    ([($cl.exclusive // [])[][], $ml[], $el[]] | unique) as $used |
     ($used - $have) as $missing |
     def ok($n): ($missing | index($n)) == null;
-    (($al | length) > 0 and ($al | all(.[]; ok(.)))) as $arch_ok |
     def inlists($r): [$lists[] | select(any(.items[]; .repo == $r)) | .name];
-    def items($n): [$lists[] | select(.name == $n) | .items[] | select(.archived | not) | .repo] | unique[];
+    def items($n): [$lists[] | select(.name == $n) | .items[] | .repo] | unique[];
+    def active($n): [$lists[] | select(.name == $n) | .items[] | select(.archived | not) | .repo] | unique[];
     def row($l; $c; $r; $m): [$l, $c, $r, $m] | @tsv;
     ($missing[] | row("red"; "config-invalid"; "-"; "list \"\(.)\" not found on GitHub")),
     (($ml | length > 0) as $ml_set | ($ml | all(.[]; ok(.))) as $ml_ok |
-      $inv[0][] | . as $i | inlists($i.name) as $in |
+      $repos[] | . as $i | inlists($i.name) as $in |
       if $ml_set and ($i.fork or ($i.name | ascii_downcase | IN($known[]))) then
         if $ml_ok and ($in | any(.[]; IN($ml[])) | not)
         then row("info"; "list-none"; $i.name; "in none of the mirrors lists") else empty end
       elif ($in | length) == 0 then row("info"; "list-none"; $i.name; "in no list")
       else empty end),
-    (select($arch_ok) | $arch[] | . as $r |
-      select(inlists($r) | any(.[]; IN($al[])) | not) |
-      row("info"; "list-none"; $r; "archived, in none of the archive lists")),
     (($cl.exclusive // [])[] | select(ok(.[0]) and ok(.[1])) | . as [$a, $b] |
-      $inv[0][] | .name as $r | inlists($r) as $in |
+      $repos[] | .name as $r | inlists($r) as $in |
       select(($in | index($a)) != null and ($in | index($b)) != null) |
       row("info"; "list-contradiction"; $r; "in \"\($a)\" and \"\($b)\"")),
-    ($sl | unique[] | select(ok(.)) | . as $m | items($m) |
+    ($sl | unique[] | select(ok(.)) | . as $m | active($m) |
       select(ascii_downcase | IN($known[]) | not) |
       row("info"; "unmanaged"; .; "in \"\($m)\" but not managed")),
     ($el | unique[] | select(ok(.)) | . as $e | items($e) |
-      row("info"; "list-external-own"; .; "own repository in \"\($e)\"")),
-    (select($arch_ok) |
-      [$lists[] | select(.name | IN($al[]) | not) | .name as $n |
-        .items[] | select(.archived) | {repo, n: $n}] |
-      group_by(.repo)[] |
-      row("info"; "list-archived"; .[0].repo;
-        "archived, still in " + (map("\"\(.n)\"") | join(", "))))
+      row("info"; "list-external-own"; .; "own repository in \"\($e)\""))
   ' "$1"
 }
 

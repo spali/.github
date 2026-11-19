@@ -6,8 +6,8 @@
 # Usage: monitor.sh            all phases, prints only the report (local run)
 #        monitor.sh PHASE      one phase, prints its log (one workflow step
 #                              each); the phases share the dir $MONITOR_WORK
-# The inventory phase also writes archived.json (names of the archived
-# repositories, kept apart: only the lists check looks at them).
+# The inventory phase also writes archived.json (name and fork flag of the
+# archived repositories, kept apart: only the lists check looks at them).
 # Phases, in order: config inventory release settings health forks
 # managed lists billing report issue. A check phase lists every repository it
 # looked at (clean ones with ✓, the others as a log group with their findings)

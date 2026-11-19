@@ -252,6 +252,8 @@ to keep it synced.
 # Lists
 
 The GitHub Lists of the owner (stars), named in `lists` of `repos.yml`.
+Archived repositories (snapshots) go in the same Lists as active ones and get
+the same checks, except `unmanaged`: an archived repository is not synced.
 
 ## list-none
 
@@ -259,16 +261,13 @@ The GitHub Lists of the owner (stars), named in `lists` of `repos.yml`.
 `managed:` (such as a mirror of a repository outside GitHub) is in none of the
 mirrors lists of `lists.mirrors` (`synced` and `other`, for example
 "👀  Mirrors", "▶️ Contribution forks", "♻️ Customization forks"; message
-`in none of the mirrors lists`), or an archived repository is in none of the
-archive lists of `lists.archived` (`archived, in none of the archive lists`).
-Archived repositories, forks too, are judged only by the archive lists. The
-mirrors and archive variants are not reported while one of their configured
-Lists is missing (that is `config-invalid`); "in no list" is still reported.
+`in none of the mirrors lists`). Archived repositories count too. The
+mirrors variant is not reported while one of the configured mirrors Lists is
+missing (that is `config-invalid`); "in no list" is still reported.
 Without mirrors lists, forks and managed repositories get the plain
 `in no list` rule.
 
-**Fix:** add it to a list (a fork or managed repository to a mirrors list, an
-archived repository to an archive list).
+**Fix:** add it to a list (a fork or managed repository to a mirrors list).
 
 ## list-contradiction
 
@@ -276,20 +275,12 @@ archived repository to an archive list).
 
 **Fix:** remove it from one of them.
 
-## list-archived
-
-🔵 An archived repository is still in a list that is not one of the archive
-lists of `lists.archived` (`archived, still in "<list>"`).
-
-**Fix:** move it to an archive list.
-
 ### Freeze a fork or mirror
 
 To keep a fork or mirror at its current state, without syncs or checks:
-archive it on GitHub and put it in an archive list, such as
-"📌 Pinned snapshots" (named in `lists.archived`). The monitor then checks it
-only for its lists. To move it to a newer state, unarchive it, sync it, and
-archive it again.
+archive it on GitHub and leave it in its List (a fork in a mirrors list). The
+monitor then checks it only for its lists. To move it to a newer state,
+unarchive it, sync it, and archive it again.
 
 A repository under `managed:` must first be removed from `managed:` (the sync
 cannot push to an archived repository); until then the monitor reports it as
@@ -297,9 +288,9 @@ cannot push to an archived repository); until then the monitor reports it as
 
 ## list-external-own
 
-🔵 An own repository (not archived) is in a list of `lists.external`, such as
-"🔍 Interesting and related", which is for repositories of others
-(`own repository in "<list>"`). An archived one is `list-archived` instead.
+🔵 An own repository (archived ones too) is in a list of `lists.external`,
+such as "🔍 Interesting and related", which is for repositories of others
+(`own repository in "<list>"`).
 
 **Fix:** move own work to your stack list and own forks to a mirrors list
 (`lists.mirrors`).

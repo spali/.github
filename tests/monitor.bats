@@ -287,20 +287,20 @@ check_stub() {
 @test "inventory phase keeps the archived repositories apart" {
   cat >"$MONITOR_SCRIPTS_DIR/monitor-repos.sh" <<EOS
 #!/usr/bin/env bash
-echo '["spali/old","spali/older"]' >"\$MONITOR_ARCHIVED"
+echo '[{"name":"spali/old","fork":false},{"name":"spali/older","fork":true}]' >"\$MONITOR_ARCHIVED"
 cat "$BATS_TEST_TMPDIR/inventory.json"
 EOS
   phase config
   phase inventory
   [ "$status" -eq 0 ]
   [[ $output == *", $(jq 'map(select(.fork)) | length' "$FIX/inventory.json") forks, 2 archived" ]]
-  [ "$(jq -c . "$BATS_TEST_TMPDIR/work/archived.json")" = '["spali/old","spali/older"]' ]
+  [ "$(jq -c . "$BATS_TEST_TMPDIR/work/archived.json")" = '[{"name":"spali/old","fork":false},{"name":"spali/older","fork":true}]' ]
 }
 
 @test "lists phase gets the archived repositories" {
   cat >"$MONITOR_SCRIPTS_DIR/monitor-repos.sh" <<EOS
 #!/usr/bin/env bash
-echo '["spali/old"]' >"\$MONITOR_ARCHIVED"
+echo '[{"name":"spali/old","fork":false}]' >"\$MONITOR_ARCHIVED"
 cat "$BATS_TEST_TMPDIR/inventory.json"
 EOS
   printf '#!/usr/bin/env bash\ncp "$ARCHIVED" "%s/archived.seen"\n' "$BATS_TEST_TMPDIR" >"$MONITOR_SCRIPTS_DIR/monitor-lists.sh"
@@ -308,7 +308,7 @@ EOS
   phase inventory
   phase lists
   [ "$status" -eq 0 ]
-  [ "$(jq -c . "$BATS_TEST_TMPDIR/archived.seen")" = '["spali/old"]' ]
+  [ "$(jq -c . "$BATS_TEST_TMPDIR/archived.seen")" = '[{"name":"spali/old","fork":false}]' ]
 }
 
 @test "billing phase runs the billing script with the whole inventory and the account token" {

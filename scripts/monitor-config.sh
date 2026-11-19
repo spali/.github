@@ -36,10 +36,8 @@ def need($e; $k; $path; test_):
 
 if type != "object" then "top level must be a mapping" else
   (if .version != 1 then "version must be 1" else empty end),
-  (keys[] | select(IN("version", "monitor", "lists", "managed", "ignores", "mirrors", "forks", "unanswered", "billing") | not)
+  (keys[] | select(IN("version", "monitor", "lists", "managed", "ignores", "unanswered", "billing") | not)
     | "unknown key \(.)"),
-  (if has("forks") then "`forks:` was removed: move the entry to `managed:`" else empty end),
-  (if has("mirrors") then "`mirrors:` was removed: move the entry to `managed:`" else empty end),
   (if has("monitor") and (.monitor | type) != "object" then "monitor must be a mapping" else empty end),
   (if (.monitor | type) == "object" then
      (.monitor | keys[] | select(IN("jobs", "runs-on") | not) | "monitor: unknown key \(.)"),
@@ -78,21 +76,17 @@ if type != "object" then "top level must be a mapping" else
    else empty end),
   (if has("lists") and (.lists | type) != "object" then "lists must be a mapping" else empty end),
   (if (.lists | type) == "object" then
-     (.lists | keys[] | select(IN("exclusive", "archive", "archived", "mirrors", "forks", "external") | not)
+     (.lists | keys[] | select(IN("exclusive", "mirrors", "external") | not)
        | "lists: unknown key \(.)"),
-     (.lists | if has("archive") then "`lists.archive` was removed: use `lists.archived`" else empty end),
-     (.lists | if has("forks") then "`lists.forks` was removed: put the Lists under `lists.mirrors.other`" else empty end),
      (.lists | if has("mirrors") then
-        (.mirrors | if type == "string" then "`lists.mirrors` is now a mapping: put the List under `lists.mirrors.synced`"
-         elif type != "object" then "lists.mirrors must be a mapping"
+        (.mirrors | if type != "object" then "lists.mirrors must be a mapping"
          else (keys[] | select(IN("synced", "other") | not) | "lists.mirrors: unknown key \(.)"),
               (to_entries[] | select(.key | IN("synced", "other"))
                | select(.value | type == "array" and all(type == "string") | not)
                | "lists.mirrors.\(.key) must be a list of strings") end)
       else empty end),
-     (.lists | to_entries[] | select(.key == "external" or .key == "archived")
-       | select(.value | type == "array" and all(type == "string") | not)
-       | "lists.\(.key) must be a list of strings"),
+     (.lists | if has("external") and (.external | type == "array" and all(type == "string") | not)
+       then "lists.external must be a list of strings" else empty end),
      (.lists | if has("exclusive") then
         (if (.exclusive | type) != "array" then "lists.exclusive must be a list"
          else (.exclusive | to_entries[]

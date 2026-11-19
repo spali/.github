@@ -617,7 +617,7 @@ J
 @test "overview: an archived repo (not in the inventory) shows only its Lists finding" {
   layout
   findings <<'J'
-{"level":"info","check":"list-none","repo":"o/old","message":"archived, in none of the archive lists"}
+{"level":"info","check":"list-none","repo":"o/old","message":"in no list"}
 J
   run "$REPORT"
   [[ "$(section "📋 Overview")" == *'| [o/old](https://github.com/o/old) | – | – | – | – | – | [🔵](#user-content-f-list-none-o-old) |'* ]]
