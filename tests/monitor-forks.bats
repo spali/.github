@@ -717,15 +717,48 @@ kinds() { jq -sc 'map([.repo, .kind, .pinned, .own, .pulls, .upstream])' "$FORK_
   [ "$(kinds)" = '[["spali/f","unchanged",true,0,[],"up/f"]]' ]
   : >"$FORK_KINDS"
   : >"$GH_RESPONSES"
+  : >"$GH_LOG"
   mirror
   mirror_repo false 2026-11-01T00:00:00Z
   refs refs/heads/main:1 | git_respond "$SRC" -
   refs refs/heads/main:1 | git_respond "$TGT" -
   run_script
-  [ "$(jq -sc 'map([.repo, .kind, .pinned, .own])' "$FORK_KINDS")" = '[["spali/m","mirror",false,null]]' ]
+  # a mirror: own commits and past pull requests are not known
+  [ "$(jq -sc 'map([.repo, .kind, .pinned, .own, .merged, .closed])' "$FORK_KINDS")" = '[["spali/m","unknown",false,null,null,null]]' ]
+  run ! grep -q graphql "$GH_LOG"
+}
+
+PAST='*api graphql -f query=*'
+
+@test "a fork records the past pull requests of its owner upstream" {
+  export FORK_KINDS="$BATS_TEST_TMPDIR/kinds.jsonl"
+  respond_jq "$PAST" '{data: {merged: {issueCount: 3}, closed: {issueCount: 1}}}'
+  run_script
+  [ "$(jq -sc 'map([.kind, .merged, .closed])' "$FORK_KINDS")" = '[["unchanged",3,1]]' ]
+  # one call, two searches by the owner of the fork in its parent
+  [ "$(grep -c 'api graphql' "$GH_LOG")" -eq 1 ]
+  grep -qF -- '-f merged=repo:up/f is:pr author:spali is:merged -f closed=repo:up/f is:pr author:spali is:closed is:unmerged' "$GH_LOG"
+}
+
+@test "past pull requests not available: check-failed, counts unknown" {
+  export FORK_KINDS="$BATS_TEST_TMPDIR/kinds.jsonl"
+  gh_fail "$PAST" 'gh: Something went wrong (HTTP 502)'
+  run_script
+  [ "$(jq -sc 'map([.kind, .own, .merged, .closed])' "$FORK_KINDS")" = '[["unchanged",0,null,null]]' ]
+  [ "$(count check-failed)" -eq 1 ]
+  [ "$(message check-failed)" = 'fork-delete-candidate: gh: Something went wrong (HTTP 502)' ]
+  : >"$FORK_KINDS"
+  : >"$FINDINGS"
+  : >"$GH_RESPONSES"
+  respond_jq "$PAST" '{data: {merged: null}}'
+  run_script
+  [ "$(jq -sc 'map([.merged, .closed])' "$FORK_KINDS")" = '[[null,null]]' ]
+  [ "$(count check-failed)" -eq 1 ]
 }
 
 @test "without FORK_KINDS nothing is recorded" {
   run_script
+  # nor are the past pull requests looked up
+  run ! grep -q graphql "$GH_LOG"
   [ ! -e "$BATS_TEST_TMPDIR/kinds.jsonl" ]
 }

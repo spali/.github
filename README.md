@@ -650,9 +650,12 @@ check: the repository, the details and a link to where to fix it. 🍴 Forks
 and mirrors lists every fork and mirror the forks check looked at
 with its upstream and what it holds: 🤝 contribution (its open pull requests
 upstream), ✏️ customized (the number of own commits on its default branch,
-which the sync rebases), ⚪ unchanged, 🪞 mirror (upstream outside GitHub),
-and 📌 when it is pinned; plus the GitHub Lists it is in besides the forks
-lists (`lists.forks`), when the lists check could read them. ✅ Clean
+which the sync rebases) or ⚪ unchanged, then the past pull requests of its
+owner upstream (✅ merged, ✖️ closed without merge; one GitHub search per
+fork), and 📌 when it is pinned. ❔ unknown stands for numbers that are not
+known: a mirror (upstream outside GitHub) is not counted. The last column
+holds the GitHub Lists it is in besides the forks lists (`lists.forks`),
+when the lists check could read them. ✅ Clean
 lists the repositories of the inventory without a red or info
 finding (ignored and not checked findings count as clean; without an
 inventory, in a local report, the section is left out). ⚪ Not checked
