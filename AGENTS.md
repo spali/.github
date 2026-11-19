@@ -288,8 +288,7 @@ resets the draft; repeat.
    with local `jq` so the test exercises the filter.
 3. Check every new `gh` flag and JSON field against the real `gh` (read-only
    commands); the stub accepts anything.
-4. Run `bats tests/`, `shellcheck -x scripts/*.sh tests/helpers/*.bash`,
-   `actionlint`.
+4. Run the checks of section 7 (bats, shellcheck, actionlint).
 5. PR with a Conventional Commits title, CI green, rebase merge.
 6. For workflow changes, test end to end in a repository that pins the new
    commit (scenarios: PR label/check, merge → draft + `-next`, dev build and
@@ -617,14 +616,17 @@ issue and the log of the failed step. Explanations for humans:
 ## 7. Verify `spali/.github` locally
 
 ```sh
-bats tests/                                        # all tests pass
+bats --jobs "$(nproc)" --no-parallelize-within-files tests/  # all tests pass
 shellcheck -x scripts/*.sh tests/helpers/*.bash    # no output
 actionlint                                         # no output
 actionlint examples/caller/*.yml                   # no output
 ```
 
 CI runs the same checks as the required checks `shellcheck`, `bats`,
-`actionlint`.
+`actionlint`. `--jobs` needs GNU `parallel`; it runs the test files in
+parallel, the tests of one file in order (in parallel within a file, bats is
+slower with few jobs). Every file must therefore stand alone: no state shared
+with other files, temporary files only in `$BATS_TEST_TMPDIR`.
 
 ## 8. Known limitations (accepted for now)
 

@@ -83,8 +83,9 @@ mk() {
   {
     echo 'version: 1'
     echo 'ignores:'
+    pad=$(printf '%080d' 0 | tr 0 x)
     for i in $(seq 1 3000); do
-      printf '  - {repo: spali/r%s, check: main-red, reason: "%s"}\n' "$i" "$(head -c 80 /dev/zero | tr '\0' x)"
+      printf '  - {repo: spali/r%s, check: main-red, reason: "%s"}\n' "$i" "$pad"
     done
   } >"$BATS_TEST_TMPDIR/big.yml"
   [ "$(stat -c %s "$BATS_TEST_TMPDIR/big.yml")" -gt 200000 ]
