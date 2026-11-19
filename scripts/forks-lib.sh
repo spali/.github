@@ -133,3 +133,27 @@ check_sync_failed() {
     [[ $open != '[]' || -n $plan ]] || return 0
   done <<<"$runs"
 }
+
+LISTS_QUERY='query { user(login: "spali") { lists(first: 50) { pageInfo { hasNextPage } nodes { name items(first: 100) { pageInfo { hasNextPage } nodes { ... on Repository { nameWithOwner isArchived } } } } } } }'
+
+# fetch_lists CHECK FILE [REPO] reads the GitHub Lists of spali into FILE as
+# [{name, items: [{repo, archived}]}], own repositories only (token
+# LISTS_TOKEN, else GH_TOKEN). Returns 1 when the lists are unavailable,
+# after a check-failed finding of CHECK for REPO (default: none).
+fetch_lists() {
+  local check=$1 repo=${3:--} body trimmed
+  body=$(GH_TOKEN="${LISTS_TOKEN:-${GH_TOKEN:-}}" fetch "$check" "$repo" graphql -f query="$LISTS_QUERY") || return 1
+  if jq -e '[.data.user.lists | .pageInfo.hasNextPage, (.nodes[].items.pageInfo.hasNextPage)] | any(. == true)' \
+    >/dev/null 2>&1 <<<"$body"; then
+    finding red check-failed "$repo" "lists: more than 50 lists or 100 items in a list, not all read"
+    return 1
+  fi
+  if ! trimmed=$(jq --arg o "spali/" '
+      [.data.user.lists.nodes[] | {name, items: [.items.nodes[] |
+        select((.nameWithOwner // "") | ascii_downcase | startswith($o)) |
+        {repo: .nameWithOwner, archived: (.isArchived // false)}]}]' 2>/dev/null <<<"$body"); then
+    parse_failed "$check" "$repo"
+    return 1
+  fi
+  printf '%s\n' "$trimmed" >"$2"
+}

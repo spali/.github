@@ -459,7 +459,7 @@ It checks five groups (archived repositories only by the Lists check):
 |---|---|---|
 | Release flow and settings | central repositories (those that use this flow) | stale dev builds and `-next` pre-releases, orphan tags, several drafts, pin behind the latest release, alert/PVR/Actions settings, rulesets |
 | Health | all repositories that are no fork and not under `forks:` | merge settings, red `main`, open Renovate pull requests, unanswered pull requests and issues, disabled workflows, Dependabot and code scanning alerts, branches of merged pull requests |
-| Forks | the own forks and the entries under `forks` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, manual rebases pending (not for pinned ones); delete candidates, old pull requests, branches of merged upstream pull requests |
+| Forks | the own forks and the entries under `forks` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, manual rebases pending (not for pinned ones); delete candidates (not the forks in `lists.external`), old pull requests, branches of merged upstream pull requests |
 | Lists | all repositories, archived ones too | GitHub Lists that contradict forks or mirrors (archived repositories stay in the normal lists, see [freeze a fork or mirror](docs/monitor-checks.md#freeze-a-fork-or-mirror); forks and entries in a forks list; no own repositories in `lists.external`, except forks and mirrors); repositories without the release flow; the last run of the control repository's sync failed |
 
 Once per run, for the whole account, the **billing** check (in the Lists job)

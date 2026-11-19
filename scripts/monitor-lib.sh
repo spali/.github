@@ -74,7 +74,7 @@ MONITOR_TODO='{
   "fork-behind": {"category": "cleanup", "areas": ["forks"], "title": "Bring forks and mirrors up to date",
     "text": "A synced fork or mirror misses upstream commits or tags for too long: read the sync run."},
   "fork-delete-candidate": {"category": "decide", "areas": ["forks"], "title": "Delete forks without own work?",
-    "text": "No own commits and no open pull request upstream: delete it, or archive or pin it to keep the state you reference."},
+    "text": "No own commits and no open pull request upstream: delete it, archive or pin it to keep the state you reference, or put it in a List of lists.external to keep following the upstream."},
   "list-none": {"category": "cleanup", "areas": ["lists"], "title": "Add repositories to a List",
     "text": "The repository is in no List, or a fork or mirror is in none of the forks Lists: add it to the right List."},
   "list-contradiction": {"category": "decide", "areas": ["lists"], "title": "Choose one of two exclusive Lists",

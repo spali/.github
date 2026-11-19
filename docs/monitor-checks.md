@@ -387,10 +387,14 @@ stopped ref: check upstream, then in the control repository run
 🔵 The fork has no own commits on its default branch, no open pull request
 upstream, and every branch of it also exists upstream or was the head of a
 closed or merged pull request from the fork (contribution done): nothing
-would be lost.
+would be lost. A fork in a list of `lists.external` (such as "🔍 Interesting
+and related") is kept on purpose to follow its upstream and is no candidate;
+the lists are read only for such a fork. When they cannot be read, the
+check is `check-failed` instead.
 
 **Fix:** delete the fork, or archive or pin it to keep the state you
-reference (see [Pin a fork or mirror](#pin-a-fork-or-mirror)).
+reference (see [Pin a fork or mirror](#pin-a-fork-or-mirror)), or add it to
+a list of `lists.external` to keep following its upstream.
 
 ## contribution-stale
 

@@ -581,6 +581,69 @@ only_main() {
   ! grep -q 'state=closed' "$GH_LOG"
 }
 
+LISTS_Q='*api graphql -f query=*lists(first: 50)*'
+# ext_lists JQ_ITEMS: the GraphQL answer of the lists, "🔍 Ext" with the
+# repositories JQ_ITEMS (array of names) and "🚀 Stack" with spali/other.
+ext_lists() {
+  respond_jq "$LISTS_Q" "{data: {user: {lists: {pageInfo: {hasNextPage: false}, nodes: [
+    {name: \"🔍 Ext\", items: {pageInfo: {hasNextPage: false}, nodes: ($1 | map({nameWithOwner: ., isArchived: false}))}},
+    {name: \"🚀 Stack\", items: {pageInfo: {hasNextPage: false}, nodes: [{nameWithOwner: \"spali/other\"}]}}]}}}}"
+}
+pure_fork_external() {
+  jq '.forks[0] |= del(.branches) | .lists.external = ["🔍 Ext"]' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  only_main
+}
+
+@test "pure fork in an external list is no delete candidate" {
+  pure_fork_external
+  ext_lists '["up/f", "Spali/F"]'
+  run_script
+  [ ! -s "$FINDINGS" ]
+  [ "$(grep -c 'lists(first: 50)' "$GH_LOG")" -eq 1 ]
+}
+
+@test "pinned pure fork in an external list is no delete candidate" {
+  pure_fork_external
+  jq '.forks[0].pinned = true' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  ext_lists '["spali/f"]'
+  run_script
+  [ ! -s "$FINDINGS" ]
+}
+
+@test "pure fork only in another list is a delete candidate" {
+  pure_fork_external
+  ext_lists '["spali/other"]'
+  run_script
+  [ "$(jq -sc 'map(.check)' "$FINDINGS")" = '["fork-delete-candidate"]' ]
+}
+
+@test "without external lists the lists are not read" {
+  jq '.forks[0] |= del(.branches)' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  only_main
+  run_script
+  [ "$(count fork-delete-candidate)" -eq 1 ]
+  run ! grep -q 'lists(first: 50)' "$GH_LOG"
+}
+
+@test "a fork that is no candidate does not read the lists" {
+  jq '.lists.external = ["🔍 Ext"]' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
+  run_script
+  run ! grep -q 'lists(first: 50)' "$GH_LOG"
+}
+
+@test "lists unreadable: check-failed, no delete candidate" {
+  pure_fork_external
+  gh_fail "$LISTS_Q" 'gh: Something went wrong (HTTP 502)'
+  run_script
+  [ "$(jq -sc 'map([.level, .check, .message])' "$FINDINGS")" = '[["red","check-failed","fork-delete-candidate: gh: Something went wrong (HTTP 502)"]]' ]
+  : >"$FINDINGS"
+  : >"$GH_RESPONSES"
+  only_main
+  respond_jq "$LISTS_Q" '{data: {user: {lists: {pageInfo: {hasNextPage: true}, nodes: []}}}}'
+  run_script
+  [ "$(jq -sc 'map([.level, .check, .message])' "$FINDINGS")" = '[["red","check-failed","lists: more than 50 lists or 100 items in a list, not all read"]]' ]
+}
+
 @test "fork with own commits on the default branch is not a candidate" {
   jq '.forks[0] |= del(.branches)' "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
   only_main
