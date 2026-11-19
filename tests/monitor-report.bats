@@ -828,3 +828,20 @@ J
   [ "$status" -le 1 ]
   [[ $output == *"## Maintenance monitor"* && $output != *"Forks and mirrors"* ]]
 }
+
+@test "the summary time is in report.timezone, with its abbreviation" {
+  config < <(jq '.report = {timezone: "Europe/Zurich"}' "$CONFIG")
+  run "$REPORT"
+  [[ $output == *' · updated 2026-11-16 20:45 CET'* ]]
+  MONITOR_NOW=$(date -u -d 2026-07-01T12:00:00Z +%s)
+  run "$REPORT"
+  [[ $output == *' · updated 2026-07-01 14:00 CEST'* ]]
+}
+
+@test "without report.timezone or with an invalid one the summary time is UTC" {
+  run "$REPORT"
+  [[ $output == *' · updated 2026-11-16 19:45 UTC'* ]]
+  config < <(jq '.report = {timezone: 1}' "$CONFIG")
+  run "$REPORT"
+  [[ $output == *' · updated 2026-11-16 19:45 UTC'* ]]
+}

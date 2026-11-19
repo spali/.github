@@ -501,3 +501,48 @@ YAML
   run --separate-stderr "$CONFIG" validate "$f"
   [ "$status" -eq 0 ]
 }
+
+@test "report.timezone is accepted" {
+  for v in UTC Europe/Zurich America/Argentina/Buenos_Aires Etc/GMT-2; do
+    f=$(printf 'version: 1\nreport:\n  timezone: %s\n' "$v" | mk ok.yml)
+    run --separate-stderr "$CONFIG" validate "$f"
+    [ "$status" -eq 0 ] || { echo "rejected: $v: $stderr"; return 1; }
+  done
+}
+
+@test "report: unknown key fails" {
+  f=$(printf 'version: 1\nreport:\n  tz: UTC\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"error: $f: report: unknown key tz"* ]]
+}
+
+@test "report must be a mapping" {
+  f=$(printf 'version: 1\nreport: UTC\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"error: $f: report must be a mapping"* ]]
+}
+
+@test "report.timezone must be a time zone name" {
+  for v in '""' 1 ../etc/passwd /UTC 'Europe//Zurich' '[UTC]'; do
+    f=$(printf 'version: 1\nreport:\n  timezone: %s\n' "$v" | mk bad.yml)
+    run --separate-stderr "$CONFIG" validate "$f"
+    [ "$status" -eq 1 ] || { echo "accepted: $v"; return 1; }
+    [[ $stderr == *"error: $f: report.timezone must be a time zone name like UTC or Europe/Zurich"* ]]
+  done
+}
+
+@test "report.timezone must be a known time zone" {
+  f=$(printf 'version: 1\nreport:\n  timezone: Europe/Atlantis\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: $f: report.timezone: unknown time zone Europe/Atlantis" ]
+}
+
+@test "an unknown time zone is listed after the other problems" {
+  f=$(printf 'version: 1\nfoo: 1\nreport:\n  timezone: Europe/Atlantis\n' | mk bad.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: $f: unknown key foo"$'\n'"error: $f: report.timezone: unknown time zone Europe/Atlantis" ]
+}
