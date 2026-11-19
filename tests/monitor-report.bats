@@ -845,3 +845,27 @@ J
   run "$REPORT"
   [[ $output == *' · updated 2026-11-16 19:45 UTC'* ]]
 }
+
+@test "times in messages are shown in report.timezone, daylight saving included" {
+  findings < <(printf '%s\n' \
+    '{"level":"red","check":"fork-behind","repo":"o/f","message":"1 tags differ, last push 2024-10-28T06:59:24Z"}' \
+    '{"level":"red","check":"fork-behind","repo":"o/g","message":"main: 3 upstream commits missing, oldest from 2024-07-01T12:00:00.5Z"}')
+  config < <(jq '.report = {timezone: "Europe/Zurich"}' "$CONFIG")
+  run "$REPORT"
+  [[ $output == *'| 1 tags differ, last push 2024-10-28 07:59 CET |'* ]]
+  [[ $output == *'| main: 3 upstream commits missing, oldest from 2024-07-01 14:00 CEST |'* ]]
+  [[ $output != *'T06:59:24Z'* && $output != *'T12:00:00.5Z'* ]]
+}
+
+@test "without report.timezone times in messages are shown in UTC" {
+  findings < <(printf '%s\n' '{"level":"info","check":"fork-behind","repo":"o/f","message":"last push 2024-10-28T06:59:24Z, again 2024-10-28T06:59:24Z"}')
+  run "$REPORT"
+  [[ $output == *'| last push 2024-10-28 06:59 UTC, again 2024-10-28 06:59 UTC |'* ]]
+}
+
+@test "text that only looks like a time is left alone" {
+  findings < <(printf '%s\n' '{"level":"info","check":"fork-behind","repo":"o/f","message":"tag 2024-13-45T99:99:99Z and 2024-10-28 plain"}')
+  config < <(jq '.report = {timezone: "Europe/Zurich"}' "$CONFIG")
+  run "$REPORT"
+  [[ $output == *'| tag 2024-13-45T99:99:99Z and 2024-10-28 plain |'* ]]
+}
