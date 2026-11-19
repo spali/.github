@@ -806,9 +806,10 @@ J
   [ "${lines[4]}" = '| [o/custom](https://github.com/o/custom) | [up/custom](https://github.com/up/custom) | ✏️ 1 own commit |' ]
   # the last record of a repository wins (case-insensitive)
   [ "${lines[5]}" = '| [O/Plain](https://github.com/O/Plain) | [up/plain](https://github.com/up/plain) | ✏️ 2 own commits |' ]
-  # unchanged, with past pull requests (only counts above 0) or without them
-  [ "${lines[6]}" = '| [o/nopast](https://github.com/o/nopast) | [up/nopast](https://github.com/up/nopast) | ⚪ unchanged · ❔ past pull requests unknown |' ]
-  [ "${lines[7]}" = '| [o/past](https://github.com/o/past) | [up/past](https://github.com/up/past) | ⚪ unchanged · ✅ 3 merged · ✖️ 1 closed |' ]
+  # unchanged, with past pull requests (only counts above 0) first, then
+  # without them
+  [ "${lines[6]}" = '| [o/past](https://github.com/o/past) | [up/past](https://github.com/up/past) | ⚪ unchanged · ✅ 3 merged · ✖️ 1 closed |' ]
+  [ "${lines[7]}" = '| [o/nopast](https://github.com/o/nopast) | [up/nopast](https://github.com/up/nopast) | ⚪ unchanged · ❔ past pull requests unknown |' ]
   # unknown own commits (a mirror) last
   [ "${lines[8]}" = '| [o/mirror](https://github.com/o/mirror) | [https://gitlab.example/m.git](https://gitlab.example/m.git) | ❔ unknown |' ]
   [ "${#lines[@]}" -eq 9 ]

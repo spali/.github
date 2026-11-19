@@ -147,10 +147,14 @@ $cfg[0] as $cfg
   (level_rows("red") | length) as $nred
 | (level_rows("info") | length) as $ninfo
 | (level_rows("skip") | length) as $nskip
-  # the kind of each fork or mirror, the last record per repository, by kind
+  # the kind of each fork or mirror, the last record per repository, by kind,
+  # within a kind the ones with past pull requests or pinned first
 | ($kinds | map(select(type == "object" and (.repo | type) == "string"))
     | group_by(.repo | ascii_downcase) | map(last)
-    | sort_by((.kind | {"contribution": 0, "customized": 1, "unchanged": 2}[.] // 3), (.repo | ascii_downcase))) as $forks
+    | sort_by((.kind | {"contribution": 0, "customized": 1, "unchanged": 2}[.] // 3),
+        (if (.merged | type) == "number" and .merged > 0 or (.closed | type) == "number" and .closed > 0
+            or .pinned == true then 0 else 1 end),
+        (.repo | ascii_downcase))) as $forks
 | def upstream_link:
     (.upstream // "") as $u
     | if $u | test("^https://") then "[\($u | cell)](\($u))"
