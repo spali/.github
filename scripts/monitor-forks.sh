@@ -197,16 +197,45 @@ check_branches() {
   done <<<"$list"
 }
 
-# record_kind REPO KIND PINNED OWN PULLS_JSON UPSTREAM appends the kind of a
-# fork or mirror to $FORK_KINDS (if set) as one JSON line {repo, kind
-# (contribution, customized, unchanged or mirror), pinned, own (own commits on
-# the default branch, null for a mirror), pulls (numbers of the open upstream
-# pull requests from it), upstream}: the report lists them.
+# PAST_QUERY: the pull requests of an author in a repository, merged and
+# closed without merge (two searches, counts only).
+PAST_QUERY='query($merged: String!, $closed: String!) {
+  merged: search(type: ISSUE, first: 0, query: $merged) { issueCount }
+  closed: search(type: ISSUE, first: 0, query: $closed) { issueCount } }'
+
+# past_pulls REPO PARENT prints the past pull requests of the owner of REPO
+# in PARENT as one JSON object {merged, closed} (counts), or {merged: null,
+# closed: null} when they are not available (a check-failed finding).
+past_pulls() {
+  local repo=$1 body counts q="repo:$2 is:pr author:${1%%/*}"
+  if body=$(fetch fork-delete-candidate "$repo" graphql -f query="$PAST_QUERY" \
+    -f merged="$q is:merged" -f closed="$q is:closed is:unmerged") &&
+    json_out fork-delete-candidate "$repo" counts -c '.data
+      | {merged: .merged.issueCount, closed: .closed.issueCount}
+      | if (.merged | type) == "number" and (.closed | type) == "number" then . else error("no counts") end' <<<"$body"; then
+    printf '%s\n' "$counts"
+  else
+    echo '{"merged":null,"closed":null}'
+  fi
+}
+
+# record_kind REPO KIND PINNED OWN PULLS_JSON UPSTREAM [PAST_JSON] appends the
+# kind of a fork or mirror to $FORK_KINDS (if set) as one JSON line {repo,
+# kind (contribution, customized, unchanged, or unknown when the own commits
+# are not known: a mirror), pinned, own (own commits on the default branch,
+# null when not known), merged and closed (past upstream pull requests of the
+# owner, merged and closed without merge; null when not known: a mirror),
+# pulls (numbers of the open upstream pull requests from it), upstream}: the
+# report lists them.
 record_kind() {
+  local past=${7:-}
   [[ -n ${FORK_KINDS:-} ]] || return 0
+  [[ -n $past ]] || past='{"merged":null,"closed":null}'
   jq -cn --arg repo "$1" --arg kind "$2" --argjson pinned "$3" --argjson own "$4" \
     --argjson pulls "$5" --arg upstream "$6" \
-    '{repo: $repo, kind: $kind, pinned: $pinned, own: $own, pulls: $pulls, upstream: $upstream}' >>"$FORK_KINDS"
+    --argjson past "$past" \
+    '{repo: $repo, kind: $kind, pinned: $pinned, own: $own, merged: $past.merged, closed: $past.closed,
+      pulls: $pulls, upstream: $upstream}' >>"$FORK_KINDS"
 }
 
 # fork_kind REPO BRANCH PARENT PARENT_BRANCH PRS_FILE PINNED prints the number
@@ -215,7 +244,7 @@ record_kind() {
 # PRS_FILE), customized (own commits) or unchanged. Prints nothing when the
 # comparison is not available (a check-failed finding on an API error).
 fork_kind() {
-  local repo=$1 branch=$2 parent=$3 pbranch=$4 prs=$5 pinned=$6 body n pulls kind=unchanged
+  local repo=$1 branch=$2 parent=$3 pbranch=$4 prs=$5 pinned=$6 body n pulls past kind=unchanged
   body=$(fetch fork-delete-candidate "$repo" \
     "repos/$parent/compare/$(uri "$pbranch")...${repo%%/*}:${repo#*/}:$(uri "$branch")") || return 0
   json_out fork-delete-candidate "$repo" n -r '.ahead_by // "x"' <<<"$body" || return 0
@@ -227,7 +256,8 @@ fork_kind() {
   elif ((n > 0)); then
     kind=customized
   fi
-  record_kind "$repo" "$kind" "$pinned" "$n" "$pulls" "$parent"
+  [[ -z ${FORK_KINDS:-} ]] || past=$(past_pulls "$repo" "$parent")
+  record_kind "$repo" "$kind" "$pinned" "$n" "$pulls" "$parent" "${past:-}"
   printf '%s\n' "$n"
 }
 
@@ -356,7 +386,7 @@ check_mirror() {
   heads_json "$tmp/tgt" >"$tmp/tb"
   heads_json "$tmp/src" >"$tmp/ub"
   check_branches "$repo" "$entry" "$default" "" "$updef" '[]' "$tmp/tb" "$tmp/ub" "$pushed"
-  record_kind "$repo" mirror false null '[]' "$upstream"
+  record_kind "$repo" unknown false null '[]' "$upstream"
 }
 
 # with_upstream ENTRY INFO prints ENTRY with the parent of the repository
@@ -395,7 +425,7 @@ check_repo() {
     if [[ $(jq -r .kind <<<"$entry") == fork ]]; then
       check_pinned_fork "$repo" "$entry" "$default" "$prs" "$tmp"
     else
-      record_kind "$repo" mirror true null '[]' "$(jq -r .upstream <<<"$entry")"
+      record_kind "$repo" unknown true null '[]' "$(jq -r .upstream <<<"$entry")"
     fi
   else
     check_settings "$repo" "$(jq -c .settings <<<"$entry")" "$info"

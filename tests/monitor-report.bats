@@ -787,12 +787,14 @@ J
 
 @test "forks section: each fork or mirror once, by kind, with its upstream" {
   cat >"$BATS_TEST_TMPDIR/kinds.jsonl" <<'J'
-{"repo":"o/plain","kind":"unchanged","pinned":false,"own":0,"pulls":[],"upstream":"up/plain"}
-{"repo":"o/mirror","kind":"mirror","pinned":false,"own":null,"pulls":[],"upstream":"https://gitlab.example/m.git"}
-{"repo":"o/custom","kind":"customized","pinned":false,"own":1,"pulls":[],"upstream":"up/custom"}
-{"repo":"o/b","kind":"customized","pinned":true,"own":3,"pulls":[],"upstream":"up/b"}
-{"repo":"o/contrib","kind":"contribution","pinned":false,"own":1,"pulls":[2,7],"upstream":"up/contrib"}
-{"repo":"O/Plain","kind":"customized","pinned":false,"own":2,"pulls":[],"upstream":"up/plain"}
+{"repo":"o/plain","kind":"unchanged","pinned":false,"own":0,"merged":0,"closed":0,"pulls":[],"upstream":"up/plain"}
+{"repo":"o/mirror","kind":"unknown","pinned":false,"own":null,"merged":null,"closed":null,"pulls":[],"upstream":"https://gitlab.example/m.git"}
+{"repo":"o/custom","kind":"customized","pinned":false,"own":1,"merged":0,"closed":0,"pulls":[],"upstream":"up/custom"}
+{"repo":"o/b","kind":"customized","pinned":true,"own":3,"merged":2,"closed":0,"pulls":[],"upstream":"up/b"}
+{"repo":"o/contrib","kind":"contribution","pinned":false,"own":1,"merged":0,"closed":0,"pulls":[2,7],"upstream":"up/contrib"}
+{"repo":"O/Plain","kind":"customized","pinned":false,"own":2,"merged":0,"closed":0,"pulls":[],"upstream":"up/plain"}
+{"repo":"o/past","kind":"unchanged","pinned":false,"own":0,"merged":3,"closed":1,"pulls":[],"upstream":"up/past"}
+{"repo":"o/nopast","kind":"unchanged","pinned":false,"own":0,"merged":null,"closed":null,"pulls":[],"upstream":"up/nopast"}
 J
   export FORK_KINDS="$BATS_TEST_TMPDIR/kinds.jsonl"
   run "$REPORT"
@@ -800,12 +802,16 @@ J
   run grep '^| ' <<<"$(section "🍴 Forks and mirrors")"
   [ "${lines[0]}" = '| Repository | Upstream | Kind |' ]
   [ "${lines[2]}" = '| [o/contrib](https://github.com/o/contrib) | [up/contrib](https://github.com/up/contrib) | 🤝 contribution: [#2](https://github.com/up/contrib/pull/2), [#7](https://github.com/up/contrib/pull/7) |' ]
-  [ "${lines[3]}" = '| [o/b](https://github.com/o/b) | [up/b](https://github.com/up/b) | ✏️ 3 own commits · 📌 pinned |' ]
+  [ "${lines[3]}" = '| [o/b](https://github.com/o/b) | [up/b](https://github.com/up/b) | ✏️ 3 own commits · ✅ 2 merged · 📌 pinned |' ]
   [ "${lines[4]}" = '| [o/custom](https://github.com/o/custom) | [up/custom](https://github.com/up/custom) | ✏️ 1 own commit |' ]
   # the last record of a repository wins (case-insensitive)
   [ "${lines[5]}" = '| [O/Plain](https://github.com/O/Plain) | [up/plain](https://github.com/up/plain) | ✏️ 2 own commits |' ]
-  [ "${lines[6]}" = '| [o/mirror](https://github.com/o/mirror) | [https://gitlab.example/m.git](https://gitlab.example/m.git) | 🪞 mirror |' ]
-  [ "${#lines[@]}" -eq 7 ]
+  # unchanged, with past pull requests (only counts above 0) or without them
+  [ "${lines[6]}" = '| [o/nopast](https://github.com/o/nopast) | [up/nopast](https://github.com/up/nopast) | ⚪ unchanged · ❔ past pull requests unknown |' ]
+  [ "${lines[7]}" = '| [o/past](https://github.com/o/past) | [up/past](https://github.com/up/past) | ⚪ unchanged · ✅ 3 merged · ✖️ 1 closed |' ]
+  # unknown own commits (a mirror) last
+  [ "${lines[8]}" = '| [o/mirror](https://github.com/o/mirror) | [https://gitlab.example/m.git](https://gitlab.example/m.git) | ❔ unknown |' ]
+  [ "${#lines[@]}" -eq 9 ]
   run "$REPORT"
   [[ "$(section "🍴 Forks and mirrors")" != *'<details>'* ]]
   # in the monitor comment, below the details marker
@@ -814,8 +820,8 @@ J
 
 @test "forks section: lists column with the other lists of each fork, without lists.forks" {
   cat >"$BATS_TEST_TMPDIR/kinds.jsonl" <<'J'
-{"repo":"o/a","kind":"unchanged","pinned":false,"own":0,"pulls":[],"upstream":"up/a"}
-{"repo":"o/b","kind":"unchanged","pinned":false,"own":0,"pulls":[],"upstream":"up/b"}
+{"repo":"o/a","kind":"unchanged","pinned":false,"own":0,"merged":0,"closed":0,"pulls":[],"upstream":"up/a"}
+{"repo":"o/b","kind":"unchanged","pinned":false,"own":0,"merged":0,"closed":0,"pulls":[],"upstream":"up/b"}
 J
   export FORK_KINDS="$BATS_TEST_TMPDIR/kinds.jsonl"
   config <<<'{"lists": {"forks": ["🍴 Forks & mirrors"]}}'

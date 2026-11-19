@@ -312,7 +312,7 @@ EOS
 }
 
 @test "the forks phase writes the fork kinds, the report reads them" {
-  printf '#!/usr/bin/env bash\necho "{\\"repo\\":\\"o/f\\",\\"kind\\":\\"customized\\",\\"pinned\\":false,\\"own\\":1,\\"pulls\\":[],\\"upstream\\":\\"up/f\\"}" >>"$FORK_KINDS"\n' \
+  printf '#!/usr/bin/env bash\necho "{\\"repo\\":\\"o/f\\",\\"kind\\":\\"customized\\",\\"pinned\\":false,\\"own\\":1,\\"merged\\":0,\\"closed\\":0,\\"pulls\\":[],\\"upstream\\":\\"up/f\\"}" >>"$FORK_KINDS"\n' \
     >"$MONITOR_SCRIPTS_DIR/monitor-forks.sh"
   phase config
   phase inventory
@@ -330,7 +330,7 @@ EOS
 }
 
 @test "the lists phase writes the lists, the report shows them for the forks" {
-  printf '#!/usr/bin/env bash\necho "{\\"repo\\":\\"o/f\\",\\"kind\\":\\"unchanged\\",\\"pinned\\":false,\\"own\\":0,\\"pulls\\":[],\\"upstream\\":\\"up/f\\"}" >>"$FORK_KINDS"\n' \
+  printf '#!/usr/bin/env bash\necho "{\\"repo\\":\\"o/f\\",\\"kind\\":\\"unchanged\\",\\"pinned\\":false,\\"own\\":0,\\"merged\\":0,\\"closed\\":0,\\"pulls\\":[],\\"upstream\\":\\"up/f\\"}" >>"$FORK_KINDS"\n' \
     >"$MONITOR_SCRIPTS_DIR/monitor-forks.sh"
   printf '#!/usr/bin/env bash\necho "[{\\"name\\":\\"Home\\",\\"items\\":[{\\"repo\\":\\"o/f\\",\\"archived\\":false}]}]" >"$LISTS"\n' \
     >"$MONITOR_SCRIPTS_DIR/monitor-lists.sh"

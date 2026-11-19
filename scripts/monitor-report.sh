@@ -150,17 +150,23 @@ $cfg[0] as $cfg
   # the kind of each fork or mirror, the last record per repository, by kind
 | ($kinds | map(select(type == "object" and (.repo | type) == "string"))
     | group_by(.repo | ascii_downcase) | map(last)
-    | sort_by((.kind | {"contribution": 0, "customized": 1, "unchanged": 2, "mirror": 3}[.] // 4), (.repo | ascii_downcase))) as $forks
+    | sort_by((.kind | {"contribution": 0, "customized": 1, "unchanged": 2}[.] // 3), (.repo | ascii_downcase))) as $forks
 | def upstream_link:
     (.upstream // "") as $u
     | if $u | test("^https://") then "[\($u | cell)](\($u))"
       elif $u == "" then "–" else $u | repo_link end;
+  # what the fork holds, then the past pull requests of its owner upstream;
+  # ❔ unknown when the numbers are missing (a mirror)
   def kind_label:
     (.upstream // "") as $u
-    | if .kind == "contribution" then "🤝 contribution: " + (.pulls | map("[#\(.)](https://github.com/\($u)/pull/\(.))") | join(", "))
-      elif .kind == "customized" then "✏️ \(count(.own; "own commit"; "own commits"))"
-      elif .kind == "mirror" then "🪞 mirror"
-      else "⚪ unchanged" end;
+    | if (.own | type) != "number" then "❔ unknown"
+      else (if .kind == "contribution" then "🤝 contribution: " + (.pulls | map("[#\(.)](https://github.com/\($u)/pull/\(.))") | join(", "))
+        elif .kind == "customized" then "✏️ \(count(.own; "own commit"; "own commits"))"
+        else "⚪ unchanged" end)
+        + (if (.merged | type) != "number" or (.closed | type) != "number" then " · ❔ past pull requests unknown"
+           else [(select(.merged > 0) | "✅ \(.merged) merged"), (select(.closed > 0) | "✖️ \(.closed) closed")]
+             | map(" · " + .) | join("") end)
+      end;
   # the other lists of the repository (without lists.forks), null without lists
   def other_lists:
     (.repo | ascii_downcase) as $r
@@ -227,7 +233,7 @@ $cfg[0] as $cfg
       (if $applies then "[↑ overview](#user-content-overview)\n" else empty end),
       (if ($forks | length) > 0 then
         section("forks"; "🍴 Forks and mirrors"),
-        "What each fork or mirror holds: 🤝 open pull requests upstream, ✏️ own commits on the default branch (the sync rebases them), ⚪ nothing of its own, 🪞 a mirror of a repository outside GitHub; 📌 pinned: not synced.\n",
+        "What each fork or mirror holds: 🤝 open pull requests upstream, ✏️ own commits on the default branch (the sync rebases them), ⚪ nothing of its own; past pull requests of its owner upstream: ✅ merged, ✖️ closed without merge; ❔ unknown: not counted (a mirror of a repository outside GitHub); 📌 pinned: not synced.\n",
         "| Repository | Upstream | Kind |\(if $lists then " Lists |" else "" end)\n| --- | --- | --- |\(if $lists then " --- |" else "" end)\n"
           + ($forks | map("| \(.repo | repo_link) | \(upstream_link) | \(kind_label)\(if .pinned then " · 📌 pinned" else "" end) |\(other_lists | if . then " \(.) |" else "" end)") | join("\n")) + "\n"
        else empty end),
