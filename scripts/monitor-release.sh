@@ -47,6 +47,8 @@ check_releases() {
     finding red several-drafts "$repo" "drafts: $lines"
   fi
 
+  # -next by its publish time: created_at is the date of its commit, which is
+  # older than a release published later for an older commit
   if json_out next-stale "$repo" latest -r \
     '[.[] | select(.draft == false and .prerelease == false)] |
      max_by(.published_at) | if . then .tag_name else empty end' "$rel" &&
@@ -55,7 +57,7 @@ check_releases() {
       '([.[] | select(.draft == false and .prerelease == false)] |
         max_by(.published_at) | .published_at) as $newest |
        .[] | select(.tag_name | test("-next$")) |
-       select(.created_at < $newest) | .tag_name' "$rel"; then
+       select((.published_at // .created_at) < $newest) | .tag_name' "$rel"; then
     while IFS= read -r tag; do
       [[ -z $tag ]] || finding red next-stale "$repo" "$tag is older than $latest"
     done <<<"$lines"

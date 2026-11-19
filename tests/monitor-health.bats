@@ -28,13 +28,20 @@ CS='*repos/spali/a/code-scanning/alerts?state=open&per_page=100 --paginate'
 ISS='*repos/spali/a/issues?state=open&per_page=100 --paginate'
 APERMS='*repos/spali/a/actions/permissions'
 APPROVAL='*repos/spali/a/actions/permissions/fork-pr-contributor-approval'
-MERGE='*graphql*owner=spali*name=a'
+MERGE='*graphql*mergeCommitAllowed*owner=spali*name=a'
+FUNDING='*graphql*fundingLinks*owner=spali*name=a'
 BRANCHES='*repos/spali/a/branches?per_page=100 --paginate'
 FIX="$BATS_TEST_DIRNAME/fixtures/monitor"
 
 # merge_json [FILTER]: the recorded compliant merge settings (GraphQL; REST
 # answers null for them to an app token), with an optional jq filter.
 merge_json() { jq -c "${1:-.}" "$FIX/settings-merge.json" | gh_respond "$MERGE" -; }
+
+# funding_json LINKS ENABLED: the number of funding links and the sponsor button.
+funding_json() {
+  respond_jq "$FUNDING" "{data: {repository: {hasSponsorshipsEnabled: $2,
+    fundingLinks: [range($1) | {platform: \"GITHUB\"}]}}}"
+}
 
 # pulls_on BRANCH JSON: the pulls of spali/a with head spali:BRANCH (all states).
 pulls_on() { respond_jq "*repos/spali/a/pulls?state=all&head=spali:$1&per_page=100 --paginate" "$2"; }
@@ -60,6 +67,7 @@ run_script() {
   respond_jq "$ISS" '[]'
   respond_jq "$APERMS" '{enabled: true}'
   respond_jq "$APPROVAL" '{approval_policy: "all_external_contributors"}'
+  funding_json 0 true
   merge_json
   respond_jq "$BRANCHES" '[{name: "main", commit: {sha: "m1"}}]'
   run --separate-stderr "$SCRIPT"
@@ -554,4 +562,40 @@ item_value() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $
   gh_fail "$BRANCHES" 'Server Error (HTTP 500)'
   run_script
   [ "$(message check-failed)" = "stale-branch: Server Error (HTTP 500)" ]
+}
+
+@test "funding: FUNDING.yml with the sponsor button off is info" {
+  funding_json 2 false
+  run_script
+  [ "$(count funding)" -eq 1 ]
+  [ "$(level funding)" = info ]
+  [ "$(message funding)" = "FUNDING.yml exists, but the sponsor button is off" ]
+}
+
+@test "funding: FUNDING.yml with the sponsor button on is fine" {
+  funding_json 2 true
+  run_script
+  [ "$(count funding)" -eq 0 ]
+}
+
+@test "funding: no FUNDING.yml is fine with either setting" {
+  for enabled in true false; do
+    : >"$FINDINGS"
+    : >"$GH_RESPONSES"
+    funding_json 0 "$enabled"
+    run_script
+    [ "$(count funding)" -eq 0 ]
+  done
+}
+
+@test "funding: an unreadable answer is check-failed" {
+  for answer in '{data: {repository: null}}' '{data: {repository: {fundingLinks: [{platform: "GITHUB"}]}}}'; do
+    : >"$FINDINGS"
+    : >"$GH_RESPONSES"
+    respond_jq "$FUNDING" "$answer"
+    run_script
+    [ "$(count funding)" -eq 0 ]
+    [ "$(count check-failed)" -eq 1 ]
+    [[ $(message check-failed) == "funding: "* ]]
+  done
 }

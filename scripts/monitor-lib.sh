@@ -6,7 +6,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 MONITOR_CHECKS=(
   devbuild-closed-pr orphan-tag several-drafts next-stale pin-behind
   settings-merge settings-alerts settings-pvr settings-actions
-  settings-fork-approval
+  settings-fork-approval funding
   ruleset-main ruleset-tags main-red renovate-stale workflow-disabled
   dependabot-alert code-scanning-alert unanswered stale-branch
   fork-missing fork-settings fork-behind fork-delete-candidate
@@ -47,6 +47,8 @@ MONITOR_TODO='{
     "text": "Workflows get write permissions by default, or Actions may approve pull requests: set the workflow token to read-only and turn off approving pull requests."},
   "settings-fork-approval": {"category": "cleanup", "areas": ["settings", "health", "forks"], "title": "Require approval for fork pull request workflows",
     "text": "Workflows of pull requests from forks run without approval and can pick a self-hosted runner: require approval for all external contributors."},
+  "funding": {"category": "cleanup", "areas": ["settings", "health", "forks"], "title": "Fix the sponsor button",
+    "text": "The sponsor button does not match the repository: on in an own repository with a FUNDING.yml, off in a fork or mirror (its FUNDING.yml belongs to the upstream)."},
   "ruleset-main": {"category": "cleanup", "areas": ["settings"], "title": "Restore the main ruleset",
     "text": "The ruleset that protects `main` is missing or differs from the documented one: restore it."},
   "ruleset-tags": {"category": "cleanup", "areas": ["settings"], "title": "Restore the tag ruleset",
@@ -290,6 +292,29 @@ check_fork_approval() {
   if [[ -n $out ]]; then
     finding red settings-fork-approval "$repo" "$out"
   fi
+}
+
+# check_funding REPO KIND: funding (info only). KIND "own": a FUNDING.yml
+# without the sponsor button wastes it. KIND "fork" (forks and mirrors): the
+# FUNDING.yml is the upstream's, so the button must be off. Read with GraphQL,
+# REST has neither value. Writes findings only and always returns 0.
+# shellcheck disable=SC2016 # GraphQL variables, no shell expansion wanted
+FUNDING_QUERY='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { hasSponsorshipsEnabled fundingLinks { platform } } }'
+check_funding() {
+  local repo=$1 kind=$2 body out
+  body=$(fetch funding "$repo" graphql -f query="$FUNDING_QUERY" \
+    -f owner="${repo%%/*}" -f name="${repo#*/}") || return 0
+  # shellcheck disable=SC2016 # jq program
+  json_out funding "$repo" out -r --arg kind "$kind" \
+    '.data.repository | if . == null then error("no repository") else . end |
+     if .hasSponsorshipsEnabled == null then error("no sponsor setting") else . end |
+     if $kind == "fork" then
+       (if .hasSponsorshipsEnabled then "the sponsor button is on in a fork or mirror" else "" end)
+     else
+       (if (.fundingLinks | length) > 0 and (.hasSponsorshipsEnabled | not)
+        then "FUNDING.yml exists, but the sponsor button is off" else "" end)
+     end' <<<"$body" || return 0
+  [[ -z $out ]] || finding info funding "$repo" "$out"
 }
 
 # check_merge REPO: settings-merge (expected values: README "Set up a new

@@ -104,6 +104,19 @@ request workflows from contributors": *Require approval for all external
 contributors*, or
 `gh api -X PUT repos/spali/<repo>/actions/permissions/fork-pr-contributor-approval -f approval_policy=all_external_contributors`.
 
+## funding
+
+🔵 The sponsor button does not match the repository. An own repository with a
+`.github/FUNDING.yml` has the button off, so the file has no effect. A fork or
+mirror has the button on: its `FUNDING.yml` is the upstream's, so the button
+would collect for the upstream on your repository. Read with GraphQL
+(`fundingLinks`, `hasSponsorshipsEnabled`).
+
+**Fix:** Settings → General → Features → *Sponsorships*: on for an own
+repository with a `FUNDING.yml`, off for a fork or mirror, or
+`gh api graphql -f query='mutation { updateRepository(input: {repositoryId: "<id>", hasSponsorshipsEnabled: true}) { repository { hasSponsorshipsEnabled } } }'`
+(`false` for a fork; the id from `gh api repos/spali/<repo> --jq .node_id`).
+
 ## ruleset-main
 
 🔴 The ruleset `main` is missing or differs: it must be active without bypass,

@@ -127,6 +127,13 @@ message() { jq -rs --arg c "$1" 'map(select(.check == $c)) | .[0].message' "$FIN
   [ ! -s "$FINDINGS" ]
 }
 
+@test "-next published after a release of an older commit is fine" {
+  releases '[{"tag_name":"v0.0.1","draft":false,"prerelease":false,"created_at":"2020-11-22T00:00:00Z","published_at":"2026-11-05T00:00:00Z"},
+    {"tag_name":"v0.0.2-next","draft":false,"prerelease":true,"created_at":"2026-11-04T00:00:00Z","published_at":"2026-11-06T00:00:00Z"}]'
+  run_script
+  [ ! -s "$FINDINGS" ]
+}
+
 @test "pin behind an 8-day-old release is red" {
   latest_release v1.1.0 2026-11-06T00:00:00Z
   inventory '[{"workflow":"pr.yml","sha":"6f26c6b1dcac0797c52055241f0cfb74a797ebe3","version":"v1.0.0"}]'
