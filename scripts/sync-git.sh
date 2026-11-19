@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Syncs the git refs of one managed fork or mirror.
+# Syncs the git refs of one fork or mirror.
 #
 #   sync-git.sh plan  fetches upstream (only the default branch, the onto
 #                     branches, the branches matching a follow pattern and,
@@ -12,8 +12,10 @@
 #                     $WORK/skipped.txt (<ref> <why>). Fails without a plan on
 #                     a conflict, a missing onto or an empty source.
 #                     The upstream default branch goes to the target default
-#                     branch. When their names differ (upstream renamed it)
-#                     and the target default is neither declared nor a
+#                     branch: fast-forwarded, or, with own commits, rebased
+#                     onto it like a declared auto branch (undeclared other
+#                     branches are left alone). When their names differ
+#                     (upstream renamed it) and the target default is neither declared nor a
 #                     contribution branch and has no commit beyond the
 #                     upstream default (upstream's name neither), it goes to
 #                     the branch of upstream's name instead, the old default
@@ -30,7 +32,9 @@
 #                     Nothing is lost or followed without a decision: a
 #                     default or followed branch that is no ancestor of
 #                     upstream is skipped as "upstream rewritten (...)" when
-#                     its record is no ancestor of upstream (else as
+#                     its record is no ancestor of upstream and it has no own
+#                     commits on top of its record (else a default branch is
+#                     handled as a declared one, a followed one is skipped as
 #                     undeclared); a declared branch that contains its record
 #                     is not rebased when the record is no ancestor of onto
 #                     (same reason, the plan goes on); a target tag that
@@ -51,9 +55,9 @@
 #                     target with ls-remote. On a mismatch it restores the old
 #                     shas (leases on the new ones) and fails. Prints
 #                     "<ref> <old>..<new> (<reason>)" per updated ref. The
-#                     caller must build TARGET_URL from the managed entry.
+#                     caller must build TARGET_URL from the entry.
 #
-# env: plan: ENTRY (the object of managed_entry), TARGET_URL, UPSTREAM_URL,
+# env: plan: ENTRY (the object of fork_entry), TARGET_URL, UPSTREAM_URL,
 #      WORK, optional SYNC_BRANCH (a branch name or *: also rebase manual
 #      branches; a missing manual branch is always created from its onto),
 #      optional SYNC_ACCEPT (a branch name, tags/<name> or *: accept the
@@ -510,10 +514,14 @@ plan() {
     if [[ $tg == "$ZERO" ]] || { [[ $tg != "$up" ]] && is_ancestor "$tg" "$up"; }; then
       add "refs/heads/$def" "$tg" "$up" ff
       record_line "$def" "$up"
-    elif [[ $tg != "$up" ]] && rewritten "$def" "$up"; then
+    elif [[ $tg != "$up" ]] && rewritten "$def" "$up" &&
+      { [[ $tg == "${RECR[$def]}" ]] || ! is_ancestor "${RECR[$def]}" "$tg"; }; then
+      # upstream rewritten, no own commits on top of the record
       rewrite_branch "$def" "$up" "$tg" ff
     elif [[ $tg != "$up" ]]; then
-      skip "refs/heads/$def" undeclared
+      # own commits: rebased onto the upstream default like a declared
+      # auto branch (an upstream rewrite stops it the same way)
+      rebase_branch "$def" "$udef"
     else
       record_line "$def" "$up"
     fi

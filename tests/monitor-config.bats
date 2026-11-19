@@ -127,11 +127,18 @@ YAML
   [[ $stderr != *"exclusive[0]"* ]]
 }
 
-@test "lists.mirrors must be a mapping" {
-  f=$(printf 'version: 1\nlists: {mirrors: [a]}\n' | mk bad.yml)
+@test "lists.forks must be a list of strings" {
+  f=$(printf 'version: 1\nlists: {forks: {synced: [a]}}\n' | mk bad.yml)
   run --separate-stderr "$CONFIG" validate "$f"
   [ "$status" -eq 1 ]
-  [[ $stderr == *"lists.mirrors must be a mapping"* ]]
+  [[ $stderr == *"lists.forks must be a list of strings"* ]]
+  f=$(printf 'version: 1\nlists: {forks: [a, 1]}\n' | mk bad2.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"lists.forks must be a list of strings"* ]]
+  f=$(printf 'version: 1\nlists:\n  forks: [a]\n  external: [c]\n' | mk ok.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
 }
 
 @test "lists.exclusive must be a list" {
@@ -173,19 +180,19 @@ YAML
   [ "$stderr" = "error: $f: monitor must be a mapping" ]
 }
 
-# managed_bad ENTRY_YAML_LINES EXPECTED: validation of a one-entry managed list.
-managed_bad() {
-  f=$(printf 'version: 1\nmanaged:\n%s\n' "$1" | mk bad.yml)
+# fork_bad ENTRY_YAML_LINES EXPECTED: validation of a one-entry forks list.
+fork_bad() {
+  f=$(printf 'version: 1\nforks:\n%s\n' "$1" | mk bad.yml)
   run --separate-stderr "$CONFIG" validate "$f"
   [ "$status" -eq 1 ]
   [[ $stderr == *"error: $f: $2"* ]]
 }
 
-@test "managed: exact keba example passes" {
+@test "forks: exact keba example passes" {
   f=$(
     mk ok.yml <<'YAML'
 version: 1
-managed:
+forks:
   - repo: spali/homeassistant-keba
     upstream: https://github.com/dannerph/homeassistant-keba
     branches:
@@ -200,11 +207,11 @@ YAML
   [ -z "$stderr" ]
 }
 
-@test "managed: valid full entry passes" {
+@test "forks: valid full entry passes" {
   f=$(
     mk ok.yml <<'YAML'
 version: 1
-managed:
+forks:
   - repo: spali/a
     upstream: https://github.com/o/a.git/
     follow: ['.*']
@@ -220,120 +227,128 @@ YAML
   [ -z "$stderr" ]
 }
 
-@test "managed: repo is required" {
-  managed_bad '  - {upstream: "https://github.com/o/a"}' "managed[0].repo is required"
+@test "forks: upstream is optional, pinned must be a boolean" {
+  f=$(printf 'version: 1\nforks:\n  - {repo: spali/a, branches: {dev: {onto: main, rebase: auto}}}\n  - {repo: spali/b, pinned: true}\n' | mk ok.yml)
+  run --separate-stderr "$CONFIG" validate "$f"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  fork_bad '  - {repo: spali/a, pinned: "yes"}' "forks[0].pinned must be a boolean"
 }
 
-@test "managed: upstream must start with https" {
-  managed_bad '  - {repo: spali/a, upstream: "http://github.com/o/a"}' "managed[0].upstream must start with https://"
+@test "forks: repo is required" {
+  fork_bad '  - {upstream: "https://github.com/o/a"}' "forks[0].repo is required"
 }
 
-@test "managed: github.com upstream must be owner/name" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a/tree/x"}' "managed[0].upstream is not a github.com repository URL"
+@test "forks: upstream must start with https" {
+  fork_bad '  - {repo: spali/a, upstream: "http://github.com/o/a"}' "forks[0].upstream must start with https://"
 }
 
-@test "managed: refs is an unknown key" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", refs: all}' "managed[0]: unknown key refs"
-  managed_bad '  - {repo: spali/a, upstream: "https://example.org/a", refs: default}' "managed[0]: unknown key refs"
+@test "forks: github.com upstream must be owner/name" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a/tree/x"}' "forks[0].upstream is not a github.com repository URL"
 }
 
-@test "managed: tags must be a boolean" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", tags: "no"}' "managed[0].tags must be a boolean"
-  managed_bad '  - {repo: spali/a, upstream: "https://example.org/a", tags: 0}' "managed[0].tags must be a boolean"
+@test "forks: refs is an unknown key" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", refs: all}' "forks[0]: unknown key refs"
+  fork_bad '  - {repo: spali/a, upstream: "https://example.org/a", refs: default}' "forks[0]: unknown key refs"
 }
 
-@test "managed: branch onto is required" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {rebase: auto}}}' "managed[0].branches.main.onto is required"
+@test "forks: tags must be a boolean" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", tags: "no"}' "forks[0].tags must be a boolean"
+  fork_bad '  - {repo: spali/a, upstream: "https://example.org/a", tags: 0}' "forks[0].tags must be a boolean"
 }
 
-@test "managed: branch rebase must be auto or manual" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: main, rebase: x}}}' "managed[0].branches.main.rebase must be auto or manual"
+@test "forks: branch onto is required" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {rebase: auto}}}' "forks[0].branches.main.onto is required"
 }
 
-@test "managed: invalid branch name fails" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {"a b": {onto: main, rebase: auto}}}' 'managed[0].branches: "a b" is not a valid branch name'
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {"a..b": {onto: main, rebase: auto}}}' 'managed[0].branches: "a..b" is not a valid branch name'
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {"-a": {onto: main, rebase: auto}}}' 'managed[0].branches: "-a" is not a valid branch name'
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {"/a": {onto: main, rebase: auto}}}' 'managed[0].branches: "/a" is not a valid branch name'
+@test "forks: branch rebase must be auto or manual" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: main, rebase: x}}}' "forks[0].branches.main.rebase must be auto or manual"
 }
 
-@test "managed: unknown settings key fails" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", settings: {foo: true}}' "managed[0].settings: unknown key foo"
+@test "forks: invalid branch name fails" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {"a b": {onto: main, rebase: auto}}}' 'forks[0].branches: "a b" is not a valid branch name'
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {"a..b": {onto: main, rebase: auto}}}' 'forks[0].branches: "a..b" is not a valid branch name'
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {"-a": {onto: main, rebase: auto}}}' 'forks[0].branches: "-a" is not a valid branch name'
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {"/a": {onto: main, rebase: auto}}}' 'forks[0].branches: "/a" is not a valid branch name'
 }
 
-@test "managed: settings values must be booleans" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", settings: {has_issues: 1}}' "managed[0].settings.has_issues must be a boolean"
+@test "forks: unknown settings key fails" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", settings: {foo: true}}' "forks[0].settings: unknown key foo"
 }
 
-@test "managed: private must be a boolean" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", private: "yes"}' "managed[0].private must be a boolean"
+@test "forks: settings values must be booleans" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", settings: {has_issues: 1}}' "forks[0].settings.has_issues must be a boolean"
 }
 
-@test "managed: duplicate repo fails" {
-  managed_bad '  - {repo: spali/x, upstream: "https://github.com/o/a"}
-  - {repo: spali/x, upstream: "https://github.com/o/b"}' "duplicate managed spali/x"
+@test "forks: private must be a boolean" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", private: "yes"}' "forks[0].private must be a boolean"
 }
 
-@test "managed: onto must be a valid branch name" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: "--x", rebase: auto}}}' 'managed[0].branches.main.onto: "--x" is not a valid branch name'
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: "a b", rebase: auto}}}' 'managed[0].branches.main.onto: "a b" is not a valid branch name'
+@test "forks: duplicate repo fails" {
+  fork_bad '  - {repo: spali/x, upstream: "https://github.com/o/a"}
+  - {repo: spali/x, upstream: "https://github.com/o/b"}' "duplicate fork spali/x"
 }
 
-@test "managed: non-string onto is invalid" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: 1, rebase: auto}}}' "managed[0].branches.main.onto is invalid"
+@test "forks: onto must be a valid branch name" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: "--x", rebase: auto}}}' 'forks[0].branches.main.onto: "--x" is not a valid branch name'
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: "a b", rebase: auto}}}' 'forks[0].branches.main.onto: "a b" is not a valid branch name'
 }
 
-@test "managed: github.com host is case-insensitive" {
-  managed_bad '  - {repo: spali/a, upstream: "https://GitHub.com/o/a/tree/x"}' "managed[0].upstream is not a github.com repository URL"
-  f=$(printf 'version: 1\nmanaged:\n  - {repo: spali/a, upstream: "https://GitHub.com/o/a", tags: true}\n' | mk ok.yml)
+@test "forks: non-string onto is invalid" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: {main: {onto: 1, rebase: auto}}}' "forks[0].branches.main.onto is invalid"
+}
+
+@test "forks: github.com host is case-insensitive" {
+  fork_bad '  - {repo: spali/a, upstream: "https://GitHub.com/o/a/tree/x"}' "forks[0].upstream is not a github.com repository URL"
+  f=$(printf 'version: 1\nforks:\n  - {repo: spali/a, upstream: "https://GitHub.com/o/a", tags: true}\n' | mk ok.yml)
   run --separate-stderr "$CONFIG" validate "$f"
   [ "$status" -eq 0 ]
 }
 
-@test "managed: duplicate and overlap checks ignore case" {
-  managed_bad '  - {repo: spali/X, upstream: "https://github.com/o/a"}
-  - {repo: spali/x, upstream: "https://github.com/o/b"}' "duplicate managed spali/x"
+@test "forks: duplicate and overlap checks ignore case" {
+  fork_bad '  - {repo: spali/X, upstream: "https://github.com/o/a"}
+  - {repo: spali/x, upstream: "https://github.com/o/b"}' "duplicate fork spali/x"
 }
 
-@test "managed: unknown entry key fails" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", foo: 1}' "managed[0]: unknown key foo"
+@test "forks: unknown entry key fails" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", foo: 1}' "forks[0]: unknown key foo"
 }
 
-@test "managed: branches and settings must be mappings" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: [main]}' "managed[0].branches must be a mapping"
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", settings: [a]}' "managed[0].settings must be a mapping"
+@test "forks: branches and settings must be mappings" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", branches: [main]}' "forks[0].branches must be a mapping"
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", settings: [a]}' "forks[0].settings must be a mapping"
 }
 
-@test "managed: must be a list" {
-  f=$(printf 'version: 1\nmanaged: x\n' | mk bad.yml)
+@test "forks: must be a list" {
+  f=$(printf 'version: 1\nforks: x\n' | mk bad.yml)
   run --separate-stderr "$CONFIG" validate "$f"
   [ "$status" -eq 1 ]
-  [ "$stderr" = "error: $f: managed must be a list" ]
+  [ "$stderr" = "error: $f: forks must be a list" ]
 }
 
-@test "managed: follow must be a list of strings" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: "release/.*"}' "managed[0].follow must be a list of strings"
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: [1]}' "managed[0].follow must be a list of strings"
+@test "forks: follow must be a list of strings" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: "release/.*"}' "forks[0].follow must be a list of strings"
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: [1]}' "forks[0].follow must be a list of strings"
 }
 
-@test "managed: follow pattern must be a valid regular expression" {
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: ["ok", "release/(v"]}' "managed[0].follow[1]: invalid regular expression"
+@test "forks: follow pattern must be a valid regular expression" {
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: ["ok", "release/(v"]}' "forks[0].follow[1]: invalid regular expression"
   # a pattern that only compiles inside the full-match wrapper is refused too
-  managed_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: ["a)|(?:.*"]}' "managed[0].follow[0]: invalid regular expression"
+  fork_bad '  - {repo: spali/a, upstream: "https://github.com/o/a", follow: ["a)|(?:.*"]}' "forks[0].follow[0]: invalid regular expression"
 }
 
-@test "managed: follow allowed for a mirror" {
-  f=$(printf 'version: 1\nmanaged:\n  - {repo: spali/a, upstream: "https://example.org/a", follow: [".*"], tags: false}\n' | mk ok.yml)
+@test "forks: follow allowed for a mirror" {
+  f=$(printf 'version: 1\nforks:\n  - {repo: spali/a, upstream: "https://example.org/a", follow: [".*"], tags: false}\n' | mk ok.yml)
   run --separate-stderr "$CONFIG" validate "$f"
   [ "$status" -eq 0 ]
   [ -z "$stderr" ]
 }
 
-@test "managed: valid follow passes" {
+@test "forks: valid follow passes" {
   f=$(
     mk ok.yml <<'YAML'
 version: 1
-managed:
+forks:
   - repo: spali/a
     upstream: https://github.com/o/a
     follow: ['^release/v[0-9]+\.[0-9]+$', 'stable']
@@ -348,34 +363,14 @@ YAML
 }
 
 @test "removed keys are unknown keys" {
-  f=$(printf 'version: 1\nforks: []\nmirrors: []\nlists: {archived: [a], archive: a, forks: [a], mirrors: x}\n' | mk bad.yml)
+  f=$(printf 'version: 1\nmanaged: []\nmirrors: []\nlists: {archived: [a], mirrors: {synced: [a]}}\n' | mk bad.yml)
   run --separate-stderr "$CONFIG" validate "$f"
   [ "$status" -eq 1 ]
-  [[ $stderr == *"error: $f: unknown key forks"* ]]
+  [[ $stderr == *"error: $f: unknown key managed"* ]]
   [[ $stderr == *"error: $f: unknown key mirrors"* ]]
   [[ $stderr == *"lists: unknown key archived"* ]]
-  [[ $stderr == *"lists: unknown key archive"* ]]
-  [[ $stderr == *"lists: unknown key forks"* ]]
-  [[ $stderr == *"lists.mirrors must be a mapping"* ]]
+  [[ $stderr == *"lists: unknown key mirrors"* ]]
   [[ $stderr != *"was removed"* ]]
-}
-
-@test "lists.mirrors mapping with synced and other is valid" {
-  f=$(printf 'version: 1\nlists:\n  mirrors: {synced: [a], other: [b]}\n  external: [c]\n' | mk ok.yml)
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 0 ]
-}
-
-@test "lists.mirrors mapping is checked" {
-  f=$(printf 'version: 1\nlists: {mirrors: {foo: []}}\n' | mk bad.yml)
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 1 ]
-  [[ $stderr == *"lists.mirrors: unknown key foo"* ]]
-  f=$(printf 'version: 1\nlists: {mirrors: {synced: x, other: [1]}}\n' | mk bad2.yml)
-  run --separate-stderr "$CONFIG" validate "$f"
-  [ "$status" -eq 1 ]
-  [[ $stderr == *"lists.mirrors.synced must be a list of strings"* ]]
-  [[ $stderr == *"lists.mirrors.other must be a list of strings"* ]]
 }
 
 @test "lists.external must be a list of strings" {

@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
-# Sync of the managed forks and mirrors (key `managed:` of the control file),
-# one step of the reusable workflow sync.yml per mode.
+# Sync of the forks and mirrors: every own fork on GitHub that is not archived
+# and every entry of `forks:` in the control file, except the pinned ones; one
+# step of the reusable workflow sync.yml per mode. A fork without an entry
+# (or an entry without upstream) syncs with its parent on GitHub.
 #
 #   sync.sh matrix       prints {"repos": [...], "runs-on": ...} for the
-#                        workflow matrix: all managed repositories, or only
-#                        SYNC_REPO (matched case-insensitively, printed as
-#                        spelled in the control file; unknown: fails).
+#                        workflow matrix: all synced repositories (the forks
+#                        are listed with GH_TOKEN), or only SYNC_REPO
+#                        (matched case-insensitively, printed as spelled in
+#                        the control file or on GitHub; unknown or pinned:
+#                        fails).
 #   sync.sh exists REPO  prints name=<repo without owner>, kind=fork or
 #                        kind=mirror and exists=true or exists=false (to
 #                        $GITHUB_OUTPUT if set); fails on any other API
 #                        error.
-#   sync.sh create REPO  creates the missing fork (sync-create.sh). A missing
-#                        mirror fails with the command to create it by hand.
+#   sync.sh create REPO  creates the missing fork (sync-create.sh; needs the
+#                        upstream of its entry). A missing mirror fails with
+#                        the command to create it by hand.
 #                        Forking needs an installation token that is not
 #                        scoped to repositories and has all app permissions.
-#   sync.sh repo REPO    refuses a repository that does not exist, then checks
+#   sync.sh repo REPO    refuses a repository that does not exist, is archived
+#                        or, without an entry, is no fork, then checks
 #                        its kind (sync-create.sh), enforces its settings
 #                        (sync-settings.sh), lists the contribution branches
 #                        of a fork (heads of open upstream pull requests from
@@ -29,14 +35,15 @@
 #                        branch) the default branch of REPO when it is not
 #                        (PATCH repos/REPO default_branch; the old branch
 #                        stays). Refs the plan kept
-#                        with own commits (skipped as undeclared or unique
-#                        commits) or stopped (upstream rewritten, upstream
+#                        with own commits (a followed branch skipped as
+#                        undeclared or with unique commits) or stopped (upstream rewritten, upstream
 #                        moved tag; with the accept command per ref) fail
 #                        the run after the push.
 #
-# REPO is looked up exactly as spelled in the control file and must be listed
-# under `managed:`. Every write goes to that repository only: its URL is built
-# here from the entry (https://github.com/<repo>.git), never taken from input.
+# REPO is the entry of `forks:` (matched case-insensitively) or an own fork
+# without one (the workflow takes REPO from the matrix). Every write goes to
+# that repository only: its URL is built here from the entry
+# (https://github.com/<repo>.git), never taken from input.
 # git gets the token only through GIT_CONFIG_COUNT/KEY/VALUE (an extraheader
 # for https://github.com/), and only in the git steps.
 # create and repo append a Markdown section to $GITHUB_STEP_SUMMARY (if set).
@@ -51,8 +58,8 @@
 set -euo pipefail
 
 DIR=${MONITOR_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")}
-# shellcheck source=scripts/managed-lib.sh
-source "$DIR/managed-lib.sh"
+# shellcheck source=scripts/forks-lib.sh
+source "$DIR/forks-lib.sh"
 
 CONFIG_FILE=${MONITOR_CONFIG:-repos.yml}
 TMP=$(mktemp -d)
@@ -90,18 +97,67 @@ check_accept() {
   [[ -z $a || $a == '*' ]] || valid_branch "$a" || die "invalid accept: ${a//[^[:print:]]/?}"
 }
 
-# load_entry REPO sets ENTRY, REPO, KIND, UPSTREAM, UPSTREAM_REPO or fails.
+# load_entry REPO sets ENTRY (the entry of `forks:`, else the defaults of a
+# fork without one: IN_CONFIG empty), REPO, KIND, UPSTREAM (empty when not
+# known yet), UPSTREAM_REPO or fails. A pinned entry fails.
 load_entry() {
-  ENTRY=$(managed_entry "$CONFIG" "$1") || die "$1 is not managed"
+  IN_CONFIG=1
+  if ! ENTRY=$(fork_entry "$CONFIG" "$1"); then
+    IN_CONFIG=
+    jq -cn --arg r "$1" '[{name: $r, fork: true}]' >"$TMP/inv.json"
+    ENTRY=$(fork_entry "$CONFIG" "$1" "$TMP/inv.json") || die "$1: no entry"
+  fi
+  [[ $(jq -r .pinned <<<"$ENTRY") != true ]] || die "$1 is pinned"
+  entry_vars
+}
+
+# entry_vars sets REPO, KIND, UPSTREAM, UPSTREAM_REPO from ENTRY.
+entry_vars() {
   export ENTRY
   REPO=$(jq -r .repo <<<"$ENTRY")
   KIND=$(jq -r .kind <<<"$ENTRY")
-  UPSTREAM=$(jq -r .upstream <<<"$ENTRY")
+  UPSTREAM=$(jq -r '.upstream // ""' <<<"$ENTRY")
   UPSTREAM_REPO=$(jq -r '.upstream_repo // ""' <<<"$ENTRY")
   [[ $REPO =~ ^spali/[A-Za-z0-9._-]+$ ]] || die "invalid repo: $REPO"
+}
+
+# check_upstream fails unless UPSTREAM and, for a fork, UPSTREAM_REPO are
+# valid.
+check_upstream() {
+  [[ -n $UPSTREAM ]] || die "$REPO: no upstream: not a fork on GitHub, set upstream under forks:"
   [[ $UPSTREAM =~ ^https://[^[:space:][:cntrl:]]+$ ]] || die "$REPO: invalid upstream"
   [[ $KIND == mirror || $UPSTREAM_REPO =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] ||
     die "$REPO: invalid upstream repository"
+}
+
+# fill_upstream sets the upstream of an entry without one to the parent of
+# REPO ($TMP/repo.json), then checks it.
+fill_upstream() {
+  local parent
+  if [[ -z $UPSTREAM ]]; then
+    parent=$(jq -r 'select(.fork == true) | .parent.full_name // empty' "$TMP/repo.json")
+    if [[ -n $parent ]]; then
+      ENTRY=$(jq -c --arg p "$parent" '.upstream = "https://github.com/\($p)" | .upstream_repo = $p | .kind = "fork"' <<<"$ENTRY")
+      entry_vars
+    fi
+  fi
+  check_upstream
+}
+
+# list_forks prints the own forks that are not archived as an inventory
+# array [{name, fork: true}]: the app installation in Actions, else the
+# repositories of the user.
+list_forks() {
+  local raw
+  if [[ ${GITHUB_ACTIONS:-} == true ]]; then
+    raw=$(gh api --paginate installation/repositories) || die "cannot list the repositories"
+    raw=$(jq -s 'map(.repositories // []) | add // []' <<<"$raw") || die "cannot read the repositories"
+  else
+    raw=$(gh api --paginate 'user/repos?affiliation=owner') || die "cannot list the repositories"
+    raw=$(jq -s 'add // []' <<<"$raw") || die "cannot read the repositories"
+  fi
+  jq -c '[.[] | select(.owner.login == "spali" and .fork == true and (.archived | not)) | {name: .full_name, fork: true}]' <<<"$raw" ||
+    die "cannot read the repositories"
 }
 
 # --- summary -------------------------------------------------------------
@@ -155,16 +211,17 @@ cmd_matrix() {
   check_accept
   [[ -z ${SYNC_BRANCH:-} || -n ${SYNC_REPO:-} ]] || die "the branch input needs the repo input"
   [[ -z ${SYNC_ACCEPT:-} || -n ${SYNC_REPO:-} ]] || die "the accept input needs the repo input"
+  list_forks >"$TMP/inv.json"
+  synced_repos "$CONFIG" "$TMP/inv.json" >"$TMP/synced.json"
   # shellcheck disable=SC2016 # jq program
-  out=$(jq -c --arg want "${SYNC_REPO:-}" '
-    [(.managed // [])[].repo] as $all |
+  out=$(jq -c --arg want "${SYNC_REPO:-}" --slurpfile all "$TMP/synced.json" '
     {
-      repos: (if $want == "" then $all
-              else [$all[] | select(ascii_downcase == ($want | ascii_downcase))] end),
+      repos: (if $want == "" then $all[0]
+              else [$all[0][] | select(ascii_downcase == ($want | ascii_downcase))] end),
       "runs-on": (.monitor["runs-on"] // "ubuntu-latest")
     }' "$CONFIG")
   n=$(jq '.repos | length' <<<"$out")
-  [[ -z ${SYNC_REPO:-} || $n -gt 0 ]] || die "${SYNC_REPO//[^[:print:]]/?} is not managed"
+  [[ -z ${SYNC_REPO:-} || $n -gt 0 ]] || die "${SYNC_REPO//[^[:print:]]/?} is not synced (no fork, archived or pinned)"
   printf '%s\n' "$out"
 }
 
@@ -190,6 +247,7 @@ cmd_exists() {
 
 cmd_create() {
   load_entry "$1"
+  check_upstream
   if step sync-create.sh; then
     note "- repository: $(head -n 1 "$TMP/out")"
     finish 0
@@ -354,6 +412,22 @@ cmd_repo() {
     fail_note repository
     finish 1
   fi
+  if [[ $(jq -r '.archived // false' "$TMP/repo.json") == true ]]; then
+    echo "error: $REPO is archived: pin it or remove its entry" | tee "$TMP/err" >&2
+    fail_note repository
+    finish 1
+  fi
+  if [[ -z $IN_CONFIG && $(jq -r '.fork // false' "$TMP/repo.json") != true ]]; then
+    echo "error: $REPO is no fork and has no entry under forks:" | tee "$TMP/err" >&2
+    fail_note repository
+    finish 1
+  fi
+  if ! (fill_upstream) 2>"$TMP/err"; then
+    cat "$TMP/err" >&2
+    fail_note repository
+    finish 1
+  fi
+  fill_upstream
   # the kind check: sync-create.sh only checks an existing repository
   if ! step sync-create.sh; then
     fail_note repository

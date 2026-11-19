@@ -1,56 +1,93 @@
-# Managed repositories (key `managed:` of the control file), sourced by scripts.
+# Forks and mirrors (key `forks:` of the control file plus the own forks on
+# GitHub), sourced by scripts.
 # shellcheck shell=bash
 # shellcheck source=scripts/monitor-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/monitor-lib.sh"
 
-MANAGED_DEFAULT_SETTINGS='{"has_issues":false,"has_pull_requests":false,"has_wiki":false,"has_discussions":false,"has_projects":false,"actions":false}'
+FORK_DEFAULT_SETTINGS='{"has_issues":false,"has_pull_requests":false,"has_wiki":false,"has_discussions":false,"has_projects":false,"actions":false}'
 
-# JQ program: one normalized object per managed entry of the config on stdin.
-# Argument: $defaults (default settings). Entries are assumed validated.
+# JQ program: one normalized object per fork or mirror, for the config on
+# stdin: every entry of `forks:`, then every fork of $inv (an inventory array
+# [{name, fork, private, parent: {name}}], may be []) without an entry, with
+# the defaults. The name is spelled as in $inv when it is there. Without `upstream:` the upstream is the parent of the
+# inventory fork (null when unknown: the caller looks it up). Arguments:
+# $defaults (default settings), $inv. Entries are assumed validated.
 # shellcheck disable=SC2016 # jq program, no shell expansion wanted
-MANAGED_JQ='
+FORKS_JQ='
 def gh: capture("^https://github\\.com/(?<o>[^/]+)/(?<n>[^/]+?)(\\.git)?/?$"; "i");
-(.managed // [])[] |
-  (.upstream | test("^https://github\\.com(/|$)"; "i")) as $fork
+(if ($inv | type) == "array" then $inv else [] end) as $inv |
+[(.forks // [])[].repo | ascii_downcase] as $cfg |
+((.forks // [])[],
+ ($inv[] | select(.fork == true and (.name | ascii_downcase | IN($cfg[]) | not)) | {repo: .name})) |
+  . as $e |
+  ([$inv[] | select((.name | ascii_downcase) == ($e.repo | ascii_downcase))] | first) as $i |
+  (.upstream // (if $i.parent.name then "https://github.com/\($i.parent.name)" else null end)) as $up |
+  ($up != null and ($up | test("^https://github\\.com(/|$)"; "i"))) as $ongh
   | {
-      repo,
-      upstream,
-      kind: (if $fork then "fork" else "mirror" end),
-      upstream_repo: (if $fork then (.upstream | gh | "\(.o)/\(.n)") else null end),
+      repo: ($i.name // .repo),
+      upstream: $up,
+      kind: (if $up == null or $ongh then "fork" else "mirror" end),
+      upstream_repo: (if $ongh then ($up | gh | "\(.o)/\(.n)") else null end),
       branches: ((.branches // {}) | to_entries | sort_by(.key)
         | map({name: .key, onto: .value.onto, rebase: (.value.rebase // "manual")})),
       follow: (.follow // []),
       tags: (.tags != false),
       settings: ($defaults + (.settings // {})),
-      private: (.private // false)
+      private: (if has("private") then .private else ($i.private // false) end),
+      pinned: (.pinned == true)
     }'
 
-# managed_entries CONFIG_JSON_FILE prints one normalized JSON object per line.
-managed_entries() {
-  [[ -r ${1:-} ]] || die "managed_entries: cannot read ${1:-}"
-  jq -c --argjson defaults "$MANAGED_DEFAULT_SETTINGS" "$MANAGED_JQ" "$1"
+# fork_entries CONFIG_JSON_FILE [INVENTORY_FILE] prints one normalized JSON
+# object per line (pinned ones too).
+fork_entries() {
+  local inv='[]'
+  [[ -r ${1:-} ]] || die "fork_entries: cannot read ${1:-}"
+  if [[ -n ${2:-} ]]; then
+    inv=$(jq -c . "$2") || die "fork_entries: cannot read $2"
+  fi
+  jq -c --argjson defaults "$FORK_DEFAULT_SETTINGS" --argjson inv "$inv" "$FORKS_JQ" "$1"
+}
+
+# fork_entry CONFIG_JSON_FILE REPO [INVENTORY_FILE] prints the object of one
+# repository (matched case-insensitively), or fails.
+fork_entry() {
+  local entries entry
+  entries=$(fork_entries "$1" "${3:-}") || return 1
+  entry=$(jq -c --arg repo "$2" 'select((.repo | ascii_downcase) == ($repo | ascii_downcase))' <<<"$entries" | head -n 1)
+  [[ -n $entry ]] || return 1
+  printf '%s\n' "$entry"
+}
+
+# synced_repos CONFIG_JSON_FILE [INVENTORY_FILE] prints the names of the
+# repositories the sync keeps current (not pinned) as one sorted JSON array.
+synced_repos() {
+  fork_entries "$@" | jq -sc '[.[] | select(.pinned | not) | .repo] | sort'
 }
 
 # SYNC_REPO_JOB_RE: a job of sync.yml that syncs one repository, named
 # "Sync · <owner/name>" with any (or no) "<caller job> / " prefix.
 SYNC_REPO_JOB_RE='^(?:.* / )?Sync · (?<r>.+)$'
 
-# check_sync_failed CONFIG_JSON_FILE: with at least one managed entry, reads
+# check_sync_failed CONFIG_JSON_FILE INVENTORY_FILE: with at least one synced
+# repository (synced_repos), reads
 # the newest completed runs of the workflow sync.yml on main of the control
 # repository ($GITHUB_REPOSITORY; unset: skip finding), newest first. A job
 # has a result unless its conclusion is cancelled, skipped or null (e.g. a run
 # GitHub cancelled in the concurrency group); such jobs are passed over and an
-# older job counts. Per managed repository the newest job "Sync · <repo>" with
+# older job counts. Per synced repository the newest job "Sync · <repo>" with
 # a result counts; anything but success (failure, timed_out, ...) is a red
 # finding of that repository. The non-repository jobs (the plan job) of the
 # newest run where one of them has a result must have succeeded, else a red
-# finding without repository. Stops reading runs once every managed
+# finding without repository. Stops reading runs once every synced
 # repository and the plan job have a result; a repository without a job (or
 # no run at all) is no finding. A run with more jobs than one page is
 # check-failed. Runs once per monitor run.
 check_sync_failed() {
   local open body runs id run_url step page plan_state repo_failures plan=1 repo url
-  json_out sync-failed - open -c '[(.managed // [])[].repo]' "$1" || return 0
+  if ! open=$(synced_repos "$1" "$2" 2>/dev/null); then
+    finding red check-failed - "sync-failed: cannot read the forks"
+    return 0
+  fi
   [[ $open != '[]' ]] || return 0
   if [[ -z ${GITHUB_REPOSITORY:-} ]]; then
     finding skip sync-failed - "sync-failed: no control repository (local run)"
@@ -95,13 +132,4 @@ check_sync_failed() {
     json_out sync-failed - open -c --argjson open "$open" '$open - .done' <<<"$step" || return 0
     [[ $open != '[]' || -n $plan ]] || return 0
   done <<<"$runs"
-}
-
-# managed_entry CONFIG_JSON_FILE REPO prints the object of one repo, or fails.
-managed_entry() {
-  local entries entry
-  entries=$(managed_entries "$1") || return 1
-  entry=$(jq -c --arg repo "$2" 'select(.repo == $repo)' <<<"$entries")
-  [[ -n $entry ]] || return 1
-  printf '%s\n' "$entry"
 }

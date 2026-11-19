@@ -2,9 +2,7 @@ version: 1
 lists:
   exclusive:
     - ["▶️ Contribution forks", "♻️ Customization forks"]
-  mirrors:
-    synced: ["👀  Mirrors"]
-    other: ["▶️ Contribution forks", "♻️ Customization forks"]
+  forks: ["🍴 Forks & mirrors"]
   external: ["🔍 Interesting and related"]
 unanswered:
   days: 14

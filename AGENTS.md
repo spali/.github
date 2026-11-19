@@ -31,9 +31,9 @@ you should fix the document that is wrong.
   `maintenance-monitor` in the calling repository, with
   that repository's `GITHUB_TOKEN`; everything else it does is `GET` requests
   and GraphQL queries with the read-only app token;
-- make the sync (`sync.yml`) write to a repository that is not listed under
-  `managed:` of the control file, take a target URL from anything but the
-  entry, or pass a token in an argument, URL, log or artifact (git gets it
+- make the sync (`sync.yml`) write to a repository that is neither an own
+  fork (not archived, not pinned) nor listed under `forks:` of the control
+  file, take a target URL from anything but the entry, or pass a token in an argument, URL, log or artifact (git gets it
   only through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`);
 - make the profile cards (`profile-cards.yml`) write anything but the card
   paths of its `cards` input to its one target repository, force-push, or use
@@ -85,7 +85,7 @@ pull request closed
 | `.github/workflows/release-publish.yml` | reusable; job `publish` |
 | `.github/workflows/monitor.yml` | reusable; job `monitor`; run by the private control repository |
 | `.github/workflows/monitor-config.yml` | reusable; job `config`; validates the control file |
-| `.github/workflows/sync.yml` | reusable; jobs `plan` (Managed repositories) and `sync` (one per managed repository); run by the private control repository |
+| `.github/workflows/sync.yml` | reusable; jobs `plan` (Repositories) and `sync` (one per synced repository); run by the private control repository |
 | `.github/workflows/profile-cards.yml` | reusable; jobs `card` (one per card) and `commit`; run by the private control repository |
 | `scripts/profile-cards.sh` | `check` (validates the card list), `commit` (writes the cards to the profile repository) |
 | `scripts/lib.sh` | `die`, `out`, `need_env` |
@@ -97,7 +97,7 @@ pull request closed
 | `scripts/cleanup-pr.sh` | delete `*-pr.<N>` releases and tags |
 | `scripts/image-cleanup.sh` | `tags=` output: tags of the existing `v*-pr.*` and `v*-next` releases without `v`, kept from deletion by the image cleanup |
 | `scripts/monitor*.sh` | maintenance monitor: `monitor.sh` runs `monitor-repos.sh` (inventory), the check scripts, `monitor-report.sh` and `monitor-issue.sh` (issue body plus one monitor comment, split at the report line `<!-- maintenance-monitor:details -->`); `monitor.sh PHASE` runs one of them (shared dir `MONITOR_WORK`); `monitor.sh matrix` prints the jobs per check group for the workflow matrix (`monitor.jobs`, `monitor.runs-on` of the control file), `MONITOR_REPO` limits a check phase to one repository (empty: all) |
-| `scripts/sync.sh` | fork and mirror sync: `matrix` (repositories, runner), `exists`, `create` (`sync-create.sh`), `repo` (kind check, `sync-settings.sh`, contribution branches, `sync-git.sh plan` and `push`); `scripts/managed-lib.sh` normalizes the `managed:` entries |
+| `scripts/sync.sh` | fork and mirror sync: `matrix` (repositories, runner), `exists`, `create` (`sync-create.sh`), `repo` (kind check, `sync-settings.sh`, contribution branches, `sync-git.sh plan` and `push`); `scripts/forks-lib.sh` normalizes the `forks:` entries and the own forks without one |
 | `docs/monitor-checks.md` | explanation of each monitor check, linked from the overview issue (one `## <check id>` section each, tested) |
 | `tests/*.bats`, `tests/helpers/gh-stub.bash` | bats tests with a fake `gh` |
 | `examples/caller/*.yml` | files a repository copies |
@@ -377,22 +377,28 @@ pass.
   that step only; never put it into the job env.
 - Never add a second workflow for another job layout.
 
-### 4.11 Add or change a managed repository
+### 4.11 Add, change or pin a fork or mirror
 
 The workflow `sync.yml` runs daily (04:47 UTC) and on every change of
 `repos.yml` from the private control repository. Code: `scripts/sync*.sh`.
 
-1. Add or change the entry under `managed:` of `repos.yml` with a PR in the
-   control repository (schema: README "Fork and mirror sync"). The `Config`
-   check validates it. Turning a setting on (`settings:`) needs the owner's
-   approval.
-2. After the merge the sync runs. A new fork is created by it; a new mirror
-   fails with `create <repo> by hand: gh repo create <repo> --public|--private`:
-   the owner runs that command once, then re-run the sync.
-3. A rebase conflict (`rebase onto <x> failed (conflict)`) pushes nothing for
-   that repository. Rebase the branch by hand (fetch upstream, `git rebase`,
-   resolve), push it, then run
-   `gh workflow run sync.yml -f repo=<repo>` in the control repository.
+1. Every own fork that is not archived is synced without an entry (default
+   branch, rebased onto upstream when it has own commits, and tags; default
+   settings). Add or change an entry under `forks:` of `repos.yml` with a PR
+   in the control repository only for exceptions (schema: README "Fork and
+   mirror sync"): a mirror outside GitHub (`upstream`), more branches
+   (`branches:`, `follow:`), `settings:`, `tags: false`, or `pinned: true`
+   to stop syncing it. The `Config` check validates it. Turning a setting on
+   (`settings:`) needs the owner's approval.
+2. After the merge the sync runs. A new fork with an entry and `upstream` is
+   created by it; a new mirror fails with `create <repo> by hand: gh repo
+   create <repo> --public|--private`: the owner runs that command once, then
+   re-run the sync.
+3. A rebase conflict (`rebase onto <x> failed (conflict)`, also of the
+   default branch with own commits) pushes nothing for that repository.
+   Rebase the branch by hand (fetch upstream, `git rebase`, resolve), push
+   it, then run `gh workflow run sync.yml -f repo=<repo>` in the control
+   repository; or ask the owner to pin the fork.
 4. Rebase a `rebase: manual` branch: `gh workflow run sync.yml -f repo=<repo>
    -f branch=<branch>` (`-f branch='*'` for all manual branches of the repo).
 5. `RESTORE FAILED for …`: the push landed but its verification failed and the
@@ -402,8 +408,8 @@ The workflow `sync.yml` runs daily (04:47 UTC) and on every change of
 6. A lease failure (`push rejected, target unchanged`) means somebody pushed to
    the repository during the run: nothing was overwritten, re-run.
 7. `error: <n> refs kept with own commits: <refs>`: the sync pushed everything
-   else but never overwrites a branch or tag with own commits that is not
-   declared (skipped as `undeclared` or `unique commits`), and the run stays
+   else but never overwrites a followed branch or a tag with own commits
+   (skipped as `undeclared` or `unique commits`), and the run stays
    red until it is resolved. Ask the owner: declare the branch under
    `branches:` (step 1), or delete it or reset it to upstream by hand.
 8. `error: <ref>: upstream rewritten (…)` or `upstream moved tag (…)`:
@@ -413,8 +419,8 @@ The workflow `sync.yml` runs daily (04:47 UTC) and on every change of
    `gh workflow run sync.yml -f repo=<repo> -f accept=<branch|tags/name|*>`;
    the old tip is kept in `refs/backup/<branch>` or `refs/backup-tags/<tag>`
    (one backup per ref, replaced by each later accept or rebase). A declared
-   branch keeps only its own commits after the record; a default or followed
-   branch with own commits on top is refused (`accept refused`, the error
+   branch (and a default branch with own commits) keeps only its own commits
+   after the record; a followed branch with own commits on top is refused (`accept refused`, the error
    line has no accept hint then): declare it (step 1) or reset it by hand.
    A `rebase: manual` branch needs only `accept`. Changing the `onto` of a
    declared branch, or declaring a previously followed branch, also shows
@@ -484,7 +490,7 @@ issue and the log of the failed step. Explanations for humans:
 | `several-drafts` | more than one draft release | ask the owner which to delete |
 | `next-stale` | `-next` pre-release older than the latest release | re-run the build on `main`, or delete it |
 | `pin-behind` | a caller (including the control repository's monitor pin) pins a `spali/.github` release older than a newer one (older than 7 days) | merge or fix the Renovate PR |
-| `settings-merge` | merge options differ from README "Set up", step 6 (all own repositories that are neither forks nor managed) | fix the setting (owner approval) |
+| `settings-merge` | merge options differ from README "Set up", step 6 (all own repositories that are neither forks nor under `forks:`) | fix the setting (owner approval) |
 | `settings-alerts` | Dependabot alerts are off | enable them (owner approval) |
 | `settings-pvr` | private vulnerability reporting is off (public repo) | enable it (owner approval) |
 | `settings-actions` | default workflow permissions are not read-only, or Actions may approve PRs | fix the setting (owner approval) |
@@ -497,22 +503,18 @@ issue and the log of the failed step. Explanations for humans:
 | `dependabot-alert` | open alert; red for critical/high, info for low/medium | update or dismiss with a reason |
 | `code-scanning-alert` | open alert; red for critical/high, info for low/medium | fix or dismiss with a reason |
 | `unanswered` | in an open pull request or issue the newest human post (opening, comment, review, review comment; bots ignored, items opened by a bot skipped) is not by the owner and older than `unanswered.days` days (default 7); the finding carries the number as `item` | answer it or close it, or ignore the item (`item: <number>`) with a reason; the ignore stays used while the item is open and becomes `ignore-unused` once it is closed: then remove it |
-| `stale-branch` | a branch (not the default branch) was the head of a merged pull request from the repository (own repositories: into the repository; forks and managed forks: into the upstream) and has no open one; red when it still points at the merged head, info when it has commits after it; the newest merge counts; the finding carries the pull request number as `item` | delete the branch, or ignore the item (`item: <number>`) with a reason |
-| `fork-behind` (info) | a fork is behind its upstream | sync by hand, add it to `managed:`, or archive it to freeze this state |
-| `fork-workflows-active` (info) | a fork runs its own workflows | disable Actions in the fork's settings if unwanted (disabled Actions = clean) |
-| `fork-delete-candidate` (info) | no own commits on the default branch, no open upstream PR from the fork, and every fork branch also exists upstream or was the head of a closed or merged upstream PR from the fork | delete the fork, archive it to freeze the state you reference, or add it to `managed:` |
-| `list-none` (info) | a repository (archived ones too) is in no list, or a fork or `managed:` repository in none of the mirrors lists (`lists.mirrors.synced` and `.other`) | add it to a list |
+| `stale-branch` | a branch (not the default branch) was the head of a merged pull request from the repository (own repositories: into the repository; forks, pinned ones too: into the upstream) and has no open one; red when it still points at the merged head, info when it has commits after it; the newest merge counts; the finding carries the pull request number as `item` | delete the branch, or ignore the item (`item: <number>`) with a reason |
+| `fork-delete-candidate` (info) | a fork (pinned ones too) has no own commits on the default branch, no open upstream PR from the fork, and every fork branch also exists upstream or was the head of a closed or merged upstream PR from the fork | delete the fork, or archive or pin it to keep the state you reference |
+| `list-none` (info) | a repository (archived ones too) is in no list, or a fork or `forks:` entry in none of the forks lists (`lists.forks`) | add it to a list |
 | `list-contradiction` (info) | a repository is in both lists of an exclusive pair | fix the lists |
-| `list-external-own` (info) | an own repository (archived ones too) is in a list of `lists.external` (lists for repositories of others) | move own work to the stack list, own forks to a mirrors list |
-| `managed-missing` | a repository under `managed:` does not exist (no other check runs for it) | let the sync create it (a mirror: run the `gh repo create` command from the failed sync job once, 4.11), or fix the entry |
-| `managed-settings` | a managed repository's issues/pull requests/wiki/discussions/projects/Actions differ from its `settings:` (default all off), or the repository is archived but still under `managed:` (then the only finding) | correct the setting (owner approval) or the `settings:` entry; for an archived one remove the `managed:` entry |
-| `managed-behind` | a managed repository's default branch, `rebase: auto` branch or followed branch (`follow:`) misses upstream commits older than 48 h (a mirror branch lacking the upstream commit: `differs from upstream` and no push for 48 h), or a declared or followed branch is missing in the target; tags (unless `tags: false`) differ from upstream and no push for 48 h; heads of open upstream PRs from the fork excepted; a ref the sync stopped on an upstream rewrite may also show (once the last push is older than 48 h; `sync-failed` is the reliable signal) | read the sync run (a stopped ref: accept it, 4.11) |
-| `branch-undeclared` | a fork or mirror branch with own commits (the default branch counted against the upstream default branch) is neither declared in `branches:` nor the head of an open upstream PR from the fork; a mirror branch the sync does not move that is not an upstream ref and is ahead of the mirror default branch: info `differs from upstream, not followed` (info for an unmanaged fork) | declare it, or delete or reset it by hand (4.11) |
+| `list-external-own` (info) | an own repository (archived ones too) is in a list of `lists.external` (lists for repositories of others) | move own work to the stack list, own forks to a forks list |
+| `fork-missing` | a repository under `forks:` does not exist (no other check runs for it) | let the sync create it (a mirror: run the `gh repo create` command from the failed sync job once, 4.11), or fix the entry |
+| `fork-settings` | a synced fork's or mirror's issues/pull requests/wiki/discussions/projects/Actions differ from its `settings:` (default all off), or the repository is archived but has an entry that is not pinned (then the only finding) | correct the setting (owner approval) or the `settings:` entry; for an archived one remove or pin the entry |
+| `fork-behind` | a synced fork's or mirror's default branch, `rebase: auto` branch or followed branch (`follow:`) misses upstream commits older than 48 h (a mirror branch lacking the upstream commit: `differs from upstream` and no push for 48 h), or a declared or followed branch is missing in the target; tags (unless `tags: false`) differ from upstream and no push for 48 h; heads of open upstream PRs from the fork excepted; a ref the sync stopped on an upstream rewrite may also show (once the last push is older than 48 h; `sync-failed` is the reliable signal) | read the sync run (a stopped ref: accept it, 4.11) |
 | `rebase-pending` (info) | a `rebase: manual` branch is behind its `onto` upstream | `gh workflow run sync.yml -f repo=<repo> -f branch=<branch>` in the control repository (4.11) |
-| `sync-failed` | per managed repository, its newest job `Sync · <repo>` with a result (cancelled, skipped or no conclusion passed over) of `sync.yml` on `main` of the control repository did not succeed (`failure`, `timed_out`, …); without repository: a non-repository job did not succeed in the newest run where it has a result (same rule); more jobs than one page is check-failed (checked in Lists when `managed:` has entries; not checked in a local run), also when it stopped a ref on an upstream rewrite (`upstream rewritten`, `upstream moved tag`) | read the sync log; a stopped ref: check upstream, then accept it (4.11) |
-| `contribution-stale` (info) | an open upstream pull request from a fork is older than 90 days (unmanaged forks) | follow up or close it |
-| `unmanaged` (info) | a non-archived repository in a synced mirrors list (`lists.mirrors.synced`) is not under `managed:` | add it to `managed:` or ignore |
-| `adoption` (info) | a repository (not a fork, not under `managed:`) does not use the release flow (one finding per repository) | adopt it (4.6) or ignore |
+| `sync-failed` | per synced repository (own forks not archived and `forks:` entries, without the pinned ones), its newest job `Sync · <repo>` with a result (cancelled, skipped or no conclusion passed over) of `sync.yml` on `main` of the control repository did not succeed (`failure`, `timed_out`, …); without repository: a non-repository job did not succeed in the newest run where it has a result (same rule); more jobs than one page is check-failed (checked in Lists when a repository is synced; not checked in a local run), also on a rebase conflict and when it stopped a ref on an upstream rewrite (`upstream rewritten`, `upstream moved tag`) | read the sync log; a stopped ref: check upstream, then accept it (4.11) |
+| `contribution-stale` (info) | an open upstream pull request from a fork (pinned ones too) is older than 90 days | follow up or close it |
+| `adoption` (info) | a repository (not a fork, not under `forks:`) does not use the release flow (one finding per repository) | adopt it (4.6) or ignore |
 | `billing-minutes` | private repositories (and repositories not in the inventory) used `billing.minutes.threshold` % (default 75) of the included Actions minutes (price-weighted, in Linux minutes; included from `billing:` or the plan), or from day 7 (UTC) the month-end projection reaches 100 % (account level) | move hosted jobs of the top repositories (`billing` line) to the self-hosted runner or run them less often; raise the threshold if expected |
 | `billing-storage` | the same for the average Actions storage (GB-hours; projection at yesterday's level) against `billing.storage` | delete old artifacts and caches or shorten their retention; raise the threshold if expected |
 | `billing` (info) | one status line per run: used and projected share of minutes and storage, top repositories; not a TODO entry; not checked without an account token | none |
@@ -579,7 +581,7 @@ issue and the log of the failed step. Explanations for humans:
   artifacts `findings-<job>-<index>` plus `monitor-base` (config, inventory, archived);
   Report concatenates them. Inventory cannot use `monitor.runs-on`: the value
   comes from its own output.
-- Self-hosted `monitor.runs-on`: Inventory (monitor) and Managed repositories
+- Self-hosted `monitor.runs-on`: Inventory (monitor) and Repositories
   (sync) run `scripts/runner-online.sh` on GitHub-hosted runners and fail when
   no runner of the control repository with all labels is online. GitHub does
   not notify about queued jobs, and Report itself would wait for the runner,
@@ -590,7 +592,7 @@ issue and the log of the failed step. Explanations for humans:
   offline or not listed at once (E2E 2026-11-18). No fallback to hosted runners (owner's decision,
   2026-11-18).
 - `git ls-remote` on mirror targets only compares the refs of the source; extra
-  refs in the target are fine (`managed-behind`).
+  refs in the target are fine (`fork-behind`).
 - Sync tokens (tested 2026-11-16): an installation token scoped
   (`repositories:`) to a repository that does not exist cannot be created
   (422). Forking needs an installation token that is not scoped to
@@ -606,8 +608,9 @@ issue and the log of the failed step. Explanations for humans:
 - GitHub accepts pushes to `refs/backup/*` (outside heads and tags); the sync
   keeps the old tip of a rebased branch there (of an accepted moved tag in
   `refs/backup-tags/*`, its records in `refs/sync/upstream/*`).
-- The sync matches the dispatch input `repo` case-insensitively against
-  `managed:` and then uses the spelling of the control file.
+- The sync matches the dispatch input `repo` case-insensitively against its
+  list of synced repositories (spelled as on GitHub when the fork is listed
+  there, else as in `forks:`).
 
 ## 7. Verify `spali/.github` locally
 

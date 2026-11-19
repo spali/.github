@@ -68,7 +68,7 @@ plan_line() {
 }
 
 # entry KIND [BRANCHES_JSON [FOLLOW_JSON [TAGS]]] exports ENTRY like
-# managed_entry prints it (TAGS true or false, default true).
+# fork_entry prints it (TAGS true or false, default true).
 entry() {
   ENTRY=$(jq -nc --arg kind "$1" --argjson branches "${2:-[]}" \
     --argjson follow "${3:-[]}" --argjson tags "${4:-true}" \

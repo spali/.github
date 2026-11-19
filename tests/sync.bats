@@ -9,7 +9,7 @@ setup() {
   # A scripts dir with the real libs and config check and stubbed sync steps.
   export MONITOR_SCRIPTS_DIR="$BATS_TEST_TMPDIR/scripts"
   mkdir -p "$MONITOR_SCRIPTS_DIR"
-  cp "$REAL"/lib.sh "$REAL"/monitor-lib.sh "$REAL"/managed-lib.sh \
+  cp "$REAL"/lib.sh "$REAL"/monitor-lib.sh "$REAL"/forks-lib.sh \
     "$REAL"/monitor-config.sh "$MONITOR_SCRIPTS_DIR"/
   export CALLS="$BATS_TEST_TMPDIR/calls"
   : >"$CALLS"
@@ -31,7 +31,7 @@ fi'
 version: 1
 monitor:
   runs-on: [self-hosted, linux]
-managed:
+forks:
   - repo: spali/tool
     upstream: https://github.com/Up/Tool
     branches:
@@ -81,15 +81,58 @@ steps() {
   grep -v '^  ' "$CALLS" || true
 }
 
-@test "matrix lists managed repos" {
+# own_forks: the repository listing has own forks (one archived), a
+# non-fork, a foreign fork and spali/tool (also under forks:).
+own_forks() {
+  jq -n '[
+    {full_name: "spali/plain", fork: true, archived: false, owner: {login: "spali"}},
+    {full_name: "spali/old", fork: true, archived: true, owner: {login: "spali"}},
+    {full_name: "spali/go-xq", fork: false, archived: false, owner: {login: "spali"}},
+    {full_name: "other/fork", fork: true, archived: false, owner: {login: "other"}},
+    {full_name: "spali/Tool", fork: true, archived: false, owner: {login: "spali"}}]' |
+    gh_respond 'api --paginate user/repos?affiliation=owner' -
+}
+
+@test "matrix lists the entries" {
   run --separate-stderr "$SYNC" matrix
   [ "$status" -eq 0 ]
-  [ "$(jq -c .repos <<<"$output")" = '["spali/tool","spali/Web"]' ]
+  [ "$(jq -c .repos <<<"$output")" = '["spali/Web","spali/tool"]' ]
   [ "$(jq -c '."runs-on"' <<<"$output")" = '["self-hosted","linux"]' ]
 }
 
+@test "matrix adds the own forks that are not archived, without the pinned ones" {
+  own_forks
+  printf '  - {repo: spali/pinned, pinned: true}\n' >>"$MONITOR_CONFIG"
+  jq -n '[{full_name: "spali/pinned", fork: true, archived: false, owner: {login: "spali"}}]' |
+    gh_respond 'api --paginate user/repos?affiliation=owner&page=2' -
+  run --separate-stderr "$SYNC" matrix
+  [ "$status" -eq 0 ]
+  # the spelling on GitHub wins
+  [ "$(jq -c .repos <<<"$output")" = '["spali/Tool","spali/Web","spali/plain"]' ]
+  grep -qx 'api --paginate user/repos?affiliation=owner' "$GH_LOG"
+  SYNC_REPO=spali/pinned run --separate-stderr "$SYNC" matrix
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "error: spali/pinned is not synced (no fork, archived or pinned)" ]
+}
+
+@test "matrix lists the forks of the app installation in GitHub Actions" {
+  jq -n '{total_count: 1, repositories: [{full_name: "spali/plain", fork: true, archived: false, owner: {login: "spali"}}]}' |
+    gh_respond 'api --paginate installation/repositories' -
+  GITHUB_ACTIONS=true run --separate-stderr "$SYNC" matrix
+  [ "$status" -eq 0 ]
+  [ "$(jq -c .repos <<<"$output")" = '["spali/Web","spali/plain","spali/tool"]' ]
+}
+
+@test "matrix fails when the forks cannot be listed" {
+  gh_fail 'api --paginate user/repos?affiliation=owner' 'gh: Server Error (HTTP 500)'
+  run --separate-stderr "$SYNC" matrix
+  [ "$status" -eq 1 ]
+  [ "${stderr_lines[-1]}" = "error: cannot list the repositories" ]
+  [ -z "$output" ]
+}
+
 @test "matrix runs-on defaults to ubuntu-latest" {
-  printf 'version: 1\nmanaged:\n  - {repo: spali/tool, upstream: "https://github.com/Up/Tool"}\n' >"$MONITOR_CONFIG"
+  printf 'version: 1\nforks:\n  - {repo: spali/tool, upstream: "https://github.com/Up/Tool"}\n' >"$MONITOR_CONFIG"
   run --separate-stderr "$SYNC" matrix
   [ "$status" -eq 0 ]
   [ "$(jq -c '."runs-on"' <<<"$output")" = '"ubuntu-latest"' ]
@@ -105,7 +148,7 @@ steps() {
 @test "unknown SYNC_REPO fails" {
   SYNC_REPO=spali/other run --separate-stderr "$SYNC" matrix
   [ "$status" -eq 1 ]
-  [ "$stderr" = "error: spali/other is not managed" ]
+  [ "$stderr" = "error: spali/other is not synced (no fork, archived or pinned)" ]
   [ -z "$output" ]
 }
 
@@ -321,17 +364,66 @@ fi'
   grep -qF 'invalid default branch' "$GITHUB_STEP_SUMMARY"
 }
 
-@test "unmanaged repo is refused" {
-  for mode in exists create repo; do
-    run "$SYNC" "$mode" spali/other
-    [ "$status" -eq 1 ]
-    [[ $output == *"spali/other is not managed"* ]]
-  done
-  # the lookup of an argument is exact
-  run "$SYNC" repo spali/web
+@test "a repository without an entry must be a fork" {
+  echo '{"full_name": "spali/other", "fork": false}' | gh_respond 'api repos/spali/other' -
+  run "$SYNC" repo spali/other
   [ "$status" -eq 1 ]
+  [[ $output == *"spali/other is no fork and has no entry under forks:"* ]]
   [ -z "$(steps)" ]
-  [ ! -s "$GH_LOG" ]
+  # without an entry there is no upstream to create it from
+  run "$SYNC" create spali/other
+  [ "$status" -eq 1 ]
+  [[ $output == *"spali/other: no upstream: not a fork on GitHub, set upstream under forks:"* ]]
+  [ -z "$(steps)" ]
+}
+
+@test "a fork without an entry syncs with its parent and the defaults" {
+  echo '{"full_name": "spali/plain", "fork": true, "parent": {"full_name": "Up/Plain"}}' |
+    gh_respond 'api repos/spali/plain' -
+  echo '[{"name": "main"}]' | gh_respond 'api --paginate repos/spali/plain/branches?per_page=100' -
+  run "$SYNC" exists spali/plain
+  [ "$status" -eq 0 ]
+  [[ $output == *"kind=fork"* && $output == *"exists=true"* ]]
+  : >"$CALLS"
+  run "$SYNC" repo spali/plain
+  [ "$status" -eq 0 ]
+  [ "$(steps)" = "$(printf 'sync-create.sh \nsync-settings.sh \nsync-git.sh plan\nsync-git.sh push')" ]
+  grep -qF '  target=https://github.com/spali/plain.git upstream=https://github.com/Up/Plain' "$CALLS"
+  grep -qF 'repos/Up/Plain/pulls?state=open' "$GH_LOG"
+}
+
+@test "an entry without upstream takes the parent" {
+  printf '  - {repo: spali/plain, branches: {dev: {onto: main, rebase: auto}}}\n' >>"$MONITOR_CONFIG"
+  echo '{"full_name": "spali/plain", "fork": true, "parent": {"full_name": "Up/Plain"}}' |
+    gh_respond 'api repos/spali/plain' -
+  run "$SYNC" repo spali/plain
+  [ "$status" -eq 0 ]
+  grep -qF '  target=https://github.com/spali/plain.git upstream=https://github.com/Up/Plain' "$CALLS"
+  # a missing fork without upstream cannot be created
+  run "$SYNC" create spali/plain
+  [ "$status" -eq 1 ]
+  [[ $output == *"spali/plain: no upstream"* ]]
+}
+
+@test "pinned and archived repositories are refused" {
+  printf '  - {repo: spali/pinned, pinned: true}\n' >>"$MONITOR_CONFIG"
+  for mode in exists create repo; do
+    run "$SYNC" "$mode" spali/pinned
+    [ "$status" -eq 1 ]
+    [[ $output == *"spali/pinned is pinned"* ]]
+  done
+  printf '  - {repo: spali/arch, upstream: "https://github.com/up/arch"}\n' >>"$MONITOR_CONFIG"
+  echo '{"full_name": "spali/arch", "fork": true, "archived": true}' | gh_respond 'api repos/spali/arch' -
+  run "$SYNC" repo spali/arch
+  [ "$status" -eq 1 ]
+  [[ $output == *"spali/arch is archived: pin it or remove its entry"* ]]
+  [ -z "$(steps)" ]
+}
+
+@test "the entry lookup ignores case" {
+  run "$SYNC" repo spali/web
+  [ "$status" -eq 0 ]
+  grep -qF '  repo=spali/Web' "$CALLS"
 }
 
 @test "summary lists updated and skipped refs" {

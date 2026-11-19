@@ -12,16 +12,14 @@ To accept a finding, add `{repo, check, reason}` to `ignores` in the control
 file `repos.yml`. Settings and rulesets change only with the owner's approval.
 
 **TODO in the overview issue:** red findings are 🔴 Fix now. Info findings
-are 🤔 Decide (a choice only you can make: `adoption`, `branch-undeclared`,
+are 🤔 Decide (a choice only you can make: `adoption`,
 `contribution-stale`, `fork-delete-candidate`, `list-contradiction`,
-`rebase-pending`, `stale-branch`, `unmanaged`) or 🧹 Clean up (all other
-checks). The title and sentence of each entry are in `MONITOR_TODO` in
+`rebase-pending`, `stale-branch`) or 🧹 Clean up (all other checks). The title and sentence of each entry are in `MONITOR_TODO` in
 `scripts/monitor-lib.sh`.
 
 Groups: [Release flow](#release-flow) · [Settings](#settings) ·
-[Health](#health) · [Forks](#forks) · [Lists](#lists) ·
-[Managed repositories](#managed-repositories) · [Billing](#billing) ·
-[Monitor](#monitor)
+[Health](#health) · [Forks and mirrors](#forks-and-mirrors) ·
+[Lists](#lists) · [Billing](#billing) · [Monitor](#monitor)
 
 # Release flow
 
@@ -125,14 +123,14 @@ block moving a tag. ⚪ Not checked like `ruleset-main`.
 
 # Health
 
-Own repositories that are neither forks nor managed.
+Own repositories that are neither forks nor under `forks:`.
 
 ## settings-merge
 
 🔴 The merge options differ: merge commits must be off, squash and rebase
 on, branches deleted on merge, and the squash commit title must be the pull
 request title. Checked on all own repositories that are neither forks nor
-managed (shown under Settings for central ones, else under Health).
+under `forks:` (shown under Settings for central ones, else under Health).
 
 **Fix:** Settings → General → Pull Requests.
 
@@ -144,8 +142,8 @@ branches" was off, see `settings-merge`). 🔵 The branch has commits after the
 merge: maybe it carries on. A branch with an open pull request, the default
 branch and branches of unmerged pull requests are not reported; the newest
 merged pull request of a branch counts. Own repositories look at pull requests
-inside the repository, forks (also managed ones) at their pull requests into
-the upstream. The finding links the pull request (`#N` in the repository,
+inside the repository, forks (synced and pinned ones) at their pull requests
+into the upstream. The finding links the pull request (`#N` in the repository,
 `owner/upstream#N` upstream) and carries its number as `item`.
 
 **Fix:** delete the branch (`git push --delete origin <branch>`, or the
@@ -217,124 +215,71 @@ ignores:
   - {repo: spali/example, check: unanswered, item: 70, reason: reviewed separately}
 ```
 
-# Forks
+# Forks and mirrors
 
-Forks with an upstream that are not managed.
+Every own fork on GitHub that is not archived, and every entry of `forks:` in
+`repos.yml` (a mirror of a repository outside GitHub needs one, with its
+`upstream`). The sync workflow of the control repository keeps them up to
+date unless they are pinned; the monitor only reports. A fork has a
+`github.com` upstream (its parent, unless the entry names one), everything
+else is a mirror.
 
-## fork-behind
+What the sync does by default: the default branch follows the upstream
+default branch, fast-forwarded, or rebased onto it when it has own commits (a
+conflict fails the sync: `sync-failed`). Tags follow upstream (unless
+`tags: false`). Other branches are synced only when declared under
+`branches:` (rebased onto their `onto`) or matched by `follow:` (taken over
+by name); all others are left alone. Issues, pull requests, wiki,
+discussions, projects and Actions are off unless `settings:` says otherwise.
+The head branch of an open upstream pull request from the fork is never
+written.
 
-🔵 A fork is behind its upstream repository.
+### Pin a fork or mirror
 
-**Fix:** sync it by hand (button "Sync fork"), add it to `managed:` so the
-central sync keeps it current, or archive it to freeze this state (see
-[Freeze a fork or mirror](#freeze-a-fork-or-mirror)).
+`pinned: true` in its entry keeps a fork or mirror at its state while you
+keep using it: the sync leaves it alone, and the monitor checks only
+`settings-fork-approval`, `stale-branch`, `fork-delete-candidate` and
+`contribution-stale` (forks), never its settings or how far it is behind.
 
-## fork-workflows-active
-
-🔵 A fork has Actions enabled and active workflows (usually copied from
-upstream), which can fail or use minutes for nothing. A fork with Actions
-disabled in its settings is clean, whatever state its workflows report.
-
-**Fix:** Settings → Actions → General → "Disable actions" (one switch, also
-covers workflows that later come from upstream).
-
-## fork-delete-candidate
-
-🔵 The fork has no own commits on its default branch, no open pull request
-upstream, and every branch of it also exists upstream or was the head of a
-closed or merged pull request from the fork (contribution done): nothing
-would be lost.
-
-**Fix:** delete the fork, archive it to freeze the state you reference (see
-[Freeze a fork or mirror](#freeze-a-fork-or-mirror)), or add it to `managed:`
-to keep it synced.
-
-# Lists
-
-The GitHub Lists of the owner (stars), named in `lists` of `repos.yml`.
-Archived repositories (snapshots) go in the same Lists as active ones and get
-the same checks, except `unmanaged`: an archived repository is not synced.
-
-## list-none
-
-🔵 A repository is in no list (`in no list`), a fork or a repository under
-`managed:` (such as a mirror of a repository outside GitHub) is in none of the
-mirrors lists of `lists.mirrors` (`synced` and `other`, for example
-"👀  Mirrors", "▶️ Contribution forks", "♻️ Customization forks"; message
-`in none of the mirrors lists`). Archived repositories count too. The
-mirrors variant is not reported while one of the configured mirrors Lists is
-missing (that is `config-invalid`); "in no list" is still reported.
-Without mirrors lists, forks and managed repositories get the plain
-`in no list` rule.
-
-**Fix:** add it to a list (a fork or managed repository to a mirrors list).
-
-## list-contradiction
-
-🔵 A repository is in both lists of an exclusive pair.
-
-**Fix:** remove it from one of them.
+```yaml
+forks:
+  - {repo: spali/example, pinned: true}
+```
 
 ### Freeze a fork or mirror
 
-To keep a fork or mirror at its current state, without syncs or checks:
-archive it on GitHub and leave it in its List (a fork in a mirrors list). The
-monitor then checks it only for its lists. To move it to a newer state,
-unarchive it, sync it, and archive it again.
+To keep it at its current state for good: archive it on GitHub and leave it
+in its List. The sync skips archived forks, and the monitor checks it only
+for its lists. To move it to a newer state, unarchive it, sync it, and
+archive it again. An archived repository with an entry that is not pinned is
+`fork-settings` until the entry is removed or pinned.
 
-A repository under `managed:` must first be removed from `managed:` (the sync
-cannot push to an archived repository); until then the monitor reports it as
-`managed-settings`.
+## fork-missing
 
-## list-external-own
+🔴 A repository under `forks:` does not exist ("repository does not exist
+(the sync creates a fork)"). No other check runs for it.
 
-🔵 An own repository (archived ones too) is in a list of `lists.external`,
-such as "🔍 Interesting and related", which is for repositories of others
-(`own repository in "<list>"`).
+**Fix:** let the sync run (it creates a missing fork from the `upstream` of
+the entry; a missing mirror fails the sync job with the command to create it
+by hand once), or fix the `repo` of the entry.
 
-**Fix:** move own work to your stack list and own forks to a mirrors list
-(`lists.mirrors`).
+## fork-settings
 
-## adoption
-
-🔵 An own repository (not a fork, not under `managed:`) that does not use the shared
-release flow ("no central release flow"). One finding per repository.
-
-**Fix:** adopt the flow (README "Set up a new repository"), or ignore the
-finding with a reason.
-
-# Managed repositories
-
-Forks and mirrors listed under `managed:` in `repos.yml`. The sync workflow
-of the control repository keeps them up to date; the monitor only reports.
-A fork has a `github.com` upstream, everything else is a mirror.
-
-## managed-missing
-
-🔴 A repository under `managed:` does not exist ("managed repository does
-not exist (the sync creates it)"). No other check runs for it.
-
-**Fix:** let the sync run (it creates a missing fork; a missing mirror fails
-the sync job with the command to create it by hand once), or fix the `repo`
-of the entry.
-
-## managed-settings
-
-🔴 A managed repository deviates from its settings: issues, pull requests,
-wiki, discussions, projects and Actions are all off unless its `settings:`
-says otherwise. The detail lists each difference
-(`has_wiki is true, expected false`). An archived repository still under
-`managed:` is reported with one finding (`archived but still under
-managed:: remove the entry`) and gets no other managed check.
+🔴 A synced fork or mirror deviates from its settings: issues, pull
+requests, wiki, discussions, projects and Actions are all off unless its
+`settings:` says otherwise. The detail lists each difference
+(`has_wiki is true, expected false`). An archived repository with an entry
+that is not pinned is reported with one finding (`archived but synced: pin
+it or remove its entry from forks:`) and gets no other check.
 
 **Fix:** correct the repository settings, or the `settings:` of its entry; for
-an archived one, remove the entry from `managed:` (see
+an archived one, remove or pin the entry (see
 [Freeze a fork or mirror](#freeze-a-fork-or-mirror)).
 
-## managed-behind
+## fork-behind
 
-🔴 A managed repository lacks upstream changes for more than 48 hours (the
-24-hour sync interval plus 24 hours):
+🔴 A synced fork or mirror lacks upstream changes for more than 48 hours
+(the 24-hour sync interval plus 24 hours):
 
 - branches (forks and mirrors alike): the default branch misses commits of
   the upstream default branch, or a branch declared with `rebase: auto`
@@ -362,7 +307,9 @@ the sync never writes it.
 When the default branch of a mirror's upstream cannot be read (`git
 ls-remote --symref` fails or the upstream has no `HEAD`), its branches are
 not compared: `check-failed` with
-`managed-behind: cannot read the upstream default branch`.
+`fork-behind: cannot read the upstream default branch`. An entry without
+`upstream` whose repository is no fork on GitHub is `check-failed` with
+`fork-behind: no upstream: …`.
 
 A branch or tag the sync stopped because upstream rewrote it
 (`upstream rewritten` or `upstream moved tag` in the sync run) stays behind
@@ -372,34 +319,6 @@ push is older than 48 hours); `sync-failed` is the reliable signal.
 **Fix:** look at the sync run (see `sync-failed`); for a missing `onto`,
 fix the `onto` of the branch in `repos.yml`; for a stopped ref, accept the
 rewrite as described under `sync-failed`.
-
-## branch-undeclared
-
-🔴 A branch of a managed fork or mirror has own commits but is not declared
-in `branches:` and is not the head of an open pull request from the fork to
-upstream. Own commits of the default branch are counted against the upstream
-default branch (never against an upstream branch of the same name), those
-of any other branch (a followed one too, the sync mirrors it by name)
-against the upstream branch of the same name, else the upstream default
-branch. The default branch counts too unless it is declared. The sync
-ignores an undeclared branch that is neither the default branch nor
-followed: its run stays green, only the monitor reports it. The default
-branch or a followed branch with own commits is kept by the sync and fails
-its run. A mirror is compared in the mirror itself: when the upstream commit
-is not there, a branch the sync moves (the default or a followed one) is
-left to `managed-behind`. (🔵 for an unmanaged fork, where no sync manages
-anything.)
-
-🔵 A mirror branch that is neither the default branch, declared nor
-followed is never synced, so it may be an old copy of an upstream branch
-that has moved on since; the mirror cannot tell such a stale copy from own
-commits. It is no finding when its tip is the sha of any upstream branch or
-tag; otherwise it is compared with the mirror's own default branch and,
-when it is ahead, reported as info:
-`<branch>: differs from upstream, not followed (own commits or a stale upstream copy)`.
-
-**Fix:** declare the branch with its `onto` and `rebase`, or delete it (or
-reset the default branch to upstream) by hand.
 
 ## rebase-pending
 
@@ -412,8 +331,9 @@ rebase it by hand and push.
 
 ## sync-failed
 
-🔴 The last sync of a managed repository did not succeed: per repository
-under `managed:` the newest job `Sync · <repo>` of the workflow `sync.yml` on
+🔴 The last sync of a fork or mirror did not succeed: per synced repository
+(the own forks that are not archived and the entries of `forks:`, without
+the pinned ones) the newest job `Sync · <repo>` of the workflow `sync.yml` on
 the branch `main` of the control repository that has a result counts; any
 result but success (`failure`, `timed_out`, …) is red. A cancelled or skipped
 job, or one without a conclusion (e.g. a run GitHub cancelled in the sync
@@ -422,45 +342,90 @@ The detail links the job (`last sync of this repository failed: <url>`). A
 sync of one repository (`-f repo=…`) thus never hides a failure of another
 one.
 🔴 Without a repository: in the newest run whose non-repository job
-(`Managed repositories`) has a result, that job did not succeed (`sync run
+(`Repositories`) has a result, that job did not succeed (`sync run
 failed before the repositories: <url>`).
 
 Only runs on `main` are read; runs on other branches (tests) never count.
-Checked once per monitor run (in the Lists job), only when `managed:` has
-entries; reads the 20 newest completed runs and stops once every managed
+Checked once per monitor run (in the Lists job), only when a repository is
+synced; reads the 20 newest completed runs and stops once every synced
 repository and the plan job have a result. A repository without a job in
-these runs (new entry) and no run yet are no finding. 🔴 A run with more jobs
-than one page (100) is `check-failed` (`sync-failed: more jobs than one page
-…`). ⚪ Not checked in a local run, where there is no control repository. The
-report links the sync runs of the control repository (Fix at) when it knows
-the control file URL.
+these runs (new fork or entry) and no run yet are no finding. 🔴 A run with
+more jobs than one page (100) is `check-failed` (`sync-failed: more jobs than
+one page …`). ⚪ Not checked in a local run, where there is no control
+repository. The report links the sync runs of the control repository (Fix
+at) when it knows the control file URL.
 
-The job of a repository also fails when the sync stopped a ref because upstream rewrote it:
+The job of a repository fails when the rebase of a branch (the default branch
+with own commits too) has a conflict, when a followed branch has own commits,
+and when the sync stopped a ref because upstream rewrote it:
 `error: <ref>: upstream rewritten (…)` or `upstream moved tag (…)`, with the
 command to accept it. Such a ref stays as it was (the other refs are synced)
 until the rewrite is accepted.
 
 **Fix:** read the log of the job or run, fix the cause, run the sync again
-(`gh workflow run sync.yml -f repo=<repo>`). For a
+(`gh workflow run sync.yml -f repo=<repo>`). For a conflict: rebase the
+branch by hand and push, or pin the fork. For a
 stopped ref: check upstream, then in the control repository run
 `gh workflow run sync.yml -f repo=<repo> -f accept=<branch|tags/name|*>`
 (the old tip is kept in `refs/backup/<branch>` or `refs/backup-tags/<tag>`).
 
+## fork-delete-candidate
+
+🔵 The fork has no own commits on its default branch, no open pull request
+upstream, and every branch of it also exists upstream or was the head of a
+closed or merged pull request from the fork (contribution done): nothing
+would be lost.
+
+**Fix:** delete the fork, or archive or pin it to keep the state you
+reference (see [Pin a fork or mirror](#pin-a-fork-or-mirror)).
+
 ## contribution-stale
 
 🔵 An open upstream pull request from a fork is older than 90 days
-(`PR #12 open for 91 days: <url>`). Checked for unmanaged forks.
+(`PR #12 open for 91 days: <url>`).
 
 **Fix:** follow up or close it.
 
-## unmanaged
+# Lists
 
-🔵 A repository (not archived) is in a synced mirrors list
-(`lists.mirrors.synced`, for example "👀  Mirrors") but is not listed under
-`managed:` (`in "<list>" but not managed`). The `other` mirrors lists may
-hold unsynced forks.
+The GitHub Lists of the owner (stars), named in `lists` of `repos.yml`.
+Archived repositories (snapshots) go in the same Lists as active ones and get
+the same checks.
 
-**Fix:** add it to `managed:`, or ignore the finding with a reason.
+## list-none
+
+🔵 A repository is in no list (`in no list`), or a fork or a repository
+under `forks:` (such as a mirror of a repository outside GitHub) is in none
+of the forks lists of `lists.forks` (for example "🍴 Forks & mirrors";
+message `in none of the forks lists`). Archived repositories count too. The
+forks variant is not reported while one of the configured forks Lists is
+missing (that is `config-invalid`); "in no list" is still reported.
+Without forks lists, forks and entries get the plain `in no list` rule.
+
+**Fix:** add it to a list (a fork or mirror to a forks list).
+
+## list-contradiction
+
+🔵 A repository is in both lists of an exclusive pair.
+
+**Fix:** remove it from one of them.
+
+## list-external-own
+
+🔵 An own repository (archived ones too) is in a list of `lists.external`,
+such as "🔍 Interesting and related", which is for repositories of others
+(`own repository in "<list>"`).
+
+**Fix:** move own work to your stack list and own forks to a forks list
+(`lists.forks`).
+
+## adoption
+
+🔵 An own repository (not a fork, not under `forks:`) that does not use the shared
+release flow ("no central release flow"). One finding per repository.
+
+**Fix:** adopt the flow (README "Set up a new repository"), or ignore the
+finding with a reason.
 
 # Billing
 

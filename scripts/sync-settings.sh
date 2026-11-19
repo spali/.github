@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Enforces the settings of ENTRY on the managed repository: the five has_*
+# Enforces the settings of ENTRY on the fork or mirror: the five has_*
 # features, GitHub Actions and, for public repositories, the approval of fork
 # pull request workflows for all external contributors. Prints "<key>: <old> -> <new>" per change or
 # "settings ok". Only keys that differ are written.
 #
-# env: ENTRY (the object of managed_entry), GH_TOKEN.
+# env: ENTRY (the object of fork_entry), GH_TOKEN.
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 source "$(dirname "$0")/lib.sh"

@@ -54,7 +54,7 @@ flowchart LR
 | [`.github/workflows/release-prepare.yml`](.github/workflows/release-prepare.yml) | Reusable: update the draft, check a pushed tag, decide kind and version |
 | [`.github/workflows/release-publish.yml`](.github/workflows/release-publish.yml) | Reusable: checksums, attestation, publish |
 | [`.github/workflows/monitor.yml`](.github/workflows/monitor.yml), [`monitor-config.yml`](.github/workflows/monitor-config.yml) | Reusable: the [maintenance monitor](#maintenance-monitor) and the validation of its control file, called from a private control repository |
-| [`.github/workflows/sync.yml`](.github/workflows/sync.yml) | Reusable: the [fork and mirror sync](#fork-and-mirror-sync) of the managed repositories, called from the private control repository |
+| [`.github/workflows/sync.yml`](.github/workflows/sync.yml) | Reusable: the [fork and mirror sync](#fork-and-mirror-sync) of the own forks and the `forks:` entries, called from the private control repository |
 | [`.github/workflows/profile-cards.yml`](.github/workflows/profile-cards.yml) | Reusable: the [profile cards](#profile-cards) of the profile repository, called from the private control repository |
 | [`scripts/`](scripts) | The logic of the reusable workflows (Bash), tested in [`tests/`](tests) |
 | [`docs/monitor-checks.md`](docs/monitor-checks.md) | What each check of the maintenance monitor means and how to fix a finding |
@@ -452,10 +452,9 @@ It checks five groups (archived repositories only by the Lists check):
 | Group | Repositories | Checks |
 |---|---|---|
 | Release flow and settings | central repositories (those that use this flow) | stale dev builds and `-next` pre-releases, orphan tags, several drafts, pin behind the latest release, alert/PVR/Actions settings, rulesets |
-| Health | all non-fork, unmanaged repositories | merge settings, red `main`, open Renovate pull requests, unanswered pull requests and issues, disabled workflows, Dependabot and code scanning alerts, branches of merged pull requests |
-| Forks | unmanaged forks | upstream commits missing, active workflows, delete candidates, old pull requests, branches with own commits, branches of merged upstream pull requests |
-| Managed | forks and mirrors listed under `managed` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, undeclared branches with own commits, branches of merged upstream pull requests, manual rebases pending |
-| Lists | all repositories, archived ones too | GitHub Lists that contradict forks or mirrors (archived repositories stay in the normal lists, see [freeze a fork or mirror](docs/monitor-checks.md#freeze-a-fork-or-mirror); forks and managed repositories in a mirrors list, every repository not archived in a `synced` mirrors list under `managed`; no own repositories in `lists.external`); repositories without the release flow; the last run of the control repository's sync failed |
+| Health | all repositories that are no fork and not under `forks:` | merge settings, red `main`, open Renovate pull requests, unanswered pull requests and issues, disabled workflows, Dependabot and code scanning alerts, branches of merged pull requests |
+| Forks | the own forks and the entries under `forks` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, manual rebases pending (not for pinned ones); delete candidates, old pull requests, branches of merged upstream pull requests |
+| Lists | all repositories, archived ones too | GitHub Lists that contradict forks or mirrors (archived repositories stay in the normal lists, see [freeze a fork or mirror](docs/monitor-checks.md#freeze-a-fork-or-mirror); forks and entries in a forks list; no own repositories in `lists.external`); repositories without the release flow; the last run of the control repository's sync failed |
 
 Once per run, for the whole account, the **billing** check (in the Lists job)
 compares the Actions minutes and storage used by private repositories with
@@ -476,7 +475,7 @@ private repositories of a Free account); it is only listed with its reason. The 
 issue update failed**; GitHub's failed-run mail is the notification.
 
 **Thresholds.** A Renovate pull request is stale after 7 days. A pin is behind
-when a newer release of `spali/.github` is older than 7 days. A managed repository is behind
+when a newer release of `spali/.github` is older than 7 days. A synced fork or mirror is behind
 after 48 h.
 
 **Set up the control repository** (once):
@@ -531,8 +530,8 @@ after 48 h.
 |---|---|
 | `version` | must be `1` |
 | `monitor` | optional: `jobs` (`per-group`, the default: one job per check group; `per-repo`: one job per check group and repository) and `runs-on` (a runner label or a list of labels, default `ubuntu-latest`) |
-| `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `mirrors` (mapping: `synced` and `other`, each a list of lists), `external` (list of lists) |
-| `managed` | forks and mirrors kept in sync by [`sync.yml`](#fork-and-mirror-sync): `repo`, `upstream`, optional `branches`, `follow`, `tags`, `settings`, `private` |
+| `lists` | names of your GitHub Lists: `exclusive` (pairs of lists a repository must not be in both of), `forks` (list of lists for forks and mirrors), `external` (list of lists) |
+| `forks` | exceptions for the forks and mirrors the [`sync.yml`](#fork-and-mirror-sync) keeps in sync (every own fork is synced without an entry): `repo`, optional `upstream`, `branches`, `follow`, `tags`, `settings`, `private`, `pinned` |
 | `billing` | optional: `minutes` (`included`, `threshold`) and `storage` (`included-gb`, `threshold`) of the [billing check](docs/monitor-checks.md#billing); missing values come from the plan (Free, Pro), thresholds default to 75 |
 | `unanswered` | optional: `days` (positive integer, default 7): how long someone may wait for an answer in an open pull request or issue |
 | `ignores` | accepted findings: `repo`, `check` (an id from the AGENTS.md catalog, not `check-failed`), optional `item` (only for `unanswered` and `stale-branch`: a pull request or issue number, ignores only that item), `reason` (required) |
@@ -544,10 +543,8 @@ monitor:
   runs-on: ubuntu-latest
 lists:
   exclusive:
-    - ["Contribution forks", "Customization forks"]
-  mirrors:
-    synced: ["Mirrors"]
-    other: ["Contribution forks", "Customization forks"]
+    - ["Stack", "Experiments"]
+  forks: ["Forks & mirrors"]
   external: ["Interesting and related"]
 ignores:
   - {repo: spali/example, check: renovate-stale, reason: waiting for upstream fix}
@@ -582,7 +579,7 @@ above). When the token expires, the billing check fails red
 
 **The run.** The job **Inventory** reads the control file and the list of
 repositories. Then each check group runs as a matrix job: release flow,
-settings and rulesets, health, forks and managed, plus **Lists** (which also
+settings and rulesets, health, forks and mirrors, plus **Lists** (which also
 runs the billing check). With
 `monitor.jobs: per-group` (default) that is one job per group; with `per-repo`
 one job per group and repository (`Forks · spali/x`), so every repository
@@ -619,7 +616,7 @@ Your own runner:
   as ephemeral runners register again after each job) and otherwise fails the
   run, so GitHub notifies you
   instead of the jobs waiting in the queue for a day; there is no fallback to
-  GitHub-hosted runners (the sync checks the same in Managed repositories);
+  GitHub-hosted runners (the sync checks the same in its Repositories job);
 - gets the read-only app token and the issue token of each job: use it only
   for the private control repository.
 
@@ -683,10 +680,14 @@ an entry to `ignores`.
 
 ## Fork and mirror sync
 
-The reusable workflow `sync.yml` keeps the forks and mirrors listed under
-`managed:` of the control file in sync with their upstream, centrally from
-the control repository: no fork or mirror needs a sync workflow of its own.
-For each managed repository it
+The reusable workflow `sync.yml` keeps every own fork (not archived) and
+every entry under `forks:` of the control file in sync with their upstream,
+centrally from the control repository: no fork or mirror needs a sync
+workflow of its own. A fork needs no entry: its upstream is its parent on
+GitHub. An entry is needed for a mirror of a repository outside GitHub, for
+other branches than the default branch, for other settings, and to pin a
+repository (`pinned: true`: the sync leaves it alone). For each synced
+repository it
 
 1. creates a missing fork (a missing mirror must be created by hand once, see
    below);
@@ -695,7 +696,8 @@ For each managed repository it
    repository requires approval of fork pull request workflows for all
    external contributors (also with Actions off);
 3. syncs the refs from upstream, the same way for forks and mirrors:
-   fast-forwards the default branch, rebases the declared branches onto
+   fast-forwards the default branch (with own commits: rebases it onto the
+   upstream default branch), rebases the declared branches onto
    their upstream branch, mirrors the upstream branches that match a
    `follow` pattern and all tags (unless `tags: false`); it deletes a
    followed branch or a tag that is gone upstream only when its commits are
@@ -712,10 +714,10 @@ The old default branch is not deleted: the sync leaves it alone like any
 other unconfigured branch (only a `follow` pattern that matches it deletes
 it in a later run, once it is gone upstream and nothing is lost). The
 default stays when the old default branch is declared in `branches:`, has
-commits that are not in the upstream default branch, or when upstream's
-name is declared, or when the target branch of that name has own commits
-(it is skipped as `undeclared` and fails the run). Forks and mirrors are
-handled the same way.
+commits that are not in the upstream default branch (it is then rebased
+onto the upstream default branch), or when upstream's name is declared. A
+target branch of upstream's name with own commits is rebased onto it and
+becomes the default branch. Forks and mirrors are handled the same way.
 
 **Only the needed branches.** The sync fetches from upstream only the
 default branch, the `onto` of each declared branch, the branches matching a
@@ -725,16 +727,16 @@ objects), so the other branches of a large upstream are not downloaded;
 listing their names still costs a little. Every other branch must be
 configured, by `branches:` or `follow:` (all branches: `follow: ['.*']`);
 other target branches are left alone. A followed branch that is new upstream is created by the next
-sync run; until then the monitor reports it as `managed-behind`
+sync run; until then the monitor reports it as `fork-behind`
 (`<branch>: missing in the target`).
 
-It writes **only to the repositories under `managed:`**. A branch with own
-commits that is not declared, and the head branch of an open upstream pull
-request from the fork, are never overwritten (the monitor reports the first
-one as `branch-undeclared`). Such a kept branch or tag with own commits
-fails the run after the push (`error: <n> refs kept with own commits: …`):
-declare the branch in `branches:`, or delete or reset it by hand. A conflict
-pushes nothing for that repository.
+It writes **only to the own forks and the repositories under `forks:`** (not
+pinned, not archived). The head branch of an open upstream pull request from
+the fork is never overwritten. A followed branch or a tag with own commits
+is kept and fails the run after the push (`error: <n> refs kept with own
+commits: …`): declare the branch in `branches:`, or delete or reset it by
+hand. A rebase conflict (the default branch with own commits too) pushes
+nothing for that repository and fails its job: rebase it by hand, or pin it.
 Every push is one atomic push with a lease on the old commit of each ref:
 if somebody pushed in between, nothing is overwritten and the job fails. The
 job summary lists, per repository, whether it existed or was created, the
@@ -755,8 +757,9 @@ the `onto` for a declared branch). It moves in the same atomic push as its
 branch and is deleted with it. When upstream rewrites history (a force push)
 the sync never follows on its own:
 
-- a default or followed branch whose upstream no longer contains its record,
-  and a declared branch whose record is no longer in its `onto`, are skipped
+- a default or followed branch whose upstream no longer contains its record
+  (a default branch with own commits on top of its record: like a declared
+  branch), and a declared branch whose record is no longer in its `onto`, are skipped
   as `upstream rewritten (synced <sha>, upstream now <sha>, <n> synced
   commits gone upstream; target has …)`;
 - a target tag that differs from the upstream tag of the same name is
@@ -770,11 +773,11 @@ rewrite intended?), then accept it:
 `-f accept=tags/<name>`; every stop of that repository: `-f accept='*'`).
 Accept backs up the old tip (a branch in `refs/backup/<branch>`, a tag in
 `refs/backup-tags/<tag>`) and then follows upstream: a default or followed
-branch and a tag are set to upstream, a declared branch rebases only its
-own commits after the record onto the new `onto`. A default or followed
-branch with own commits on top is refused (`; accept refused: own commits on
-top, …`, the error line then has no accept hint): declare it in
-`branches:`, or reset it by hand. A declared branch
+branch and a tag are set to upstream, a declared branch (and a default
+branch with own commits) rebases only its own commits after the record onto
+the new `onto`. A followed branch with own commits on top is refused
+(`; accept refused: own commits on top, …`, the error line then has no
+accept hint): declare it in `branches:`, or reset it by hand. A declared branch
 whose record is not in the branch (reset or rebased by hand) is no stop and
 rebases as usual; a `rebase: manual` branch in a stop needs only `accept`
 (no `branch`). The records are first created by the first run after an
@@ -807,12 +810,14 @@ fork that carries own tags should set `tags: false`. Otherwise:
   (empty or broken source)`), e.g. a fork with more own tags than upstream
   refs.
 
-**The `managed:` entries:**
+**The `forks:` entries** (only for exceptions; a fork without an entry syncs
+its default branch and tags with the defaults):
 
 | Key | Meaning |
 |---|---|
 | `repo` | the fork or mirror, `spali/name` |
-| `upstream` | `https://` URL of the source; on `github.com` the repository is a **fork**, anywhere else a **mirror** |
+| `upstream` | `https://` URL of the source; on `github.com` the repository is a **fork**, anywhere else a **mirror**; default: the parent of the fork on GitHub (needed for a mirror and to create a missing fork) |
+| `pinned` | `true`: not synced, the monitor checks neither its settings nor how far it is behind (default `false`) |
 | `follow` | a list of regular expressions (jq/Oniguruma syntax); every upstream branch whose **whole** name matches one is mirrored by name (fast-forward only, a diverged one with own commits is kept, one gone upstream is deleted only when nothing is lost); all branches: `['.*']`; default none (only the default branch and the declared branches) |
 | `tags` | `true` (the default): all upstream tags are mirrored (new ones taken over, annotated tags kept, one that differs from upstream stops as `upstream moved tag` until accepted, one gone upstream is deleted only when nothing is lost, see "Own tags"); `false`: tags are neither fetched nor touched |
 | `branches` | own branches: `<branch>: {onto: <upstream branch>, rebase: auto}` or `rebase: manual`; `auto` rebases on every run, `manual` only when dispatched with `branch`; a missing declared branch is created from its `onto` |
@@ -820,9 +825,8 @@ fork that carries own tags should set `tags: false`. Otherwise:
 | `private` | mirrors: the visibility in the create command (default `false`) |
 
 ```yaml
-managed:
+forks:
   - repo: spali/example-fork
-    upstream: https://github.com/someone/example
     branches:
       my-feature: {onto: main, rebase: auto}
       experiment: {onto: develop, rebase: manual}
@@ -834,8 +838,9 @@ managed:
     follow: ['.*']
     private: true
   - repo: spali/example-big
-    upstream: https://github.com/someone/big
     tags: false
+  - repo: spali/example-pinned
+    pinned: true
 ```
 
 Other ref namespaces (`refs/pull/*`, `refs/merge-requests/*`, …) are never
@@ -859,7 +864,8 @@ The rebased commits are committed by the app's bot user
 **Mirrors are created by hand once.** An app token cannot create a repository
 of a user account. When a mirror is missing, its job fails and prints the
 command to run, for example `gh repo create spali/example-mirror --private`;
-the monitor shows `managed-missing` until then. Forks are created by the sync.
+the monitor shows `fork-missing` until then. A fork with an entry and an
+`upstream` is created by the sync.
 
 **Add `.github/workflows/sync.yml`** to the control repository (replace
 `<sha>` and `vX.Y.Z` like for the monitor):
@@ -875,7 +881,7 @@ on:
   workflow_dispatch:
     inputs:
       repo:
-        description: Only this managed repository (spali/name)
+        description: Only this repository (spali/name)
         type: string
       branch:
         description: Also rebase this manual branch (or * for all), needs repo
@@ -899,8 +905,10 @@ jobs:
       app-key: ${{ secrets.SYNC_APP_KEY }}
 ```
 
-**The run.** The job **Managed repositories** validates the control file and
-lists the repositories (only `repo` when dispatched with it); with a
+**The run.** The job **Repositories** validates the control file and
+lists the repositories: the own forks that are not archived (read with a
+metadata token of the app) and the entries, without the pinned ones (only
+`repo` when dispatched with it); with a
 self-hosted `monitor.runs-on` it fails when no such runner is online (see
 "Jobs and runner"). Then one job
 **Sync · spali/name** per repository runs, at most 4 at a time, on

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Creates the managed fork or mirror of ENTRY when it does not exist.
+# Creates the fork or mirror of ENTRY when it does not exist.
 #
 # Prints "exists", "created fork" or fails. A repository that exists with
 # the wrong kind (or the wrong parent) is never modified.
 #
-# env: ENTRY (the object of managed_entry), GH_TOKEN, optional
+# env: ENTRY (the object of fork_entry), GH_TOKEN, optional
 #      SYNC_POLL_SLEEP (seconds between the visibility polls, default 3).
 set -euo pipefail
 # shellcheck source=scripts/lib.sh

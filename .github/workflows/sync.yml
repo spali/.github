@@ -1,7 +1,7 @@
-# Reusable: sync the managed forks and mirrors (key `managed:` of the control
-# file) with their upstream: create a missing fork, enforce the settings,
-# fast-forward, rebase or mirror the refs, follow a renamed upstream default
-# branch.
+# Reusable: sync the own forks (not archived) and the entries of `forks:` in
+# the control file, except the pinned ones, with their upstream: create a
+# missing fork, enforce the settings, fast-forward, rebase or mirror the
+# refs, follow a renamed upstream default branch.
 #
 # Call it from the PRIVATE control repository that holds the control file:
 #
@@ -14,7 +14,7 @@
 #     workflow_dispatch:
 #       inputs:
 #         repo:
-#           description: Only this managed repository (spali/name)
+#           description: Only this repository (spali/name)
 #           type: string
 #         branch:
 #           description: Also rebase this manual branch (or * for all), needs repo
@@ -38,20 +38,21 @@
 #         app-key: ${{ secrets.SYNC_APP_KEY }}
 #
 # The control file (default repos.yml) is read from the calling repository.
-# The sync writes only to the repositories listed under `managed:`, with a
-# write app (Administration, Contents and Workflows write; Pull requests,
-# Actions and Metadata read; installed on all repositories). Each repository
-# gets its own job and tokens: a metadata token checks that it exists, an
+# The sync writes only to the own forks and the repositories under `forks:`
+# (not pinned), with a write app (Administration, Contents and Workflows
+# write; Pull requests, Actions and Metadata read; installed on all
+# repositories). A metadata token lists the forks for the matrix. Each
+# repository gets its own job and tokens: a metadata token checks that it exists, an
 # unscoped token with all app permissions creates a missing fork (forking
 # refuses down-scoped tokens; it is minted only then), and a token scoped to
 # that repository syncs it. A missing mirror
 # fails with the command to create it by hand. The caller owns the schedule and the
 # concurrency group; each repository also has its own group (sync-<repo>).
 #
-# Jobs: Managed repositories (control file, repository list; with a
+# Jobs: Repositories (control file, repository list; with a
 # self-hosted monitor.runs-on a token with Administration read on the calling
 # repository checks that such a runner is online) → Sync · <repo>
-# (one per managed repository, at most 4 at a time).
+# (one per synced repository, at most 4 at a time).
 name: Sync
 
 on:
@@ -66,7 +67,7 @@ on:
         type: string
         default: repos.yml
       repo:
-        description: Only this managed repository (default all)
+        description: Only this repository (default all)
         type: string
         default: ""
       branch:
@@ -90,7 +91,7 @@ env:
 
 jobs:
   plan:
-    name: Managed repositories
+    name: Repositories
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -110,9 +111,18 @@ jobs:
           ref: ${{ job.workflow_sha || 'job-workflow-sha-unavailable' }}
           path: .sync
           persist-credentials: false
+      - name: Repositories token
+        id: list-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-key }}
+          owner: spali
+          permission-metadata: read
       - name: Repositories
         id: matrix
         env:
+          GH_TOKEN: ${{ steps.list-token.outputs.token }}
           SYNC_REPO: ${{ inputs.repo }}
           SYNC_BRANCH: ${{ inputs.branch }}
           SYNC_ACCEPT: ${{ inputs.accept }}

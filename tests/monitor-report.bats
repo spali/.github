@@ -390,8 +390,8 @@ J
   printf '%s\n' \
     '{"level":"red","check":"sync-failed","repo":"spali/knx.js","message":"last sync of this repository failed: https://github.com/ctl/x/actions/runs/9/job/7"}' \
     '{"level":"red","check":"sync-failed","repo":null,"message":"sync run failed before the repositories: https://github.com/ctl/x/actions/runs/9"}' >"$lists"
-  printf '%s\n' '{"level":"red","check":"managed-behind","repo":"spali/knx.js","message":"m"}' >"$one"
-  # per-group: one managed job for all repos; per-repo: one job per repo (and
+  printf '%s\n' '{"level":"red","check":"fork-behind","repo":"spali/knx.js","message":"m"}' >"$one"
+  # per-group: one forks job for all repos; per-repo: one job per repo (and
   # an empty file for another); the Lists job runs once in both.
   for files in "$lists $one" "$lists $one $BATS_TEST_TMPDIR/empty.jsonl"; do
     : >"$BATS_TEST_TMPDIR/empty.jsonl"
@@ -420,8 +420,8 @@ J
 # --- layout F: TODO, overview matrix, row anchors, summary line ----------
 
 # layout sets a realistic inventory, control file and findings: red and info
-# of several checks, a repo-less finding, a not checked finding, a managed
-# repository outside the inventory (other case in the control file).
+# of several checks, a repo-less finding, a not checked finding, a
+# repository under forks: outside the inventory (other case in the control file).
 layout() {
   jq -n '[
     {name: "o/central", central: true, fork: false, pins: []},
@@ -430,19 +430,19 @@ layout() {
     {name: "o/clean", central: false, fork: false, pins: []}]' >"$BATS_TEST_TMPDIR/inv.json"
   export INVENTORY="$BATS_TEST_TMPDIR/inv.json"
   config <<'J'
-{"managed":[{"repo":"o/Man","upstream":"https://src.example/p.git"}],"ignores":[]}
+{"forks":[{"repo":"o/Man","upstream":"https://src.example/p.git"}],"ignores":[]}
 J
   findings <<'J'
 {"level":"red","check":"main-red","repo":"o/plain","message":"CI failed"}
 {"level":"info","check":"adoption","repo":"o/plain","message":"no central release flow"}
 {"level":"info","check":"fork-behind","repo":"o/fork","message":"3 commits behind upstream"}
-{"level":"info","check":"branch-undeclared","repo":"o/fork","message":"b: 2 own commits"}
-{"level":"info","check":"branch-undeclared","repo":"o/fork","message":"a: 1 own commits"}
+{"level":"info","check":"contribution-stale","repo":"o/fork","message":"b: 2 own commits"}
+{"level":"info","check":"contribution-stale","repo":"o/fork","message":"a: 1 own commits"}
 {"level":"red","check":"check-failed","repo":"o/fork","message":"fork-behind: cannot compare"}
 {"level":"info","check":"list-none","repo":"o/central","message":"in no list"}
 {"level":"skip","check":"ruleset-tags","repo":"o/central","message":"rulesets not available"}
 {"level":"red","check":"config-invalid","repo":null,"message":"repos.yml: bad"}
-{"level":"red","check":"managed-behind","repo":"o/man","message":"2 tags differ"}
+{"level":"red","check":"fork-settings","repo":"o/man","message":"has_wiki is true, expected false"}
 J
 }
 
@@ -473,10 +473,10 @@ todo_titles() { section "📝 TODO" | grep '^<details'; }
   [ "${#lines[@]}" -eq 8 ]
   [ "${lines[0]}" = '<details open><summary>🔴 <b>Fix now</b> · Fix checks that could not run · 1 repository · <code>check-failed</code></summary>' ]
   [[ ${lines[1]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · 1 entry · <code>config-invalid</code></summary>' ]]
-  [[ ${lines[2]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · 1 repository · <code>main-red</code></summary>' ]]
-  [[ ${lines[3]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · <code>managed-behind</code></summary>' ]]
+  [[ ${lines[2]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · <code>fork-settings</code></summary>' ]]
+  [[ ${lines[3]} == '<details open><summary>🔴 <b>Fix now</b> · '*' · 1 repository · <code>main-red</code></summary>' ]]
   [[ ${lines[4]} == '<details><summary>🤔 <b>Decide</b> · '*' · 1 repository · <code>adoption</code></summary>' ]]
-  [[ ${lines[5]} == '<details><summary>🤔 <b>Decide</b> · '*' · 2 entries · <code>branch-undeclared</code></summary>' ]]
+  [[ ${lines[5]} == '<details><summary>🤔 <b>Decide</b> · '*' · 2 entries · <code>contribution-stale</code></summary>' ]]
   [[ ${lines[6]} == '<details><summary>🧹 <b>Clean up</b> · '*' · <code>fork-behind</code></summary>' ]]
   [[ ${lines[7]} == '<details><summary>🧹 <b>Clean up</b> · '*' · <code>list-none</code></summary>' ]]
 }
@@ -494,14 +494,14 @@ todo_titles() { section "📝 TODO" | grep '^<details'; }
 
 @test "TODO: a check with red and info findings has a Fix now and a Decide entry" {
   findings <<'J'
-{"level":"red","check":"branch-undeclared","repo":"o/a","message":"x: 3 own commits"}
-{"level":"info","check":"branch-undeclared","repo":"o/b","message":"y: differs"}
+{"level":"red","check":"stale-branch","repo":"o/a","message":"x: merged"}
+{"level":"info","check":"stale-branch","repo":"o/b","message":"y: merged, new commits"}
 J
   run "$REPORT"
   run todo_titles
   [ "${#lines[@]}" -eq 2 ]
-  [[ ${lines[0]} == '<details open><summary>🔴 <b>Fix now</b> · '*'<code>branch-undeclared</code></summary>' ]]
-  [[ ${lines[1]} == '<details><summary>🤔 <b>Decide</b> · '*'<code>branch-undeclared</code></summary>' ]]
+  [[ ${lines[0]} == '<details open><summary>🔴 <b>Fix now</b> · '*'<code>stale-branch</code></summary>' ]]
+  [[ ${lines[1]} == '<details><summary>🤔 <b>Decide</b> · '*'<code>stale-branch</code></summary>' ]]
 }
 
 @test "TODO: nothing to do without red or info findings" {
@@ -562,7 +562,7 @@ J
     jq -e --arg c "$c" '.[$c] | (.category == "decide" or .category == "cleanup")
       and (.title | type == "string" and length > 0)
       and (.text | type == "string" and length > 0 and endswith("."))
-      and (.areas | type == "array" and all(.[]; IN("release", "settings", "health", "forks", "managed", "lists")))
+      and (.areas | type == "array" and all(.[]; IN("release", "settings", "health", "forks", "lists")))
       and ((has("todo") | not) or (.todo | type == "boolean"))' \
       <<<"$MONITOR_TODO" >/dev/null || { echo "no complete TODO entry: $c"; return 1; }
   done
@@ -574,7 +574,7 @@ J
 @test "TODO: the categories follow the agreed mapping" {
   source "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
   run jq -r 'to_entries | map(select(.value.category == "decide") | .key) | sort | join(" ")' <<<"$MONITOR_TODO"
-  [ "$output" = "adoption branch-undeclared contribution-stale fork-delete-candidate list-contradiction rebase-pending stale-branch unmanaged" ]
+  [ "$output" = "adoption contribution-stale fork-delete-candidate list-contradiction rebase-pending stale-branch" ]
 }
 
 @test "TODO: a check without an entry is Clean up, titled by its id, without sentence" {
@@ -591,13 +591,13 @@ J
   run "$REPORT"
   ov=$(section "📋 Overview")
   run grep '^| ' <<<"$ov"
-  [ "${lines[0]}" = '| Repository | Release | Settings | Health | Fork / Mirror | Sync | Lists |' ]
-  [ "${lines[1]}" = '| :-- | :-: | :-: | :-: | :-: | :-: | :-: |' ]
-  [ "${lines[2]}" = '| [o/fork](https://github.com/o/fork) | – | – | – | [🔴](#user-content-f-check-failed-o-fork)[🔵](#user-content-f-branch-undeclared-o-fork)[🔵](#user-content-f-branch-undeclared-o-fork-2)[🔵](#user-content-f-fork-behind-o-fork) | – | ✅ |' ]
-  [ "${lines[3]}" = '| [o/man](https://github.com/o/man) | – | – | – | – | [🔴](#user-content-f-managed-behind-o-man) | – |' ]
+  [ "${lines[0]}" = '| Repository | Release | Settings | Health | Fork / Mirror | Lists |' ]
+  [ "${lines[1]}" = '| :-- | :-: | :-: | :-: | :-: | :-: |' ]
+  [ "${lines[2]}" = '| [o/fork](https://github.com/o/fork) | – | – | – | [🔴](#user-content-f-check-failed-o-fork)[🔵](#user-content-f-contribution-stale-o-fork)[🔵](#user-content-f-contribution-stale-o-fork-2)[🔵](#user-content-f-fork-behind-o-fork) | ✅ |' ]
+  [ "${lines[3]}" = '| [o/man](https://github.com/o/man) | – | – | – | [🔴](#user-content-f-fork-settings-o-man) | – |' ]
   # adoption sits in Release although release does not apply to o/plain
-  [ "${lines[4]}" = '| [o/plain](https://github.com/o/plain) | [🔵](#user-content-f-adoption-o-plain) | – | [🔴](#user-content-f-main-red-o-plain) | – | – | ✅ |' ]
-  [ "${lines[5]}" = '| [o/central](https://github.com/o/central) | ✅ | ⚪ | ✅ | – | – | [🔵](#user-content-f-list-none-o-central) |' ]
+  [ "${lines[4]}" = '| [o/plain](https://github.com/o/plain) | [🔵](#user-content-f-adoption-o-plain) | – | [🔴](#user-content-f-main-red-o-plain) | – | ✅ |' ]
+  [ "${lines[5]}" = '| [o/central](https://github.com/o/central) | ✅ | ⚪ | ✅ | – | [🔵](#user-content-f-list-none-o-central) |' ]
   [ "${#lines[@]}" -eq 6 ]
   # the clean repository and the repo-less finding are not in the matrix
   [[ $ov != *"o/clean"* && $ov != *"config-invalid"* ]]
@@ -611,7 +611,7 @@ J
 {"level":"info","check":"fork-behind","repo":"o/plain","message":"1 commit behind upstream"}
 J
   run "$REPORT"
-  [[ "$(section "📋 Overview")" == *'| [o/plain](https://github.com/o/plain) | [🔵](#user-content-f-adoption-o-plain) | – | ✅ | [🔵](#user-content-f-fork-behind-o-plain) | – | ✅ |'* ]]
+  [[ "$(section "📋 Overview")" == *'| [o/plain](https://github.com/o/plain) | [🔵](#user-content-f-adoption-o-plain) | – | ✅ | [🔵](#user-content-f-fork-behind-o-plain) | ✅ |'* ]]
 }
 
 @test "overview: an archived repo (not in the inventory) shows only its Lists finding" {
@@ -620,7 +620,7 @@ J
 {"level":"info","check":"list-none","repo":"o/old","message":"in no list"}
 J
   run "$REPORT"
-  [[ "$(section "📋 Overview")" == *'| [o/old](https://github.com/o/old) | – | – | – | – | – | [🔵](#user-content-f-list-none-o-old) |'* ]]
+  [[ "$(section "📋 Overview")" == *'| [o/old](https://github.com/o/old) | – | – | – | – | [🔵](#user-content-f-list-none-o-old) |'* ]]
 }
 
 @test "overview: 🔴 before 🔵 in one cell" {
@@ -630,12 +630,12 @@ J
 {"level":"red","check":"main-red","repo":"o/plain","message":"x"}
 J
   run "$REPORT"
-  [[ "$(section "📋 Overview")" == *'| [o/plain](https://github.com/o/plain) | – | – | [🔴](#user-content-f-main-red-o-plain)[🔵](#user-content-f-dependabot-alert-o-plain) | – | – | ✅ |'* ]]
+  [[ "$(section "📋 Overview")" == *'| [o/plain](https://github.com/o/plain) | – | – | [🔴](#user-content-f-main-red-o-plain)[🔵](#user-content-f-dependabot-alert-o-plain) | – | ✅ |'* ]]
 }
 
 @test "every matrix link resolves to exactly one row anchor, and row anchors are unique" {
   layout
-  f=$(cat "$FINDINGS"; echo '{"level":"red","check":"branch-undeclared","repo":"o/fork","message":"c: 9 own commits"}')
+  f=$(cat "$FINDINGS"; echo '{"level":"red","check":"contribution-stale","repo":"o/fork","message":"c: 9 own commits"}')
   findings <<<"$f"
   run "$REPORT"
   links=$(section "📋 Overview" | grep -o '(#user-content-f-[^)]*)' | sed 's/^(#user-content-//; s/)$//')
@@ -644,9 +644,9 @@ J
     [ "$(grep -cF "<a name=\"$l\"></a>" <<<"$output")" -eq 1 ] || { echo "not one anchor: $l"; return 1; }
   done
   [ -z "$(grep -o '<a name="f-[^"]*"' <<<"$output" | sort | uniq -d)" ]
-  # the red branch-undeclared row comes first, the info rows continue its numbering
-  [[ "$(section "🔴 Red")" == *'| <a name="f-branch-undeclared-o-fork"></a>[o/fork](https://github.com/o/fork) | c: 9 own commits |'* ]]
-  [[ "$(section "🔵 Info")" == *'| <a name="f-branch-undeclared-o-fork-2"></a>[o/fork](https://github.com/o/fork) | b: 2 own commits |'* ]]
+  # the red contribution-stale row comes first, the info rows continue its numbering
+  [[ "$(section "🔴 Red")" == *'| <a name="f-contribution-stale-o-fork"></a>[o/fork](https://github.com/o/fork) | c: 9 own commits |'* ]]
+  [[ "$(section "🔵 Info")" == *'| <a name="f-contribution-stale-o-fork-2"></a>[o/fork](https://github.com/o/fork) | b: 2 own commits |'* ]]
 }
 
 @test "row anchor slug: repository lowercased, other characters become -" {
@@ -674,7 +674,7 @@ J
   [[ "$(section "📝 TODO")" != *"list-none"* && "$(section "📝 TODO")" != *"main-red"* ]]
   ov=$(section "📋 Overview")
   [[ $ov != *"o/central"* && $ov != *"main-red"* ]]
-  [[ $ov == *'| [o/plain](https://github.com/o/plain) | [🔵](#user-content-f-adoption-o-plain) | – | ✅ | – | – | ✅ |'* ]]
+  [[ $ov == *'| [o/plain](https://github.com/o/plain) | [🔵](#user-content-f-adoption-o-plain) | – | ✅ | – | ✅ |'* ]]
 }
 
 @test "an old adoption ignore without repository becomes a visible ignore-unused" {

@@ -36,7 +36,7 @@ def need($e; $k; $path; test_):
 
 if type != "object" then "top level must be a mapping" else
   (if .version != 1 then "version must be 1" else empty end),
-  (keys[] | select(IN("version", "monitor", "lists", "managed", "ignores", "unanswered", "billing") | not)
+  (keys[] | select(IN("version", "monitor", "lists", "forks", "ignores", "unanswered", "billing") | not)
     | "unknown key \(.)"),
   (if has("monitor") and (.monitor | type) != "object" then "monitor must be a mapping" else empty end),
   (if (.monitor | type) == "object" then
@@ -76,17 +76,11 @@ if type != "object" then "top level must be a mapping" else
    else empty end),
   (if has("lists") and (.lists | type) != "object" then "lists must be a mapping" else empty end),
   (if (.lists | type) == "object" then
-     (.lists | keys[] | select(IN("exclusive", "mirrors", "external") | not)
+     (.lists | keys[] | select(IN("exclusive", "forks", "external") | not)
        | "lists: unknown key \(.)"),
-     (.lists | if has("mirrors") then
-        (.mirrors | if type != "object" then "lists.mirrors must be a mapping"
-         else (keys[] | select(IN("synced", "other") | not) | "lists.mirrors: unknown key \(.)"),
-              (to_entries[] | select(.key | IN("synced", "other"))
-               | select(.value | type == "array" and all(type == "string") | not)
-               | "lists.mirrors.\(.key) must be a list of strings") end)
-      else empty end),
-     (.lists | if has("external") and (.external | type == "array" and all(type == "string") | not)
-       then "lists.external must be a list of strings" else empty end),
+     (.lists | to_entries[] | select(.key | IN("forks", "external"))
+       | select(.value | type == "array" and all(type == "string") | not)
+       | "lists.\(.key) must be a list of strings"),
      (.lists | if has("exclusive") then
         (if (.exclusive | type) != "array" then "lists.exclusive must be a list"
          else (.exclusive | to_entries[]
@@ -95,18 +89,19 @@ if type != "object" then "top level must be a mapping" else
       else empty end)
    else empty end),
   (if has("ignores") and (.ignores | type) != "array" then "ignores must be a list" else empty end),
-  (if has("managed") and (.managed | type) != "array" then "managed must be a list" else empty end),
-  (list_of("managed") | to_entries[] | "managed[\(.key)]" as $p | .value
+  (if has("forks") and (.forks | type) != "array" then "forks must be a list" else empty end),
+  (list_of("forks") | to_entries[] | "forks[\(.key)]" as $p | .value
     | if type != "object" then "\($p) must be a mapping" else
-        (keys[] | select(IN("repo", "upstream", "branches", "follow", "tags", "settings", "private") | not)
+        (keys[] | select(IN("repo", "upstream", "branches", "follow", "tags", "settings", "private", "pinned") | not)
           | "\($p): unknown key \(.)"),
         (if has("repo") | not then "\($p).repo is required" else repo_err("\($p).repo"; .repo) end),
-        (if has("upstream") | not then "\($p).upstream is required"
+        (if has("upstream") | not then empty
          elif (.upstream | type == "string" and startswith("https://")) | not
          then "\($p).upstream must start with https://"
          elif (.upstream | on_github) and ((.upstream | gh_repo_url) | not)
          then "\($p).upstream is not a github.com repository URL" else empty end),
         (if has("private") and (.private | type) != "boolean" then "\($p).private must be a boolean" else empty end),
+        (if has("pinned") and (.pinned | type) != "boolean" then "\($p).pinned must be a boolean" else empty end),
         (if has("tags") and (.tags | type) != "boolean" then "\($p).tags must be a boolean" else empty end),
         (if has("follow") then
            (if (.follow | type == "array" and all(type == "string")) | not
@@ -139,8 +134,8 @@ if type != "object" then "top level must be a mapping" else
                 else empty end) end)
          else empty end)
       end),
-  ([list_of("managed")[] | select(type == "object" and (.repo | type) == "string") | .repo | ascii_downcase]
-    | group_by(.)[] | select(length > 1) | "duplicate managed \(.[0])"),
+  ([list_of("forks")[] | select(type == "object" and (.repo | type) == "string") | .repo | ascii_downcase]
+    | group_by(.)[] | select(length > 1) | "duplicate fork \(.[0])"),
   (list_of("ignores") | to_entries[] | "ignores[\(.key)]" as $p | .value
     | if type != "object" then "\($p) must be a mapping" else
         (if has("repo") | not then "\($p).repo is required" else repo_err("\($p).repo"; .repo) end),
