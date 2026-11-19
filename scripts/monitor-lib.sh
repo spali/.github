@@ -9,10 +9,9 @@ MONITOR_CHECKS=(
   settings-fork-approval
   ruleset-main ruleset-tags main-red renovate-stale workflow-disabled
   dependabot-alert code-scanning-alert unanswered stale-branch
-  fork-behind fork-workflows-active fork-delete-candidate
+  fork-missing fork-settings fork-behind fork-delete-candidate
   list-none list-contradiction list-external-own
-  managed-missing managed-settings managed-behind branch-undeclared
-  rebase-pending sync-failed contribution-stale unmanaged
+  rebase-pending sync-failed contribution-stale
   adoption billing-minutes billing-storage billing
   check-failed config-invalid ignore-unused
 )
@@ -46,7 +45,7 @@ MONITOR_TODO='{
     "text": "Reporters of a public repository cannot send a vulnerability privately: enable private vulnerability reporting."},
   "settings-actions": {"category": "cleanup", "areas": ["settings"], "title": "Fix the Actions permissions",
     "text": "Workflows get write permissions by default, or Actions may approve pull requests: set the workflow token to read-only and turn off approving pull requests."},
-  "settings-fork-approval": {"category": "cleanup", "areas": ["settings", "health", "forks", "managed"], "title": "Require approval for fork pull request workflows",
+  "settings-fork-approval": {"category": "cleanup", "areas": ["settings", "health", "forks"], "title": "Require approval for fork pull request workflows",
     "text": "Workflows of pull requests from forks run without approval and can pick a self-hosted runner: require approval for all external contributors."},
   "ruleset-main": {"category": "cleanup", "areas": ["settings"], "title": "Restore the main ruleset",
     "text": "The ruleset that protects `main` is missing or differs from the documented one: restore it."},
@@ -64,36 +63,28 @@ MONITOR_TODO='{
     "text": "Code scanning found a problem in the code: fix it, or dismiss the alert with a reason."},
   "unanswered": {"category": "cleanup", "areas": ["health"], "title": "Answer waiting pull requests and issues",
     "text": "Someone waits for an answer in an open pull request or issue: answer it, close it, or ignore the item with a reason."},
-  "stale-branch": {"category": "decide", "areas": ["health", "forks", "managed"], "title": "Delete branches of merged pull requests",
+  "stale-branch": {"category": "decide", "areas": ["health", "forks"], "title": "Delete branches of merged pull requests",
     "text": "The pull request of a branch is merged but the branch is left: delete it, or ignore the pull request number as item if the branch carries on."},
-  "fork-behind": {"category": "cleanup", "areas": ["forks"], "title": "Bring forks up to date",
-    "text": "A fork is behind its upstream: sync it by hand, add it to `managed:` to keep it synced, or archive it to freeze this state."},
-  "fork-workflows-active": {"category": "cleanup", "areas": ["forks"], "title": "Turn off Actions in forks",
-    "text": "Upstream workflows run in the fork and cost minutes or fail: disable Actions in the settings of the fork if unwanted."},
+  "fork-missing": {"category": "cleanup", "areas": ["forks"], "title": "Create missing forks",
+    "text": "A repository under `forks:` does not exist: let the sync create the fork, or fix the entry."},
+  "fork-settings": {"category": "cleanup", "areas": ["forks"], "title": "Fix the settings of forks and mirrors",
+    "text": "A synced fork or mirror differs from its `settings:` (default: all off), or is archived but synced: correct the setting or the entry."},
+  "fork-behind": {"category": "cleanup", "areas": ["forks"], "title": "Bring forks and mirrors up to date",
+    "text": "A synced fork or mirror misses upstream commits or tags for too long: read the sync run."},
   "fork-delete-candidate": {"category": "decide", "areas": ["forks"], "title": "Delete forks without own work?",
-    "text": "No own commits and no open pull request upstream: delete it, archive it to freeze the state you reference, or add it to `managed:` to keep it synced."},
+    "text": "No own commits and no open pull request upstream: delete it, or archive or pin it to keep the state you reference."},
   "list-none": {"category": "cleanup", "areas": ["lists"], "title": "Add repositories to a List",
-    "text": "The repository is in no List, or a fork or managed repository is in none of the mirrors Lists: add it to the right List."},
+    "text": "The repository is in no List, or a fork or mirror is in none of the forks Lists: add it to the right List."},
   "list-contradiction": {"category": "decide", "areas": ["lists"], "title": "Choose one of two exclusive Lists",
     "text": "The repository is in both Lists of an exclusive pair: decide which one fits and remove it from the other."},
   "list-external-own": {"category": "cleanup", "areas": ["lists"], "title": "Move own repositories out of external Lists",
-    "text": "Lists in lists.external are for repositories of others: move own work to your stack List and own forks to a mirrors List."},
-  "managed-missing": {"category": "cleanup", "areas": ["managed"], "title": "Create missing managed repositories",
-    "text": "A repository under `managed:` does not exist: let the sync create it, or fix the entry."},
-  "managed-settings": {"category": "cleanup", "areas": ["managed"], "title": "Fix the settings of managed repositories",
-    "text": "A managed repository differs from its `settings:`: correct the setting or the entry."},
-  "managed-behind": {"category": "cleanup", "areas": ["managed"], "title": "Bring managed repositories up to date",
-    "text": "A managed repository misses upstream commits or tags for too long: read the sync run."},
-  "branch-undeclared": {"category": "decide", "areas": ["managed", "forks"], "title": "Declare or delete branches with own commits",
-    "text": "A branch has own commits (or is a stale upstream copy) that no `branches:` entry covers: declare it in its `managed:` entry, or delete it."},
-  "rebase-pending": {"category": "decide", "areas": ["managed"], "title": "Rebase manual branches?",
+    "text": "Lists in lists.external are for repositories of others: move own work to your stack List and own forks to the forks List."},
+  "rebase-pending": {"category": "decide", "areas": ["forks"], "title": "Rebase manual branches?",
     "text": "A `rebase: manual` branch is behind its upstream: run the sync for this branch when you are ready."},
-  "sync-failed": {"category": "cleanup", "areas": ["managed"], "title": "Fix failed syncs",
-    "text": "The last sync of a managed repository, or the sync run itself, did not succeed: read the sync log."},
+  "sync-failed": {"category": "cleanup", "areas": ["forks"], "title": "Fix failed syncs",
+    "text": "The last sync of a fork or mirror, or the sync run itself, did not succeed: read the sync log (a rebase conflict: resolve it by hand, or pin the fork)."},
   "contribution-stale": {"category": "decide", "areas": ["forks"], "title": "Follow up old pull requests upstream",
     "text": "An own pull request upstream is open for more than 90 days: ping, close or keep it."},
-  "unmanaged": {"category": "decide", "areas": ["lists"], "title": "Manage repositories in the synced mirrors Lists?",
-    "text": "A repository in a synced mirrors List is not under `managed:`: add it to `managed:`, or ignore it."},
   "adoption": {"category": "decide", "areas": ["release"], "title": "Adopt the release flow?",
     "text": "An own repository does not use the central release flow: adopt it, or ignore the finding."},
   "billing-minutes": {"category": "cleanup", "areas": [], "title": "Keep Actions minutes within the included quota",
@@ -102,7 +93,7 @@ MONITOR_TODO='{
     "text": "Private repositories use up the included Actions storage: delete old artifacts and caches or shorten their retention (the info line names the top repositories); raise `billing.storage.threshold` if expected."},
   "billing": {"category": "cleanup", "areas": [], "todo": false, "title": "Actions usage of the account",
     "text": "The used and projected share of the included Actions minutes and storage, one line per run."},
-  "check-failed": {"category": "cleanup", "areas": ["release", "settings", "health", "forks", "managed", "lists"], "title": "Fix checks that could not run",
+  "check-failed": {"category": "cleanup", "areas": ["release", "settings", "health", "forks", "lists"], "title": "Fix checks that could not run",
     "text": "A check could not run (API error, missing access, bad response): read the detail and fix the cause; never ignore it."},
   "config-invalid": {"category": "cleanup", "areas": [], "title": "Fix the control file",
     "text": "The control file is missing or invalid, or names an unknown List or check: fix the file."},
@@ -113,24 +104,25 @@ MONITOR_TODO='{
 # jq definitions of the repositories each check group looks at, shared by
 # the workflow matrix (monitor.sh) and the overview of the report:
 # groups($c; $inv) with $c the control file and $inv the inventory (anything
-# but an array counts as empty) is {release, settings, health, forks,
-# managed: [names, sorted]}. Managed repositories (names compared
-# case-insensitively) are left out of health and forks; the group managed
-# takes the names of the control file.
+# but an array counts as empty) is {release, settings, health, forks: [names,
+# sorted]}. forks: the inventory forks and the entries of
+# `forks:` (names compared case-insensitively, the inventory spelling wins);
+# health: the other repositories that are no fork.
 # shellcheck disable=SC2016,SC2034 # jq program; used by monitor.sh and monitor-report.sh
 MONITOR_GROUPS_JQ='
   def groups($c; $inv):
-    ([$c.managed // [] | .[].repo]) as $mg |
-    ([$mg[] | ascii_downcase]) as $mgl |
-    def unmanaged: (.name | ascii_downcase | IN($mgl[])) | not;
+    ([$c.forks // [] | .[].repo]) as $fe |
+    ([$fe[] | ascii_downcase]) as $fel |
+    def entry: .name | ascii_downcase | IN($fel[]);
     (if ($inv | type) == "array" then $inv else [] end) as $inv |
+    ([$inv[].name | ascii_downcase]) as $invl |
     def names(f): [$inv[] | select(f) | .name] | sort;
     {
       release: names(.central or ((.pins // []) | length > 0)),
       settings: names(.central == true),
-      health: names(.fork == false and unmanaged),
-      forks: names(.fork == true and .parent != null and unmanaged),
-      managed: ($mg | sort)
+      health: names(.fork == false and (entry | not)),
+      forks: (names(.fork == true or entry)
+        + [$fe[] | select(ascii_downcase | IN($invl[]) | not)] | sort)
     };'
 
 # API answers that mean "not applicable" (matched as fixed substrings of the
@@ -280,7 +272,7 @@ json_out() {
 # for all external contributors is the only guard. The endpoint answers 422 for
 # private repositories, so they are skipped without a call (PRIVATE is "true";
 # anything else counts as public). With Actions disabled no workflow can run:
-# no finding (like fork-workflows-active). Writes findings only and always
+# no finding. Writes findings only and always
 # returns 0.
 check_fork_approval() {
   local repo=$1 private=$2 body out
@@ -302,7 +294,7 @@ check_fork_approval() {
 
 # check_merge REPO: settings-merge (expected values: README "Set up a new
 # repository", step 6), for every owned repository that is neither a fork nor
-# managed. The merge settings are read with GraphQL: the REST repository
+# under `forks:`. The merge settings are read with GraphQL: the REST repository
 # answers null for them to an app token without write access. Writes findings
 # only and always returns 0.
 # shellcheck disable=SC2016 # GraphQL variables, no shell expansion wanted
@@ -419,41 +411,4 @@ api_refs() {
     fi
     rm -f "$part"
   done
-}
-
-# undeclared_branches CHECK REPO UPSTREAM_REPO UPSTREAM_DEFAULT DECLARED_JSON
-# OPEN_PRS_FILE TARGET_DEFAULT prints "branch<TAB>n" for every branch of REPO
-# with n > 0 own commits that is not declared (DECLARED_JSON: JSON array of
-# branch names) and not the head of an open upstream pull request from REPO
-# (OPEN_PRS_FILE: JSON array of {head_repo, head_ref}). Own commits of
-# TARGET_DEFAULT (the default branch of REPO, may be empty) are counted against
-# UPSTREAM_DEFAULT, never against an upstream branch of the same name (the
-# sync moves it onto the upstream default); those of any other branch against
-# the upstream branch of the same name, else UPSTREAM_DEFAULT (branch names
-# URL-encoded in the compare URL). API errors are
-# check-failed findings of CHECK; the function then returns 1 after printing
-# the branches found so far.
-undeclared_branches() {
-  local check=$1 repo=$2 up=$3 updef=$4 declared=$5 prs=$6 tdef=$7 tb ub list branch base uri body n
-  tb=$(mktemp)
-  ub=$(mktemp)
-  # shellcheck disable=SC2064 # expand now
-  trap "rm -f '$tb' '$ub'; trap - RETURN" RETURN
-  paged "$check" "$repo" "repos/$repo/branches?per_page=100" '{name}' "$tb" || return 1
-  paged "$check" "$repo" "repos/$up/branches?per_page=100" '{name}' "$ub" || return 1
-  # shellcheck disable=SC2016 # jq program
-  json_out "$check" "$repo" list -r --argjson d "$declared" --arg r "$repo" --arg def "$updef" \
-    --arg tdef "$tdef" --slurpfile u "$ub" --slurpfile p "$prs" '
-    [$u[0][].name] as $un |
-    [$p[0][] | select((.head_repo // "" | ascii_downcase) == ($r | ascii_downcase)) | .head_ref] as $contrib |
-    .[] | .name | select(IN($d[]) or IN($contrib[]) | not) |
-    [., (if . != $tdef and IN($un[]) then . else $def end | @uri), @uri] | @tsv' "$tb" || return 1
-  while IFS=$'\t' read -r branch base uri; do
-    [[ -n $branch ]] || continue
-    body=$(fetch "$check" "$repo" "repos/$up/compare/$base...${repo%%/*}:${repo#*/}:$uri") || return 1
-    json_out "$check" "$repo" n -r '.ahead_by // 0' <<<"$body" || return 1
-    if ((n > 0)); then
-      printf '%s\t%s\n' "$branch" "$n"
-    fi
-  done <<<"$list"
 }

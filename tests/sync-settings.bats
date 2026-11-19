@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 
 setup() {
-  # shellcheck source=scripts/managed-lib.sh
-  source "$BATS_TEST_DIRNAME/../scripts/managed-lib.sh"
+  # shellcheck source=scripts/forks-lib.sh
+  source "$BATS_TEST_DIRNAME/../scripts/forks-lib.sh"
   load helpers/gh-stub
   stub_gh
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/sync-settings.sh"
@@ -19,12 +19,12 @@ approval() {
   jq -nc --arg p "$1" '{approval_policy: $p}' >"$APPROVAL_FILE"
 }
 
-# settings <json> sets ENTRY through managed_entry with the given exceptions
+# settings <json> sets ENTRY through fork_entry with the given exceptions
 settings() {
   local cfg="$BATS_TEST_TMPDIR/config.json"
   jq -n --argjson s "$1" \
-    '{version: 1, managed: [{repo: "spali/tool", upstream: "https://github.com/up/tool", settings: $s}]}' >"$cfg"
-  ENTRY=$(managed_entry "$cfg" spali/tool)
+    '{version: 1, forks: [{repo: "spali/tool", upstream: "https://github.com/up/tool", settings: $s}]}' >"$cfg"
+  ENTRY=$(fork_entry "$cfg" spali/tool)
   export ENTRY
 }
 

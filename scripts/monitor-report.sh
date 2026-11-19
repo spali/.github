@@ -145,7 +145,7 @@ $cfg[0] as $cfg | . as $f
 | ($inventory | if . then groups($cfg; .) | map_values(map(ascii_downcase))
     | .lists = ($inventory | map(.name | ascii_downcase)) else null end) as $applies
 | ([["release", "Release"], ["settings", "Settings"], ["health", "Health"],
-    ["forks", "Fork / Mirror"], ["managed", "Sync"], ["lists", "Lists"]]) as $cols
+    ["forks", "Fork / Mirror"], ["lists", "Lists"]]) as $cols
 | def column:
     (.repo | ascii_downcase) as $r
     | (if .check == "check-failed" then ((.message // "" | tostring | capture("^(?<k>[a-z-]+): ") | .k)? // "" | $todo[.].areas) else null end) as $named

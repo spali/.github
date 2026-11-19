@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Health checks for owned, non-fork, unmanaged repositories:
+# Health checks for owned repositories that are no fork and not under `forks:`:
 # main-red, renovate-stale, unanswered, workflow-disabled, dependabot-alert,
 # code-scanning-alert, stale-branch, settings-merge, settings-fork-approval.
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
@@ -172,7 +172,7 @@ main() {
     days=7
   fi
   if ! repos=$(jq -r --slurpfile c "$CONFIG" '
-      ([$c[0].managed // [] | .[].repo | ascii_downcase]) as $mg |
+      ([$c[0].forks // [] | .[].repo | ascii_downcase]) as $mg |
       .[] | select(.fork == false) |
       select(.name | ascii_downcase | IN($mg[]) | not) |
       [.name, .default_branch, (.private // false)] | @tsv' "$INVENTORY" 2>/dev/null); then

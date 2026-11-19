@@ -41,15 +41,27 @@ REC=refs/sync/upstream
   [ ! -s "$WORK/skipped.txt" ]
 }
 
-@test "fork with undeclared own commits is skipped" {
-  O=$(commit "$A" o own)
+@test "fork default branch with own commits is rebased onto upstream" {
+  O=$(GIT_AUTHOR_NAME=me commit "$A" o own "own")
   set_ref "$TG" refs/heads/main "$O"
   entry fork
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ ! -s "$WORK/plan.tsv" ]
-  no_record main
-  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/main\tundeclared')" ]
+  N=$(git -C "$WORK/repo" rev-parse refs/heads/main)
+  [ "$(git -C "$WORK/repo" rev-parse "$N^")" = "$B" ]
+  [ "$(git -C "$WORK/repo" log -1 --format=%an "$N")" = me ]
+  [ "$(cat "$WORK/plan.tsv")" = "$(printf 'refs/heads/main\t%s\t%s\trebase\nrefs/backup/main\t%s\t%s\tbackup\n%s/main\t%s\t%s\trecord' \
+    "$O" "$N" "$ZERO" "$O" "$REC" "$ZERO" "$B")" ]
+  [ ! -s "$WORK/skipped.txt" ]
+}
+
+@test "fork default branch rebase conflict fails without a plan" {
+  set_ref "$TG" refs/heads/main "$(commit "$A" f conflict)"
+  entry fork
+  run --separate-stderr "$SCRIPT" plan
+  [ "$status" -eq 1 ]
+  [ "${stderr_lines[-1]}" = "error: branch main: rebase onto main failed (conflict)" ]
+  [ ! -e "$WORK/plan.tsv" ]
 }
 
 @test "declared branch is rebased onto upstream" {
@@ -344,16 +356,19 @@ REC=refs/sync/upstream
 }
 
 @test "target default branch is never deleted" {
-  # master is gone upstream and has own commits: kept as undeclared
+  # master is gone upstream and has own commits: rebased onto the upstream
+  # default, not deleted
   git -C "$TG" symbolic-ref HEAD refs/heads/master
-  set_ref "$TG" refs/heads/master "$(commit "$A" o own)"
+  O=$(commit "$A" o own)
+  set_ref "$TG" refs/heads/master "$O"
   set_ref "$TG" refs/heads/main "$B"
   entry mirror '[]' '[".*"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ -z "$(synced)" ]
-  no_record master
-  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/master\tundeclared')" ]
+  N=$(git -C "$WORK/repo" rev-parse refs/heads/master)
+  [ "$(synced)" = "$(printf 'refs/heads/master\t%s\t%s\trebase\nrefs/backup/master\t%s\t%s\tbackup' "$O" "$N" "$ZERO" "$O")" ]
+  [ "$(git -C "$WORK/repo" rev-parse "$N^")" = "$B" ]
+  [ ! -s "$WORK/skipped.txt" ]
 }
 
 @test "target default follows the upstream default" {
@@ -369,14 +384,17 @@ REC=refs/sync/upstream
   no_record master
   [ ! -s "$WORK/skipped.txt" ]
   [ "$(cat "$WORK/default.txt")" = main ]
-  # diverged: skipped, upstream main is not created, the default stays
+  # own commits: master is rebased onto upstream main, upstream main is not
+  # created, the default stays
   fresh_work
-  set_ref "$TG" refs/heads/master "$(commit "$A" o own)"
+  O=$(commit "$A" o own)
+  set_ref "$TG" refs/heads/master "$O"
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ -z "$(synced)" ]
-  no_record master
-  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/master\tundeclared')" ]
+  N=$(git -C "$WORK/repo" rev-parse refs/heads/master)
+  [ "$(synced)" = "$(printf 'refs/heads/master\t%s\t%s\trebase\nrefs/backup/master\t%s\t%s\tbackup' "$O" "$N" "$ZERO" "$O")" ]
+  [ -z "$(plan_line refs/heads/main)" ]
+  [ ! -s "$WORK/skipped.txt" ]
   [ ! -e "$WORK/default.txt" ]
 }
 
@@ -407,16 +425,19 @@ REC=refs/sync/upstream
   [ "$(cat "$WORK/default.txt")" = main ]
 }
 
-@test "renamed upstream default: target branch with own commits keeps the default" {
+@test "renamed upstream default: target branch with own commits is rebased and becomes the default" {
   git -C "$TG" symbolic-ref HEAD refs/heads/master
   set_ref "$TG" refs/heads/master "$A"
-  set_ref "$TG" refs/heads/main "$(commit "$A" o own)"
+  O=$(commit "$A" o own)
+  set_ref "$TG" refs/heads/main "$O"
   entry mirror
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ -z "$(synced)" ]
-  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/main\tundeclared')" ]
-  [ ! -e "$WORK/default.txt" ]
+  N=$(git -C "$WORK/repo" rev-parse refs/heads/main)
+  [ "$(synced)" = "$(printf 'refs/heads/main\t%s\t%s\trebase\nrefs/backup/main\t%s\t%s\tbackup' "$O" "$N" "$ZERO" "$O")" ]
+  [ -z "$(plan_line refs/heads/master)" ]
+  [ ! -s "$WORK/skipped.txt" ]
+  [ "$(cat "$WORK/default.txt")" = main ]
 }
 
 @test "declared target default branch keeps the default" {
@@ -745,7 +766,7 @@ rewrite_skip() {
   [ ! -s "$WORK/skipped.txt" ]
 }
 
-@test "without a record a diverged branch stays undeclared" {
+@test "without a record a diverged default is rebased, a followed branch stays undeclared" {
   C=$(commit "$A" c x)
   R1=$(commit "$A" r one)
   R2=$(commit "$A" r two)
@@ -756,8 +777,10 @@ rewrite_skip() {
   entry mirror '[]' '["rel"]'
   run "$SCRIPT" plan
   [ "$status" -eq 0 ]
-  [ ! -s "$WORK/plan.tsv" ]
-  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/main\tundeclared\nrefs/heads/rel\tundeclared')" ]
+  N=$(git -C "$WORK/repo" rev-parse refs/heads/main)
+  [ "$(synced)" = "$(printf 'refs/heads/main\t%s\t%s\trebase\nrefs/backup/main\t%s\t%s\tbackup' "$B" "$N" "$ZERO" "$B")" ]
+  [ "$(git -C "$WORK/repo" rev-parse "$N^")" = "$C" ]
+  [ "$(cat "$WORK/skipped.txt")" = "$(printf 'refs/heads/rel\tundeclared')" ]
 }
 
 @test "force-pushed default branch stops, followed branch and tag sync" {

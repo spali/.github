@@ -10,7 +10,7 @@ setup() {
   CONFIG="$BATS_TEST_TMPDIR/config.json"
   export FINDINGS INVENTORY CONFIG
   : >"$FINDINGS"
-  echo '{"managed":[]}' >"$CONFIG"
+  echo '{"forks":[]}' >"$CONFIG"
   export MONITOR_NOW
   MONITOR_NOW=$(date -u -d 2026-11-14T12:00:00Z +%s)
   unset GITHUB_WORKFLOW_REF
@@ -272,11 +272,11 @@ run_entry() {
   [ "$(count main-red)" -eq 0 ]
 }
 
-@test "managed repositories are out of scope" {
+@test "repositories under forks: are out of scope" {
   jq -n '[
     {name: "spali/a", fork: false, default_branch: "main"},
     {name: "spali/Managed", fork: false, default_branch: "main"}]' >"$INVENTORY"
-  echo '{"managed":[{"repo":"spali/managed","upstream":"https://src.example/m.git"}]}' >"$CONFIG"
+  echo '{"forks":[{"repo":"spali/managed","upstream":"https://src.example/m.git"}]}' >"$CONFIG"
   run_script
   run ! grep -qi 'spali/managed' "$GH_LOG"
   grep -q 'spali/a/' "$GH_LOG"
@@ -385,7 +385,7 @@ item_value() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $
 }
 
 @test "unanswered: the days come from the config" {
-  echo '{"managed":[],"unanswered":{"days":14}}' >"$CONFIG"
+  echo '{"forks":[],"unanswered":{"days":14}}' >"$CONFIG"
   item 5 other 2026-11-04T10:00:00Z | jq -s . | gh_respond "$ISS" -
   run_script
   [ "$(count unanswered)" -eq 0 ]
@@ -433,7 +433,7 @@ item_value() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $
 }
 
 @test "unanswered: an ignored open item answered by the owner still emits the ignored finding without calls" {
-  echo '{"managed":[],"ignores":[{"repo":"Spali/A","check":"unanswered","item":5,"reason":"r"}]}' >"$CONFIG"
+  echo '{"forks":[],"ignores":[{"repo":"Spali/A","check":"unanswered","item":5,"reason":"r"}]}' >"$CONFIG"
   { item 5 other 2026-09-01T10:00:00Z; item 7 other 2026-09-01T10:00:00Z pr; } | jq -s . | gh_respond "$ISS" -
   { post other 2026-09-02T10:00:00Z; post spali 2026-09-03T10:00:00Z; } | jq -s . | comments 5
   run_script
@@ -443,7 +443,7 @@ item_value() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $
 }
 
 @test "unanswered: an ignored open pull request emits the ignored finding" {
-  echo '{"managed":[],"ignores":[{"repo":"spali/a","check":"unanswered","item":7,"reason":"r"}]}' >"$CONFIG"
+  echo '{"forks":[],"ignores":[{"repo":"spali/a","check":"unanswered","item":7,"reason":"r"}]}' >"$CONFIG"
   item 7 spali 2026-11-13T10:00:00Z pr | jq -s . | gh_respond "$ISS" -
   run_script
   [ "$(count unanswered)" -eq 1 ]

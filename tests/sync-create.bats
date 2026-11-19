@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 
 setup() {
-  # shellcheck source=scripts/managed-lib.sh
-  source "$BATS_TEST_DIRNAME/../scripts/managed-lib.sh"
+  # shellcheck source=scripts/forks-lib.sh
+  source "$BATS_TEST_DIRNAME/../scripts/forks-lib.sh"
   load helpers/gh-stub
   stub_gh
   SCRIPT="$BATS_TEST_DIRNAME/../scripts/sync-create.sh"
@@ -10,16 +10,16 @@ setup() {
   entry fork
 }
 
-# entry <kind> [follow_json [private]] sets ENTRY through managed_entry, so
+# entry <kind> [follow_json [private]] sets ENTRY through fork_entry, so
 # it has the real shape (upstream_repo is null for mirrors)
 entry() {
   local kind=$1 follow=${2:-[]} private=${3:-false} upstream=https://github.com/Up/Tool
   [[ $kind == fork ]] || upstream=https://gitlab.com/up/tool
   local cfg="$BATS_TEST_TMPDIR/config.json"
   jq -n --arg up "$upstream" --argjson follow "$follow" --argjson private "$private" \
-    '{version: 1, managed: [{repo: "spali/tool", upstream: $up, private: $private}
+    '{version: 1, forks: [{repo: "spali/tool", upstream: $up, private: $private}
       + (if $follow == [] then {} else {follow: $follow} end)]}' >"$cfg"
-  ENTRY=$(managed_entry "$cfg" spali/tool)
+  ENTRY=$(fork_entry "$cfg" spali/tool)
   export ENTRY
 }
 

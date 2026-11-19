@@ -236,11 +236,11 @@ gh_fail_raw() {
   [ "$(jq -r .check "$FINDINGS")" = check-failed ]
 }
 
-@test "unmanaged fork TODO texts propose managing or archiving" {
+@test "fork TODO texts point to the sync run and to pinning" {
   run jq -r '."fork-behind".text' <<<"$MONITOR_TODO"
-  [ "$output" = 'A fork is behind its upstream: sync it by hand, add it to `managed:` to keep it synced, or archive it to freeze this state.' ]
+  [ "$output" = 'A synced fork or mirror misses upstream commits or tags for too long: read the sync run.' ]
   run jq -r '."fork-delete-candidate".text' <<<"$MONITOR_TODO"
-  [ "$output" = 'No own commits and no open pull request upstream: delete it, archive it to freeze the state you reference, or add it to `managed:` to keep it synced.' ]
+  [ "$output" = 'No own commits and no open pull request upstream: delete it, or archive or pin it to keep the state you reference.' ]
 }
 
 @test "fork approval: private repository is skipped without a call" {

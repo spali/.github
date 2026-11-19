@@ -20,7 +20,7 @@ setup() {
   PIN="📌 Pinned snapshots"
   EXT="🔍 Interesting and related"
   jq -n '{lists: {exclusive: [["▶️ Contribution forks", "♻️ Customization forks"]],
-      mirrors: {synced: ["👀  Mirrors"], other: ["▶️ Contribution forks", "♻️ Customization forks"]},
+      forks: ["👀  Mirrors", "▶️ Contribution forks", "♻️ Customization forks"],
       external: ["🔍 Interesting and related"]}}' >"$CONFIG"
   inv spali/a false false true
 }
@@ -38,8 +38,8 @@ lists() {
 }
 
 # all_lists JQ_ITEMS: all seven lists on GitHub (0 stack, 1 archive and 5
-# pinned snapshots, both not configured, 2 synced mirrors, 3 and 4 other
-# mirrors lists, 6 external), JQ_ITEMS sets the items of some.
+# pinned snapshots, both not configured, 2, 3 and 4 forks lists, 6
+# external), JQ_ITEMS sets the items of some.
 all_lists() {
   lists "[\"$STACK\", \"$ARCH\", \"$MIRR\", \"$F1\", \"$F2\", \"$PIN\", \"$EXT\"] | map({name: ., items: []}) | $1"
 }
@@ -90,37 +90,38 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(message list-none)" = "in no list" ]
 }
 
-@test "list-none: fork in none of the mirrors lists" {
+@test "list-none: fork in none of the forks lists" {
   inv spali/f false true true
   all_lists '(.[0].items = [["spali/f", false]])'
   run_script
   [ "$(count list-none)" -eq 1 ]
   [ "$(level list-none)" = info ]
   [ "$(repo list-none)" = spali/f ]
-  [ "$(message list-none)" = "in none of the mirrors lists" ]
+  [ "$(message list-none)" = "in none of the forks lists" ]
 }
 
-@test "list-none: fork in no list at all is in none of the mirrors lists" {
+@test "list-none: fork in no list at all is in none of the forks lists" {
   inv spali/f false true true
   all_lists '.'
   run_script
   [ "$(count list-none)" -eq 1 ]
-  [ "$(message list-none)" = "in none of the mirrors lists" ]
+  [ "$(message list-none)" = "in none of the forks lists" ]
 }
 
-@test "fork in the synced mirrors list is fine when managed" {
+@test "fork with an entry in a forks list is fine" {
   inv spali/f false true true
-  config '.managed = [{repo: "spali/f", upstream: "https://github.com/up/f"}]'
+  config '.forks = [{repo: "spali/f", upstream: "https://github.com/up/f"}]'
   all_lists '(.[2].items = [["spali/f", false]])'
   run_script
   [ "$(jq -sc 'map(.check) - ["sync-failed"]' "$FINDINGS")" = '[]' ]
 }
 
-@test "fork in an other mirrors list is fine" {
+@test "fork without an entry in a forks list is fine" {
   inv spali/f false true true
   all_lists '(.[3].items = [["spali/f", false]])'
   run_script
-  [ ! -s "$FINDINGS" ]
+  # a fork is synced: only the skipped sync check (no control repository)
+  [ "$(jq -sc 'map([.level, .check])' "$FINDINGS")" = '[["skip","sync-failed"]]' ]
 }
 
 @test "list-contradiction: repo in both lists of an exclusive pair" {
@@ -132,47 +133,47 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(message list-contradiction)" = 'in "▶️ Contribution forks" and "♻️ Customization forks"' ]
 }
 
-@test "managed non-fork mirror in no mirrors list is list-none, not list-mirror-missing" {
-  config '.managed = [{repo: "spali/knx.js", upstream: "https://bitbucket.example/x.git"}]'
+@test "mirror entry in no forks list is list-none" {
+  config '.forks = [{repo: "spali/knx.js", upstream: "https://bitbucket.example/x.git"}]'
   inv spali/knx.js false false false
   all_lists '(.[0].items = [["spali/knx.js", false]])'
   run_script
   [ "$(count list-mirror-missing)" -eq 0 ]
   [ "$(count list-none)" -eq 1 ]
   [ "$(repo list-none)" = spali/knx.js ]
-  [ "$(message list-none)" = "in none of the mirrors lists" ]
+  [ "$(message list-none)" = "in none of the forks lists" ]
 }
 
-@test "managed non-fork mirror in no list at all is in none of the mirrors lists" {
-  config '.managed = [{repo: "spali/m", upstream: "https://salsa.example/x.git"}]'
+@test "mirror entry in no list at all is in none of the forks lists" {
+  config '.forks = [{repo: "spali/m", upstream: "https://salsa.example/x.git"}]'
   inv spali/m false false false
   all_lists '.'
   run_script
   [ "$(count list-none)" -eq 1 ]
-  [ "$(message list-none)" = "in none of the mirrors lists" ]
+  [ "$(message list-none)" = "in none of the forks lists" ]
 }
 
-@test "managed mirror in the synced mirrors list is fine, also in other case, and no adoption" {
-  config '.managed = [{repo: "spali/M", upstream: "https://salsa.example/x.git"}]'
+@test "mirror entry in a forks list is fine, also in other case, and no adoption" {
+  config '.forks = [{repo: "spali/M", upstream: "https://salsa.example/x.git"}]'
   inv spali/m false false false
   all_lists '(.[2].items = [["spali/m", false]])'
   run_script
-  # only the skipped sync check of the managed entry (no control repository)
+  # only the skipped sync check of the entry (no control repository)
   [ "$(jq -sc 'map(.check)' "$FINDINGS")" = '["sync-failed"]' ]
 }
 
-@test "managed non-fork repo in an other mirrors list is fine" {
-  config '.managed = [{repo: "spali/m", upstream: "https://github.com/up/m"}]'
+@test "non-fork entry with a GitHub upstream in a forks list is fine" {
+  config '.forks = [{repo: "spali/m", upstream: "https://github.com/up/m"}]'
   inv spali/m false false false
   all_lists '(.[4].items = [["spali/m", false]])'
   run_script
   [ "$(count list-none)" -eq 0 ]
 }
 
-@test "missing other mirrors list is config-invalid and no mirrors list-none" {
+@test "one missing forks list is config-invalid and no forks list-none" {
   jq -n '[{name: "spali/f", private: false, fork: true, central: true},
     {name: "spali/m", private: false, fork: false, central: true}]' >"$INVENTORY"
-  config '.managed = [{repo: "spali/m", upstream: "https://salsa.example/x.git"}]'
+  config '.forks = [{repo: "spali/m", upstream: "https://salsa.example/x.git"}]'
   lists "[\"$STACK\", \"$ARCH\", \"$MIRR\", \"$F1\", \"$PIN\", \"$EXT\"] | map({name: ., items: []})"
   run_script
   [ "$(count config-invalid)" -eq 1 ]
@@ -180,75 +181,20 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(count list-none)" -eq 0 ]
 }
 
-@test "missing synced mirrors list is config-invalid, no mirrors list-none and no unmanaged" {
+@test "missing forks list is config-invalid and no forks list-none" {
   inv spali/f false true true
   lists "[\"$STACK\", \"$ARCH\", \"$F1\", \"$F2\", \"$PIN\", \"$EXT\"] | map({name: ., items: []})"
   run_script
   [ "$(count config-invalid)" -eq 1 ]
   [ "$(message config-invalid)" = 'list "👀  Mirrors" not found on GitHub' ]
   [ "$(count list-none)" -eq 0 ]
-  [ "$(count unmanaged)" -eq 0 ]
 }
 
-@test "only other mirrors lists: no unmanaged, list-none still works" {
-  config '.lists.mirrors = {other: ["▶️ Contribution forks", "♻️ Customization forks"]}'
-  jq -n '[{name: "spali/f", private: false, fork: true, central: true},
-    {name: "spali/g", private: false, fork: true, central: true}]' >"$INVENTORY"
-  all_lists '(.[2].items = [["spali/f", false], ["spali/x", false]]) | (.[3].items = [["spali/g", false]])'
-  run_script
-  [ "$(count unmanaged)" -eq 0 ]
-  [ "$(count list-none)" -eq 1 ]
-  [ "$(repo list-none)" = spali/f ]
-  [ "$(message list-none)" = "in none of the mirrors lists" ]
-}
-
-@test "repo in a synced and an other mirrors list counts once" {
+@test "fork in two forks lists counts once" {
   inv spali/f false true true
-  all_lists '(.[2].items = [["spali/f", false]]) | (.[3].items = [["spali/f", false]])'
+  all_lists '(.[2].items = [["spali/f", false], ["spali/x", false]]) | (.[3].items = [["spali/f", false]])'
   run_script
-  [ "$(count list-none)" -eq 0 ]
-  [ "$(count unmanaged)" -eq 1 ]
-  [ "$(message unmanaged)" = 'in "👀  Mirrors" but not managed' ]
-}
-
-@test "repo listed twice in a synced mirrors list is unmanaged once" {
-  all_lists '(.[2].items = [["spali/x", false], ["spali/x", false]])'
-  run_script
-  [ "$(count unmanaged)" -eq 1 ]
-}
-
-@test "unmanaged is reported per synced list" {
-  config '.lists.mirrors.synced = ["👀  Mirrors", "📌 Pinned snapshots"]'
-  all_lists '(.[2].items = [["spali/x", false]]) | (.[5].items = [["spali/x", false]])'
-  run_script
-  [ "$(count unmanaged)" -eq 2 ]
-  [ "$(message unmanaged 0)" = 'in "👀  Mirrors" but not managed' ]
-  [ "$(message unmanaged 1)" = 'in "📌 Pinned snapshots" but not managed' ]
-}
-
-@test "synced mirrors list entry without managed entry is unmanaged" {
-  echo '{"lists": {"mirrors": {"synced": ["👀  Mirrors"]}}, "managed": [{"repo": "spali/ok", "upstream": "https://github.com/up/ok"},
-    {"repo": "spali/m", "upstream": "https://salsa.example/m.git"}]}' >"$CONFIG"
-  inv spali/m false false false
-  all_lists '(.[2].items = [["spali/m", false], ["spali/other", false], ["spali/OK", false], ["spali/m", false]])'
-  run_script
-  [ "$(count unmanaged)" -eq 1 ]
-  [ "$(level unmanaged)" = info ]
-  [ "$(repo unmanaged)" = spali/other ]
-  [ "$(message unmanaged)" = 'in "👀  Mirrors" but not managed' ]
-}
-
-@test "archived repo in the synced mirrors list is not unmanaged" {
-  all_lists '(.[2].items = [["spali/old", true]])'
-  run_script
-  [ "$(count unmanaged)" -eq 0 ]
-}
-
-@test "unmanaged needs synced mirrors lists" {
-  all_lists '(.[2].items = [["spali/other", false]])'
-  config '.lists.mirrors |= del(.synced)'
-  run_script
-  [ "$(count unmanaged)" -eq 0 ]
+  [ "$(jq -sc 'map(.check) - ["sync-failed"]' "$FINDINGS")" = '[]' ]
 }
 
 @test "list-external-own: own repository in an external list" {
@@ -287,7 +233,7 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   source "$BATS_TEST_DIRNAME/../scripts/monitor-lib.sh"
   [[ " ${MONITOR_CHECKS[*]} " != *" list-mirror-missing "* ]]
   [[ " ${MONITOR_CHECKS[*]} " == *" list-external-own "* ]]
-  [ "$(jq -c '."list-external-own" | [.category, .areas, .title, .text]' <<<"$MONITOR_TODO")" = '["cleanup",["lists"],"Move own repositories out of external Lists","Lists in lists.external are for repositories of others: move own work to your stack List and own forks to a mirrors List."]' ]
+  [ "$(jq -c '."list-external-own" | [.category, .areas, .title, .text]' <<<"$MONITOR_TODO")" = '["cleanup",["lists"],"Move own repositories out of external Lists","Lists in lists.external are for repositories of others: move own work to your stack List and own forks to the forks List."]' ]
   [ "$(jq -c 'has("list-mirror-missing")' <<<"$MONITOR_TODO")" = false ]
 }
 
@@ -308,14 +254,14 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(message list-none)" = "in no list" ]
 }
 
-@test "archived fork outside the mirrors lists is list-none" {
+@test "archived fork outside the forks lists is list-none" {
   archived '[{"name": "spali/oldfork", "fork": true}, {"name": "spali/gone", "fork": true}]'
   all_lists '(.[0].items = [["spali/a", false], ["spali/oldfork", true]])'
   run_script
-  [ "$(jq -rs 'map(select(.check == "list-none") | "\(.repo) \(.message)") | join(",")' "$FINDINGS")" = "spali/oldfork in none of the mirrors lists,spali/gone in none of the mirrors lists" ]
+  [ "$(jq -rs 'map(select(.check == "list-none") | "\(.repo) \(.message)") | join(",")' "$FINDINGS")" = "spali/oldfork in none of the forks lists,spali/gone in none of the forks lists" ]
 }
 
-@test "archived fork in a mirrors list is clean, also in the synced one" {
+@test "archived fork in a forks list is clean" {
   archived '[{"name": "spali/f1", "fork": true}, {"name": "spali/f2", "fork": true}]'
   all_lists '(.[0].items = [["spali/a", false]]) | (.[2].items = [["spali/f1", true]]) | (.[3].items = [["spali/f2", true]])'
   run_script
@@ -376,7 +322,7 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(count list-none)" -eq 0 ]
 }
 
-@test "fork gets no list-none while a mirrors list is missing" {
+@test "fork gets no list-none while a forks list is missing" {
   jq -n '[{name: "spali/a", private: false, fork: false, central: true},
     {name: "spali/f", private: false, fork: true, central: true}]' >"$INVENTORY"
   lists '[{name: "🚀 My stack", items: [["spali/a", false]]}, {name: "🗃️ My stack Archive", items: []}, {name: "👀  Mirrors", items: []}, {name: "▶️ Contribution forks", items: []}, {name: "📌 Pinned snapshots", items: []}, {name: "🔍 Interesting and related", items: []}]'
@@ -385,11 +331,11 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   [ "$(count list-none)" -eq 0 ]
 }
 
-@test "without configured mirrors lists a fork or managed repo in no list is plain list-none" {
+@test "without configured forks lists a fork or entry in no list is plain list-none" {
   local c
-  for c in '{"lists": {"exclusive": []}}' '{"lists": {"mirrors": {}}}' '{"lists": {"mirrors": {"synced": [], "other": []}}}'; do
+  for c in '{"lists": {"exclusive": []}}' '{"lists": {"forks": []}}'; do
     : >"$FINDINGS"
-    jq --argjson c "$c" -n '$c + {managed: [{repo: "spali/m", upstream: "https://salsa.example/x.git"}]}' >"$CONFIG"
+    jq --argjson c "$c" -n '$c + {forks: [{repo: "spali/m", upstream: "https://salsa.example/x.git"}]}' >"$CONFIG"
     jq -n '[{name: "spali/f", private: false, fork: true, central: true},
       {name: "spali/m", private: false, fork: false, central: true}]' >"$INVENTORY"
     all_lists '.'
@@ -398,10 +344,10 @@ repo() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $c)) | 
   done
 }
 
-@test "adoption skips managed repos" {
+@test "adoption skips the entries of forks:" {
   jq -n '[{name: "spali/m", private: false, fork: false, central: false},
     {name: "spali/b", private: false, fork: false, central: false}]' >"$INVENTORY"
-  jq '.managed = [{repo: "spali/M", upstream: "https://github.com/up/m"}]' "$CONFIG" >"$CONFIG.n" && mv "$CONFIG.n" "$CONFIG"
+  jq '.forks = [{repo: "spali/M", upstream: "https://github.com/up/m"}]' "$CONFIG" >"$CONFIG.n" && mv "$CONFIG.n" "$CONFIG"
   all_lists '(.[0].items = [["spali/m", false], ["spali/b", false]])'
   run_script
   [ "$(jq -sr '[.[] | select(.check == "adoption") | .repo] | join(",")' "$FINDINGS")" = "spali/b" ]
@@ -514,11 +460,11 @@ GHEND
 
 RUNS='repos/ctl/x/actions/workflows/sync.yml/runs?per_page=20&status=completed&branch=main'
 
-# managed [REPO...]: managed entries for REPO... (default spali/f).
-managed() {
+# entries [REPO...]: forks: entries for REPO... (default spali/f).
+entries() {
   local repos
   repos=$(jq -nc '$ARGS.positional' --args "${@:-spali/f}")
-  jq --argjson r "$repos" '.managed = ($r | map({repo: ., upstream: "https://github.com/up/x"}))' \
+  jq --argjson r "$repos" '.forks = ($r | map({repo: ., upstream: "https://github.com/up/x"}))' \
     "$CONFIG" >"$CONFIG.new" && mv "$CONFIG.new" "$CONFIG"
 }
 
@@ -541,14 +487,14 @@ sync_jobs() {
     gh_respond "*repos/ctl/x/actions/runs/$id/jobs?per_page=100" -
 }
 
-PLAN='sync / Managed repositories'
+PLAN='sync / Repositories'
 
 # sync_findings prints the sync-failed findings as "level repo message" lines.
 sync_findings() {
   jq -rs 'map(select(.check == "sync-failed"))[] | "\(.level) \(.repo // "-") \(.message)"' "$FINDINGS"
 }
 
-@test "no managed entries: no sync check" {
+@test "no synced repository: no sync check" {
   export GITHUB_REPOSITORY=ctl/x
   all_lists '.'
   run_script
@@ -556,8 +502,8 @@ sync_findings() {
   run ! grep -F 'sync.yml' "$GH_LOG"
 }
 
-@test "managed entries without a control repository skip sync-failed" {
-  managed
+@test "synced repositories without a control repository skip sync-failed" {
+  entries
   all_lists '.'
   run_script
   [ "$(count sync-failed)" -eq 1 ]
@@ -567,7 +513,7 @@ sync_findings() {
 }
 
 @test "failed sync run is sync-failed" {
-  managed
+  entries
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 9
   sync_jobs 9 "$PLAN=success" 'sync / Sync · spali/f=failure'
@@ -576,8 +522,21 @@ sync_findings() {
   [ "$(sync_findings)" = "red spali/f last sync of this repository failed: https://github.com/ctl/x/actions/runs/9/job/92" ]
 }
 
+@test "inventory forks count as synced, pinned entries do not" {
+  jq -n '[{name: "spali/a", private: false, fork: false, central: true},
+    {name: "spali/inv", private: false, fork: true, central: false, parent: {name: "up/inv"}},
+    {name: "spali/pin", private: false, fork: true, central: false, parent: {name: "up/pin"}}]' >"$INVENTORY"
+  config '.forks = [{repo: "spali/pin", pinned: true}]'
+  export GITHUB_REPOSITORY=ctl/x
+  sync_runs 9
+  sync_jobs 9 "$PLAN=success" 'sync / Sync · spali/inv=failure' 'sync / Sync · spali/pin=failure'
+  all_lists '(.[0].items = [["spali/a", false]]) | (.[2].items = [["spali/inv", false], ["spali/pin", false]])'
+  run_script
+  [ "$(sync_findings)" = "red spali/inv last sync of this repository failed: https://github.com/ctl/x/actions/runs/9/job/92" ]
+}
+
 @test "successful sync run is no finding" {
-  managed
+  entries
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 9
   sync_jobs 9 "$PLAN=success" 'sync / Sync · spali/f=success'
@@ -588,7 +547,7 @@ sync_findings() {
 }
 
 @test "no sync run yet is no finding" {
-  managed
+  entries
   export GITHUB_REPOSITORY=ctl/x
   jq -nc '{total_count: 0, workflow_runs: []}' | gh_respond "*$RUNS" -
   all_lists '.'
@@ -599,7 +558,7 @@ sync_findings() {
 }
 
 @test "red nightly run and green dispatch for another repo: only the failed repo is red" {
-  managed spali/f spali/g spali/h
+  entries spali/f spali/g spali/h
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 11 10
   sync_jobs 11 "$PLAN=success" 'sync / Sync · spali/g=success'
@@ -611,7 +570,7 @@ sync_findings() {
 }
 
 @test "a later green job of the same repo clears it" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 11 10
   sync_jobs 11 "$PLAN=success" 'sync / Sync · spali/f=success'
@@ -622,7 +581,7 @@ sync_findings() {
 }
 
 @test "cancelled newest job keeps the older failure" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 12 11 10
   sync_jobs 12 "$PLAN=success" 'sync / Sync · spali/f=cancelled'
@@ -634,7 +593,7 @@ sync_findings() {
 }
 
 @test "failed plan job of the newest run is the general finding" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 11 10
   sync_jobs 11 "$PLAN=failure" 'sync / Sync · spali/f=skipped'
@@ -645,7 +604,7 @@ sync_findings() {
 }
 
 @test "failed plan job of an older run is no finding" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 11 10 9
   sync_jobs 11 "$PLAN=success" 'sync / Sync · spali/g=success'
@@ -657,7 +616,7 @@ sync_findings() {
 }
 
 @test "job names with any caller prefix and dotted repo names match exactly" {
-  managed spali/knx.js spali/a-b_c spali/n spali/ok
+  entries spali/knx.js spali/a-b_c spali/n spali/ok
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 9
   sync_jobs 9 'Managed repositories=success' 'Sync · spali/knx.jsx=failure' \
@@ -673,7 +632,7 @@ sync_findings() {
 }
 
 @test "a job name merely containing the repo does not match" {
-  managed spali/knx.js
+  entries spali/knx.js
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 9
   sync_jobs 9 "$PLAN=success" 'sync / Sync · spali/knx.js extra=failure' 'sync / Sync · xspali/knx.js=failure' \
@@ -683,8 +642,8 @@ sync_findings() {
   [ "$(count sync-failed)" -eq 0 ]
 }
 
-@test "unmanaged repo jobs are ignored" {
-  managed spali/f
+@test "jobs of repositories that are not synced are ignored" {
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 9
   sync_jobs 9 "$PLAN=success" 'sync / Sync · spali/f=success' 'sync / Sync · spali/gone=failure'
@@ -694,7 +653,7 @@ sync_findings() {
 }
 
 @test "runs are read only from main" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 9
   sync_jobs 9 "$PLAN=success" 'sync / Sync · spali/f=success'
@@ -705,7 +664,7 @@ sync_findings() {
 }
 
 @test "reading stops once every repo has a result" {
-  managed spali/f spali/g
+  entries spali/f spali/g
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 12 11 10
   sync_jobs 12 "$PLAN=success" 'sync / Sync · spali/f=failure'
@@ -719,7 +678,7 @@ sync_findings() {
 }
 
 @test "a repo without a job in any run is no finding" {
-  managed spali/f spali/new
+  entries spali/f spali/new
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 10 9
   sync_jobs 10 "$PLAN=success" 'sync / Sync · spali/f=failure'
@@ -731,7 +690,7 @@ sync_findings() {
 }
 
 @test "runs API error is check-failed" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   gh_fail "*$RUNS" 'HTTP 500: boom (https://api.github.com/x) (HTTP 500)'
   all_lists '.'
@@ -742,7 +701,7 @@ sync_findings() {
 }
 
 @test "jobs API error is check-failed" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 9
   gh_fail '*repos/ctl/x/actions/runs/9/jobs*' 'HTTP 502: bad (HTTP 502)'
@@ -754,7 +713,7 @@ sync_findings() {
 }
 
 @test "cancelled newest run is no general finding" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 11 10
   sync_jobs 11 "$PLAN=cancelled" 'sync / Sync · spali/f=skipped'
@@ -766,7 +725,7 @@ sync_findings() {
 }
 
 @test "the general finding comes from the newest run whose plan job has a result" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 12 11 10 9
   sync_jobs 12 "$PLAN=success" 'sync / Sync · spali/f=success'
@@ -780,7 +739,7 @@ sync_findings() {
 }
 
 @test "a cancelled newest run does not hide an older failed plan job" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 12 11 10
   sync_jobs 12 "$PLAN=cancelled" 'sync / Sync · spali/f=skipped'
@@ -792,7 +751,7 @@ sync_findings() {
 }
 
 @test "the plan job keeps runs read until it has a result" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 11 10
   sync_jobs 11 "$PLAN=skipped" 'sync / Sync · spali/f=failure'
@@ -805,7 +764,7 @@ sync_findings() {
 }
 
 @test "a timed out repo job over an older success is red" {
-  managed spali/f spali/g
+  entries spali/f spali/g
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 11 10
   sync_jobs 11 "$PLAN=success" 'sync / Sync · spali/f=timed_out' 'sync / Sync · spali/g=action_required'
@@ -819,7 +778,7 @@ sync_findings() {
 }
 
 @test "a repo job without a conclusion is passed over" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 11 10
   sync_jobs 11 "$PLAN=success" 'sync / Sync · spali/f='
@@ -830,7 +789,7 @@ sync_findings() {
 }
 
 @test "more jobs than one page is check-failed" {
-  managed spali/f
+  entries spali/f
   export GITHUB_REPOSITORY=ctl/x
   sync_runs 9
   jq -nc '{total_count: 101, jobs: [{name: "sync / Managed repositories", conclusion: "success", html_url: "u1"},

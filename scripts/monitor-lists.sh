@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 # GitHub Lists drift (list-none, list-contradiction, list-external-own,
-# unmanaged, config-invalid for unknown list names) and release-flow
-# adoption, and sync-failed (managed-lib.sh; here because it runs once).
-# Archived repositories (snapshots) go in the same Lists as active ones and
-# get the same list checks, except unmanaged. Forks and repositories under
-# `managed:` belong in a mirrors List (lists.mirrors.synced or .other); every
-# repository (not archived) in a synced List must be under `managed:`; own
-# repositories do not belong in lists.external. Writes findings only. Env:
+# config-invalid for unknown list names) and release-flow adoption, and
+# sync-failed (forks-lib.sh; here because it runs once). Archived
+# repositories (snapshots) go in the same Lists as active ones and get the
+# same checks. Forks and repositories under `forks:` belong in a forks List
+# (lists.forks); own repositories do not belong in lists.external. Writes
+# findings only. Env:
 # FINDINGS INVENTORY CONFIG (file paths), optional ARCHIVED (JSON array of
 # the archived repositories as {name, fork}; missing, empty or unreadable:
 # none), LISTS_TOKEN (used as GH_TOKEN for the GraphQL call only),
 # GITHUB_REPOSITORY (the control repository, for sync-failed).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
-# shellcheck source=scripts/managed-lib.sh
-source "$(dirname "${BASH_SOURCE[0]}")/managed-lib.sh"
+# shellcheck source=scripts/forks-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/forks-lib.sh"
 
 need_env FINDINGS INVENTORY CONFIG
 
@@ -59,11 +58,9 @@ list_findings() {
   arch=$(archived_repos)
   jq -r --slurpfile inv "$INVENTORY" --slurpfile cfg "$CONFIG" --argjson arch "$arch" '
     ($cfg[0].lists // {}) as $cl |
-    (($cl.mirrors | objects) // {}) as $mc |
-    ($mc.synced // []) as $sl |
-    ((($mc.other // []) + $sl) | unique) as $ml |
+    (($cl.forks // []) | unique) as $ml |
     ($cl.external // []) as $el |
-    [($cfg[0].managed // [])[].repo | ascii_downcase] as $known |
+    [($cfg[0].forks // [])[].repo | ascii_downcase] as $known |
     ([$inv[0][] | {name, fork}] + $arch) as $repos |
     . as $lists |
     ([$lists[].name]) as $have |
@@ -72,23 +69,19 @@ list_findings() {
     def ok($n): ($missing | index($n)) == null;
     def inlists($r): [$lists[] | select(any(.items[]; .repo == $r)) | .name];
     def items($n): [$lists[] | select(.name == $n) | .items[] | .repo] | unique[];
-    def active($n): [$lists[] | select(.name == $n) | .items[] | select(.archived | not) | .repo] | unique[];
     def row($l; $c; $r; $m): [$l, $c, $r, $m] | @tsv;
     ($missing[] | row("red"; "config-invalid"; "-"; "list \"\(.)\" not found on GitHub")),
     (($ml | length > 0) as $ml_set | ($ml | all(.[]; ok(.))) as $ml_ok |
       $repos[] | . as $i | inlists($i.name) as $in |
       if $ml_set and ($i.fork or ($i.name | ascii_downcase | IN($known[]))) then
         if $ml_ok and ($in | any(.[]; IN($ml[])) | not)
-        then row("info"; "list-none"; $i.name; "in none of the mirrors lists") else empty end
+        then row("info"; "list-none"; $i.name; "in none of the forks lists") else empty end
       elif ($in | length) == 0 then row("info"; "list-none"; $i.name; "in no list")
       else empty end),
     (($cl.exclusive // [])[] | select(ok(.[0]) and ok(.[1])) | . as [$a, $b] |
       $repos[] | .name as $r | inlists($r) as $in |
       select(($in | index($a)) != null and ($in | index($b)) != null) |
       row("info"; "list-contradiction"; $r; "in \"\($a)\" and \"\($b)\"")),
-    ($sl | unique[] | select(ok(.)) | . as $m | active($m) |
-      select(ascii_downcase | IN($known[]) | not) |
-      row("info"; "unmanaged"; .; "in \"\($m)\" but not managed")),
     ($el | unique[] | select(ok(.)) | . as $e | items($e) |
       row("info"; "list-external-own"; .; "own repository in \"\($e)\""))
   ' "$1"
@@ -97,7 +90,7 @@ list_findings() {
 check_adoption() {
   local out repo
   if ! out=$(jq -r --slurpfile cfg "$CONFIG" '
-      [$cfg[0].managed // [] | .[].repo | ascii_downcase] as $m |
+      [$cfg[0].forks // [] | .[].repo | ascii_downcase] as $m |
       [.[] | select(.name != "spali/.github" and .fork == false and .central == false and ((.pins // []) | length == 0) and (.name | ascii_downcase | IN($m[]) | not)) | .name] |
       sort[]' "$INVENTORY" 2>/dev/null); then
     finding red check-failed - "adoption: cannot parse inventory"
@@ -123,7 +116,7 @@ main() {
   fi
   rm -f "$tmp"
   check_adoption
-  check_sync_failed "$CONFIG"
+  check_sync_failed "$CONFIG" "$INVENTORY"
   local names
   names=$(jq -r '.[].name' "$INVENTORY" 2>/dev/null) || names=
   while IFS= read -r repo; do
