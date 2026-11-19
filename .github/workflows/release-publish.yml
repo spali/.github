@@ -4,6 +4,9 @@
 # The build job uploads its files as the artifact "release-assets". This
 # workflow adds checksums.txt, attests the build provenance over it and
 # publishes the release, the "-next" or the dev pre-release.
+#
+# A repository without files to release (e.g. a library) has no build job and
+# passes assets: false; the releases then carry only the notes and the tag.
 name: Release publish
 
 on:
@@ -29,6 +32,11 @@ on:
         type: string
         required: false
         default: ""
+      assets:
+        description: "false: no build job, publish without files (no checksums.txt, no attestation)"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
@@ -61,20 +69,22 @@ jobs:
           path: .release-flow
           persist-credentials: false
       - name: Download the release assets
+        if: ${{ inputs.assets }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-assets
           path: dist
       - name: Write checksums.txt
+        if: ${{ inputs.assets }}
         run: .release-flow/scripts/checksums.sh dist
       # GitHub stores attestations only for public repositories of user accounts.
       - name: Attest build provenance
-        if: ${{ !github.event.repository.private }}
+        if: ${{ inputs.assets && !github.event.repository.private }}
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-checksums: dist/checksums.txt
       - name: Skip attestation for private repositories
-        if: ${{ github.event.repository.private }}
+        if: ${{ inputs.assets && github.event.repository.private }}
         run: echo "::notice::No build provenance attestation, GitHub does not support it for private user-owned repositories"
       - name: Publish
         env:
@@ -84,6 +94,7 @@ jobs:
           SHA: ${{ inputs.sha }}
           PR: ${{ inputs.pr }}
           DRAFT_ID: ${{ inputs.draft-id }}
+          ASSETS: ${{ inputs.assets }}
           ASSETS_DIR: dist
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}

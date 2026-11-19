@@ -263,6 +263,8 @@ Works for any language. Steps 1–4 are files, 5–9 are settings.
    - [`release-generic.yml`](examples/caller/release-generic.yml): any build,
      replace the `Build` step.
    - [`release-go.yml`](examples/caller/release-go.yml): Go with goreleaser.
+   - [`release-library.yml`](examples/caller/release-library.yml): nothing to
+     build (e.g. a library): no `build` job, releases without files.
 
    Repositories that publish a container image also add the two
    `image-cleanup` jobs from the [interface](#interface). Replace every
@@ -371,7 +373,10 @@ uploads all files to publish as the artifact **`release-assets`**
 
 **`release-publish.yml`** (needs `contents: write`, `pull-requests: write`,
 `id-token: write`, `attestations: write`, `artifact-metadata: write`): takes
-all outputs of `prepare` as inputs of the same name.
+all outputs of `prepare` as inputs of the same name. Optional input `assets`
+(default `true`): `false` for a repository without files to release (e.g. a
+library). It then has no `build` job, `publish` needs only `prepare`, and the
+releases carry only the notes and the tag (no `checksums.txt`, no attestation).
 
 **`image-cleanup.yml`** (needs `contents: read`, `packages: write`): input
 `package` (default: the repository name). Call it as a job `image-cleanup`:

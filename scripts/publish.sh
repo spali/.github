@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Publishes the files in $ASSETS_DIR (including checksums.txt).
+# Publishes the files in $ASSETS_DIR (including checksums.txt), or no files
+# with ASSETS=false (a repository without build, e.g. a library).
 #
 #   publish.sh release  attach to the draft $DRAFT_ID and publish it at $TAG
 #   publish.sh next     replace all "-next" pre-releases, notes from the draft
 #   publish.sh pr       replace the dev pre-releases of pull request $PR and
 #                       add or update a comment with the link
-# env: TAG, VERSION, SHA, PR, DRAFT_ID, ASSETS_DIR, GH_REPO, GITHUB_SERVER_URL
+# env: TAG, VERSION, SHA, PR, DRAFT_ID, ASSETS (true|false, default true),
+#      ASSETS_DIR (with ASSETS=true), GH_REPO, GITHUB_SERVER_URL
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 source "$(dirname "$0")/lib.sh"
@@ -13,8 +15,15 @@ source "$(dirname "$0")/lib.sh"
 comment_marker='<!-- release-flow:pr-dev -->'
 comment_author='github-actions[bot]'
 
-# load_assets sets the global array "files" to the files in $ASSETS_DIR.
+# load_assets sets the global array "files" to the files in $ASSETS_DIR,
+# empty with ASSETS=false.
 load_assets() {
+  files=()
+  case ${ASSETS:-true} in
+  true) need_env ASSETS_DIR ;;
+  false) return ;;
+  *) die "ASSETS must be true or false, not '$ASSETS'" ;;
+  esac
   files=("$ASSETS_DIR"/*)
   [[ -e ${files[0]} ]] || die "no release assets found in $ASSETS_DIR"
   need_files "$ASSETS_DIR"
@@ -44,7 +53,7 @@ delete_leftover_tag() {
 }
 
 publish_release() {
-  need_env TAG VERSION SHA DRAFT_ID ASSETS_DIR GH_REPO
+  need_env TAG VERSION SHA DRAFT_ID GH_REPO
   local prerelease=false latest=true state main_sha
   load_assets
   # the build took a while: the draft must still be this release's draft and
@@ -61,7 +70,9 @@ publish_release() {
     prerelease=true
     latest=false
   fi
-  gh release upload "$TAG" "${files[@]}" --clobber
+  if ((${#files[@]})); then
+    gh release upload "$TAG" "${files[@]}" --clobber
+  fi
   gh api -X PATCH "repos/$GH_REPO/releases/$DRAFT_ID" \
     -F draft=false -f tag_name="$TAG" -F prerelease="$prerelease" -f make_latest="$latest"
   # the -next pre-release was the build of this version
@@ -69,7 +80,7 @@ publish_release() {
 }
 
 publish_next() {
-  need_env TAG SHA DRAFT_ID ASSETS_DIR GH_REPO
+  need_env TAG SHA DRAFT_ID GH_REPO
   local notes
   load_assets
   notes=$(mktemp)
@@ -84,7 +95,7 @@ publish_next() {
 }
 
 publish_pr() {
-  need_env TAG SHA PR ASSETS_DIR GH_REPO GITHUB_SERVER_URL
+  need_env TAG SHA PR GH_REPO GITHUB_SERVER_URL
   local body comment_id state
   load_assets
   delete_releases "*-pr.$PR"
