@@ -578,7 +578,8 @@ issue and the log of the failed step. Explanations for humans:
   `matrix.repo || 'all repositories'`. An empty group gives `[]` and the job is
   skipped by its `if` (an empty matrix would be an error). Findings travel as
   artifacts `findings-<job>-<index>` (findings, and in the forks jobs the
-  fork kinds `fork-kinds.jsonl` for the report section 🍴 Forks and mirrors)
+  fork kinds `fork-kinds.jsonl`, in the lists job the lists `lists.json`, both
+  for the report section 🍴 Forks and mirrors)
   plus `monitor-base` (config, inventory, archived);
   Report concatenates them. Inventory cannot use `monitor.runs-on`: the value
   comes from its own output.

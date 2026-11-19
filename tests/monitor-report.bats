@@ -8,7 +8,7 @@ setup() {
   export FINDINGS="$FIX/findings.jsonl"
   export CONFIG="$FIX/config.json"
   export MONITOR_DOCS_URL=https://docs.example/checks.md
-  unset MONITOR_CONFIG_URL INVENTORY GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID FORK_KINDS
+  unset MONITOR_CONFIG_URL INVENTORY GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID FORK_KINDS LISTS
   export MONITOR_NOW
   MONITOR_NOW=$(date -u -d 2026-11-16T19:45:30Z +%s)
 }
@@ -184,10 +184,11 @@ J
   [[ $output == *"[ℹ️](https://github.com/spali/.github/blob/main/docs/monitor-checks.md#main-red)"* ]]
 }
 
-@test "not checked findings are listed in a collapsed section, one line per reason" {
+@test "not checked findings are listed in an open section, one line per reason" {
   run "$REPORT"
   nc=$(section "⚪ Not checked")
-  [[ $nc == *"Checks that did not run in these repositories because they do not apply or the feature is not available there; the repositories were checked otherwise. Each line gives the reason."*"<details>"*"### \`code-scanning-alert\` [ℹ️](https://docs.example/checks.md#code-scanning-alert)"*"- no analysis found: [spali/pub](https://github.com/spali/pub)"*"</details>"* ]]
+  [[ $nc == *"Checks that did not run in these repositories because they do not apply or the feature is not available there; the repositories were checked otherwise. Each line gives the reason."*"### \`code-scanning-alert\` [ℹ️](https://docs.example/checks.md#code-scanning-alert)"*"- no analysis found: [spali/pub](https://github.com/spali/pub)"* ]]
+  [[ $nc != *"<details>"* ]]
   [[ $nc != *"| Repository |"* ]]
   [[ $output != *"Skipped"* && $output != *"skipped"* ]]
 }
@@ -207,14 +208,8 @@ J
   [ "$(grep -c '^- ' <<<"$nc")" -eq 3 ]
   [[ $nc == *$'\n- Code scanning is not enabled for this repository. (HTTP 403): [o/a](https://github.com/o/a), [o/b](https://github.com/o/b)\n'* ]]
   [[ $nc == *$'\n- no analysis found (HTTP 404): [o/c](https://github.com/o/c)\n'* ]]
-  [[ $nc == *$'\n- private repository: [o/a](https://github.com/o/a)\n'* ]]
+  grep -qxF -- '- private repository: [o/a](https://github.com/o/a)' <<<"$nc"
   [[ $nc != *"Fix at"* && $nc != *"[Code scanning]("* ]]
-  [[ $nc == *"<summary>4 entries, click to show</summary>"* ]]
-}
-
-@test "not checked: one entry is singular" {
-  run "$REPORT"
-  [[ "$(section "⚪ Not checked")" == *"<summary>1 entry, click to show</summary>"* ]]
 }
 
 @test "not checked: empty reason and missing repo" {
@@ -225,7 +220,7 @@ J
 J
   run "$REPORT"
   nc=$(section "⚪ Not checked")
-  [[ $nc == *$'\n- no control repository\n'* ]]
+  grep -qxF -- '- no control repository' <<<"$nc"
   [[ $nc == *$'\n- (no details): [o/a](https://github.com/o/a)\n'* ]]
   [[ $nc == *$'\n- (no details): [o/b](https://github.com/o/b)\n'* ]]
 }
@@ -292,7 +287,8 @@ J
   # o/e only has an unused ignore, o/f has an info finding, so it is not clean
   [[ $output == *"**[1 red](#user-content-red)** · [3 info](#user-content-info) · [3 clean](#user-content-clean) · [1 not checked](#user-content-not-checked)"* ]]
   clean=$(section "✅ Clean")
-  [[ $clean == *"<details>"*"3 repositories"*$'\n[o/c](https://github.com/o/c), [o/d](https://github.com/o/d), [o/e](https://github.com/o/e)\n'*"</details>"* ]]
+  grep -qxF '[o/c](https://github.com/o/c), [o/d](https://github.com/o/d), [o/e](https://github.com/o/e)' <<<"$clean"
+  [[ $clean != *"<details>"* ]]
 }
 
 @test "the section anchors stay the same whatever the counts" {
@@ -802,18 +798,46 @@ J
   run "$REPORT"
   anchored forks "🍴 Forks and mirrors"
   run grep '^| ' <<<"$(section "🍴 Forks and mirrors")"
-  [ "${lines[0]}" = '| Repository | Kind | Upstream |' ]
-  [ "${lines[2]}" = '| [o/contrib](https://github.com/o/contrib) | 🤝 contribution: [#2](https://github.com/up/contrib/pull/2), [#7](https://github.com/up/contrib/pull/7) | [up/contrib](https://github.com/up/contrib) |' ]
-  [ "${lines[3]}" = '| [o/b](https://github.com/o/b) | ✏️ 3 own commits · 📌 pinned | [up/b](https://github.com/up/b) |' ]
-  [ "${lines[4]}" = '| [o/custom](https://github.com/o/custom) | ✏️ 1 own commit | [up/custom](https://github.com/up/custom) |' ]
+  [ "${lines[0]}" = '| Repository | Upstream | Kind |' ]
+  [ "${lines[2]}" = '| [o/contrib](https://github.com/o/contrib) | [up/contrib](https://github.com/up/contrib) | 🤝 contribution: [#2](https://github.com/up/contrib/pull/2), [#7](https://github.com/up/contrib/pull/7) |' ]
+  [ "${lines[3]}" = '| [o/b](https://github.com/o/b) | [up/b](https://github.com/up/b) | ✏️ 3 own commits · 📌 pinned |' ]
+  [ "${lines[4]}" = '| [o/custom](https://github.com/o/custom) | [up/custom](https://github.com/up/custom) | ✏️ 1 own commit |' ]
   # the last record of a repository wins (case-insensitive)
-  [ "${lines[5]}" = '| [O/Plain](https://github.com/O/Plain) | ✏️ 2 own commits | [up/plain](https://github.com/up/plain) |' ]
-  [ "${lines[6]}" = '| [o/mirror](https://github.com/o/mirror) | 🪞 mirror | [https://gitlab.example/m.git](https://gitlab.example/m.git) |' ]
+  [ "${lines[5]}" = '| [O/Plain](https://github.com/O/Plain) | [up/plain](https://github.com/up/plain) | ✏️ 2 own commits |' ]
+  [ "${lines[6]}" = '| [o/mirror](https://github.com/o/mirror) | [https://gitlab.example/m.git](https://gitlab.example/m.git) | 🪞 mirror |' ]
   [ "${#lines[@]}" -eq 7 ]
   run "$REPORT"
-  [[ "$(section "🍴 Forks and mirrors")" == *'<details><summary>5 forks and mirrors, click to show</summary>'* ]]
+  [[ "$(section "🍴 Forks and mirrors")" != *'<details>'* ]]
   # in the monitor comment, below the details marker
   [[ ${output%%<!-- maintenance-monitor:details -->*} != *"Forks and mirrors"* ]]
+}
+
+@test "forks section: lists column with the other lists of each fork, without lists.forks" {
+  cat >"$BATS_TEST_TMPDIR/kinds.jsonl" <<'J'
+{"repo":"o/a","kind":"unchanged","pinned":false,"own":0,"pulls":[],"upstream":"up/a"}
+{"repo":"o/b","kind":"unchanged","pinned":false,"own":0,"pulls":[],"upstream":"up/b"}
+J
+  export FORK_KINDS="$BATS_TEST_TMPDIR/kinds.jsonl"
+  config <<<'{"lists": {"forks": ["🍴 Forks & mirrors"]}}'
+  jq -n '[{name: "🍴 Forks & mirrors", items: [{repo: "o/a", archived: false}, {repo: "o/b", archived: false}]},
+    {name: "🚀 My stack", items: [{repo: "O/A", archived: false}]},
+    {name: "Home | KNX", items: [{repo: "o/a", archived: false}]},
+    {name: "empty", items: []}]' >"$BATS_TEST_TMPDIR/lists.json"
+  export LISTS="$BATS_TEST_TMPDIR/lists.json"
+  run "$REPORT"
+  run grep '^| ' <<<"$(section "🍴 Forks and mirrors")"
+  [ "${lines[0]}" = '| Repository | Upstream | Kind | Lists |' ]
+  [ "${lines[1]}" = '| --- | --- | --- | --- |' ]
+  [ "${lines[2]}" = '| [o/a](https://github.com/o/a) | [up/a](https://github.com/up/a) | ⚪ unchanged | 🚀 My stack, Home \| KNX |' ]
+  [ "${lines[3]}" = '| [o/b](https://github.com/o/b) | [up/b](https://github.com/up/b) | ⚪ unchanged | – |' ]
+  # missing or broken lists: no lists column
+  for f in missing.json bad.json; do
+    printf '{not json\n' >"$BATS_TEST_TMPDIR/bad.json"
+    export LISTS="$BATS_TEST_TMPDIR/$f"
+    run "$REPORT"
+    run grep '^| ' <<<"$(section "🍴 Forks and mirrors")"
+    [ "${lines[0]}" = '| Repository | Upstream | Kind |' ]
+  done
 }
 
 @test "forks section: none without fork kinds, broken ones are ignored" {
