@@ -332,10 +332,10 @@ J
 {"level":"info","check":"fork-behind","repo":"o/r","message":"m"}
 {"level":"red","check":"settings-fork-approval","repo":"o/fa","message":"m"}
 {"level":"red","check":"stale-branch","repo":"o/sb","message":"m","item":3}
-{"level":"red","check":"renovate-automerge","repo":"o/ra","message":"m"}
+{"level":"red","check":"renovate-automerge","repo":"o/ra","message":".github/renovate.json: automergeStrategy: got null, want \"rebase\""}
 J
   run "$REPORT"
-  [[ $output == *"[Code](https://github.com/o/ra)"* ]]
+  [[ $output == *"[Renovate config](https://github.com/o/ra/blob/HEAD/.github/renovate.json)"* ]]
   [[ $output == *"[Releases](https://github.com/o/r/releases)"* ]]
   [[ $output == *"[Tags](https://github.com/o/r/tags)"* ]]
   [[ $output == *"[Renovate PRs](https://github.com/o/r/pulls?q=is%3Apr+is%3Aopen+author%3Aapp%2Frenovate)"* ]]

@@ -585,6 +585,31 @@ private_inventory() {
   [ "$(message check-failed)" = 'renovate-automerge: cannot parse .github/renovate.json5' ]
 }
 
+@test "renovate-automerge: a config that is not one object is check-failed" {
+  for text in '[]' 'null' '' '{"a": 1}{"b": 2}'; do
+    : >"$FINDINGS"
+    renovate_file r2 "$text"
+    run_script
+    [ "$(count renovate-automerge)" -eq 0 ] || { echo "text: $text"; return 1; }
+    [ "$(message check-failed)" = 'renovate-automerge: cannot parse .github/renovate.json' ] || { echo "text: $text"; return 1; }
+  done
+}
+
+@test "renovate-automerge: an unreadable config of a public repository still needs allow_auto_merge" {
+  renovate_file r3 '{automergeStrategy: "rebase"}' '.data.repository.autoMergeAllowed = false'
+  run_script
+  [ "$(message settings-merge)" = 'allow_auto_merge: got false, want true' ]
+  [ "$(message check-failed)" = 'renovate-automerge: cannot parse .github/renovate.json5' ]
+}
+
+@test "renovate-automerge: a private repository with platformAutomerge true is red" {
+  private_inventory
+  renovate_file r2 '{"platformAutomerge": true, "automergeStrategy": "rebase"}'
+  run_script
+  [ "$(count settings-merge)" -eq 0 ]
+  [ "$(message renovate-automerge)" = '.github/renovate.json: platformAutomerge: got true, want false' ]
+}
+
 @test "renovate-automerge: the merge query reads the auto-merge setting and the config files" {
   run_script
   grep -q 'autoMergeAllowed' "$GH_LOG"
