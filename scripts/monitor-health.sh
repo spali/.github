@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Health checks for owned repositories that are no fork and not under `forks:`:
 # main-red, renovate-stale, unanswered, workflow-disabled, dependabot-alert,
-# code-scanning-alert, stale-branch, settings-merge, settings-fork-approval,
-# funding.
+# code-scanning-alert, stale-branch, settings-merge, renovate-automerge,
+# settings-fork-approval, funding.
 # Writes findings only. Env: FINDINGS INVENTORY CONFIG (file paths).
 # shellcheck disable=SC2016 # jq programs, $vars are jq variables
 set -euo pipefail
@@ -183,7 +183,7 @@ main() {
   while IFS=$'\t' read -r repo branch private; do
     [[ -n $repo ]] || continue
     checked "$repo"
-    check_merge "$repo"
+    check_merge "$repo" "$private"
     check_fork_approval "$repo" "$private"
     check_funding "$repo" own
     check_branches "$repo" "$branch"

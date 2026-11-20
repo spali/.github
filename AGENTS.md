@@ -495,7 +495,8 @@ issue and the log of the failed step. Explanations for humans:
 | `several-drafts` | more than one draft release | ask the owner which to delete |
 | `next-stale` | `-next` pre-release published before the latest release | re-run the build on `main`, or delete it |
 | `pin-behind` | a caller (including the control repository's monitor pin) pins a `spali/.github` release older than a newer one (older than 7 days) | merge or fix the Renovate PR |
-| `settings-merge` | merge options differ from README "Set up", step 6 (all own repositories that are neither forks nor under `forks:`) | fix the setting (owner approval) |
+| `settings-merge` | merge options differ from README "Set up", step 6 (all own repositories that are neither forks nor under `forks:`; `allow_auto_merge` only for public ones with a Renovate config) | fix the setting (owner approval) |
+| `renovate-automerge` | the Renovate config on the default branch (first of Renovate's file names, top-level keys only) differs from README "Set up", step 3: `automergeStrategy` not `rebase`, or `platformAutomerge` `false` in a public repository / not `false` in a private one (no rulesets under the Free plan, so GitHub auto-merge would not wait for checks); a file jq cannot parse (JSON5) is `check-failed` | fix the config by PR |
 | `settings-alerts` | Dependabot alerts are off | enable them (owner approval) |
 | `settings-pvr` | private vulnerability reporting is off (public repo) | enable it (owner approval) |
 | `settings-actions` | default workflow permissions are not read-only, or Actions may approve PRs | fix the setting (owner approval) |

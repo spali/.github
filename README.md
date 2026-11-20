@@ -286,7 +286,11 @@ Works for any language. Steps 1–4 are files, 5–9 are settings.
    ```
 3. **Renovate:** `.github/renovate.json` with
    `helpers:pinGitHubActionDigests` (see [this repository's](.github/renovate.json)),
-   so the pinned `spali/.github` commits are updated.
+   so the pinned `spali/.github` commits are updated. Automatic updates merge
+   by rebase (`"automergeStrategy": "rebase"`) through GitHub auto-merge as
+   soon as the required checks are green (`"platformAutomerge": true`; in a
+   private repository without rulesets `false`, so Renovate waits for the
+   checks itself).
 4. **First release:** without any published release, release-drafter has no
    baseline and the first draft lists no pull requests. Merge the setup, then
    release that first draft (or an [exception version](#release-a-different-version)).
@@ -300,6 +304,8 @@ Works for any language. Steps 1–4 are files, 5–9 are settings.
    ```
 6. **Repository settings:** merge with rebase or squash only (the squash
    commit takes the pull request title), delete branches after merge,
+   auto-merge allowed (public repositories with Renovate; only accounts with
+   write access can turn it on for a pull request),
    Dependabot alerts and private vulnerability reporting on. Actions: workflow
    permissions *Read repository contents*, GitHub Actions may not create or
    approve pull requests, fork pull request workflows need approval for all
@@ -309,6 +315,8 @@ Works for any language. Steps 1–4 are files, 5–9 are settings.
    gh api -X PATCH repos/spali/<repo> -F allow_merge_commit=false \
      -F allow_squash_merge=true -F allow_rebase_merge=true -F delete_branch_on_merge=true \
      -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=COMMIT_MESSAGES
+   # public repositories with Renovate only
+   gh api -X PATCH repos/spali/<repo> -F allow_auto_merge=true
    gh api -X PUT repos/spali/<repo>/vulnerability-alerts
    gh api -X PUT repos/spali/<repo>/private-vulnerability-reporting
    gh api -X PUT repos/spali/<repo>/actions/permissions/workflow \
@@ -458,7 +466,7 @@ It checks five groups (archived repositories only by the Lists check):
 | Group | Repositories | Checks |
 |---|---|---|
 | Release flow and settings | central repositories (those that use this flow) | stale dev builds and `-next` pre-releases, orphan tags, several drafts, pin behind the latest release, alert/PVR/Actions settings, rulesets |
-| Health | all repositories that are no fork and not under `forks:` | merge settings, red `main`, open Renovate pull requests, unanswered pull requests and issues, disabled workflows, Dependabot and code scanning alerts, branches of merged pull requests |
+| Health | all repositories that are no fork and not under `forks:` | merge settings, Renovate auto-merge config, red `main`, open Renovate pull requests, unanswered pull requests and issues, disabled workflows, Dependabot and code scanning alerts, branches of merged pull requests |
 | Forks | the own forks and the entries under `forks` in `repos.yml` | repository missing, settings, upstream commits or refs missing for 48 h, manual rebases pending (not for pinned ones); delete candidates (not the forks in `lists.external`), old pull requests, branches of merged upstream pull requests |
 | Lists | all repositories, archived ones too | GitHub Lists that contradict forks or mirrors (archived repositories stay in the normal lists, see [freeze a fork or mirror](docs/monitor-checks.md#freeze-a-fork-or-mirror); forks and entries in a forks list; no own repositories in `lists.external`, except forks and mirrors); repositories without the release flow; the last run of the control repository's sync failed |
 

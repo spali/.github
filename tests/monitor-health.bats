@@ -513,6 +513,85 @@ item_value() { jq -rs --arg c "$1" --argjson i "${2:-0}" 'map(select(.check == $
   [ "$(message settings-merge)" = 'delete_branch_on_merge: got false, want true' ]
 }
 
+# renovate_file ALIAS JSON_TEXT: merge settings with a Renovate config blob
+# under ALIAS (r0 renovate.json … r2 .github/renovate.json, see RENOVATE_FILES).
+renovate_file() { merge_json ".data.repository.$1 = {text: $(jq -Rs . <<<"$2")}${3:+ | $3}"; }
+
+private_inventory() {
+  jq -n '[{name: "spali/a", fork: false, private: true, default_branch: "main"}]' >"$INVENTORY"
+}
+
+@test "renovate-automerge: no Renovate config, no finding and no auto-merge setting wanted" {
+  merge_json '.data.repository.autoMergeAllowed = false'
+  run_script
+  [ "$(jq -s length "$FINDINGS")" -eq 0 ]
+}
+
+@test "renovate-automerge: a compliant public repository has no finding" {
+  renovate_file r2 '{"platformAutomerge": true, "automergeStrategy": "rebase"}'
+  run_script
+  [ "$(jq -s length "$FINDINGS")" -eq 0 ]
+}
+
+@test "renovate-automerge: platformAutomerge may be left at the default in a public repository" {
+  renovate_file r2 '{"automergeStrategy": "rebase"}'
+  run_script
+  [ "$(jq -s length "$FINDINGS")" -eq 0 ]
+}
+
+@test "renovate-automerge: names the file and each differing key" {
+  renovate_file r2 '{"platformAutomerge": false}'
+  run_script
+  [ "$(count renovate-automerge)" -eq 1 ]
+  [ "$(level renovate-automerge)" = red ]
+  [ "$(message renovate-automerge)" = '.github/renovate.json: platformAutomerge: got false, want true; automergeStrategy: got null, want "rebase"' ]
+}
+
+@test "renovate-automerge: a public repository with a Renovate config needs allow_auto_merge" {
+  renovate_file r2 '{"automergeStrategy": "rebase"}' '.data.repository.autoMergeAllowed = false'
+  run_script
+  [ "$(count renovate-automerge)" -eq 0 ]
+  [ "$(message settings-merge)" = 'allow_auto_merge: got false, want true' ]
+}
+
+@test "renovate-automerge: a private repository needs platformAutomerge false, not allow_auto_merge" {
+  private_inventory
+  renovate_file r2 '{"automergeStrategy": "rebase"}' '.data.repository.autoMergeAllowed = false'
+  run_script
+  [ "$(count settings-merge)" -eq 0 ]
+  [ "$(message renovate-automerge)" = '.github/renovate.json: platformAutomerge: got null, want false' ]
+}
+
+@test "renovate-automerge: a compliant private repository has no finding" {
+  private_inventory
+  renovate_file r2 '{"platformAutomerge": false, "automergeStrategy": "rebase"}' '.data.repository.autoMergeAllowed = false'
+  run_script
+  [ "$(count renovate-automerge)" -eq 0 ]
+  [ "$(count settings-merge)" -eq 0 ]
+}
+
+@test "renovate-automerge: the first config file in Renovate's order wins" {
+  merge_json '.data.repository.r0 = {text: "{\"automergeStrategy\": \"squash\"}"}
+    | .data.repository.r2 = {text: "{\"automergeStrategy\": \"rebase\"}"}'
+  run_script
+  [ "$(message renovate-automerge)" = 'renovate.json: automergeStrategy: got "squash", want "rebase"' ]
+}
+
+@test "renovate-automerge: a config jq cannot parse is check-failed" {
+  renovate_file r3 '{automergeStrategy: "rebase", // JSON5
+}'
+  run_script
+  [ "$(count renovate-automerge)" -eq 0 ]
+  [ "$(message check-failed)" = 'renovate-automerge: cannot parse .github/renovate.json5' ]
+}
+
+@test "renovate-automerge: the merge query reads the auto-merge setting and the config files" {
+  run_script
+  grep -q 'autoMergeAllowed' "$GH_LOG"
+  grep -qF 'HEAD:.github/renovate.json' "$GH_LOG"
+  grep -qF 'HEAD:.renovaterc.json5' "$GH_LOG"
+}
+
 @test "stale-branch: a merged branch at the merged head is red with the pull request as item" {
   respond_jq "$BRANCHES" '[{name: "main", commit: {sha: "m1"}}, {name: "feat/x", commit: {sha: "s1"}}]'
   pull feat/x 5 closed 2026-11-10T00:00:00Z s1 | jq -s . | gh_respond '*pulls?state=all&head=spali:feat%2Fx&*' -
