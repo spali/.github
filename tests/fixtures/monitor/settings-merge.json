@@ -5,7 +5,8 @@
       "squashMergeAllowed": true,
       "rebaseMergeAllowed": true,
       "deleteBranchOnMerge": true,
-      "squashMergeCommitTitle": "PR_TITLE"
+      "squashMergeCommitTitle": "PR_TITLE",
+      "autoMergeAllowed": true
     }
   }
 }

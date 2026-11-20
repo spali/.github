@@ -145,7 +145,32 @@ on, branches deleted on merge, and the squash commit title must be the pull
 request title. Checked on all own repositories that are neither forks nor
 under `forks:` (shown under Settings for central ones, else under Health).
 
+A public repository with a Renovate config also needs "Allow auto-merge"
+(`allow_auto_merge`), so Renovate can hand its automatic updates to GitHub
+auto-merge.
+
 **Fix:** Settings → General → Pull Requests.
+
+## renovate-automerge
+
+🔴 The Renovate config does not let automatic updates merge by rebase as soon
+as the required checks are green. Read from the default branch: the first of
+Renovate's config files (`renovate.json`, `renovate.json5`,
+`.github/renovate.json`, …, `.renovaterc.json5`), top-level keys only (presets
+in `extends` are not resolved). Wanted:
+
+- `automergeStrategy: "rebase"`.
+- Public repository: `platformAutomerge` not `false` (Renovate's default is
+  `true`): GitHub merges once the required checks of the `main` ruleset pass,
+  instead of Renovate on its next run, often hours later.
+- Private repository: `platformAutomerge: false`. Under the Free plan it has no
+  rulesets and so no required checks; GitHub auto-merge would not wait for
+  them. Renovate then merges itself once all checks are green.
+
+The finding names the file. Without a Renovate config there is no finding. A
+config jq cannot read (JSON5 with comments) is `check-failed`.
+
+**Fix:** correct the config by pull request.
 
 ## stale-branch
 

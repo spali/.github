@@ -68,6 +68,7 @@ $cfg[0] as $cfg
       elif $c == "devbuild-closed-pr" or $c == "several-drafts" or $c == "next-stale" then ["Releases", "\($r | gh)/releases"]
       elif $c == "orphan-tag" then ["Tags", "\($r | gh)/tags"]
       elif $c == "pin-behind" or $c == "renovate-stale" then ["Renovate PRs", "\($r | gh)/pulls?q=is%3Apr+is%3Aopen+author%3Aapp%2Frenovate"]
+      elif $c == "renovate-automerge" then ["Code", ($r | gh)]
       elif $c == "settings-merge" or $c == "funding" then ["Settings", "\($r | gh)/settings"]
       elif $c == "settings-alerts" or $c == "settings-pvr" then ["Security settings", "\($r | gh)/settings/security_analysis"]
       elif $c == "settings-actions" or $c == "settings-fork-approval" then ["Actions settings", "\($r | gh)/settings/actions"]

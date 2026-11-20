@@ -7,7 +7,7 @@ MONITOR_CHECKS=(
   devbuild-closed-pr orphan-tag several-drafts next-stale pin-behind
   settings-merge settings-alerts settings-pvr settings-actions
   settings-fork-approval funding
-  ruleset-main ruleset-tags main-red renovate-stale workflow-disabled
+  ruleset-main ruleset-tags main-red renovate-stale renovate-automerge workflow-disabled
   dependabot-alert code-scanning-alert unanswered stale-branch
   fork-missing fork-settings fork-behind fork-delete-candidate
   list-none list-contradiction list-external-own
@@ -57,6 +57,8 @@ MONITOR_TODO='{
     "text": "The latest run of a workflow on the default branch failed: fix the cause and re-run it."},
   "renovate-stale": {"category": "cleanup", "areas": ["health"], "title": "Merge or close old Renovate pull requests",
     "text": "A Renovate pull request is open for more than 7 days: review and merge it, or close it."},
+  "renovate-automerge": {"category": "cleanup", "areas": ["health"], "title": "Fix the Renovate auto-merge settings",
+    "text": "Renovate does not merge automatic updates by rebase as soon as the required checks are green: fix `platformAutomerge` and `automergeStrategy` in the Renovate config."},
   "workflow-disabled": {"category": "cleanup", "areas": ["health"], "title": "Enable disabled workflows",
     "text": "GitHub disabled a workflow after 60 days without activity: enable it again, or delete it."},
   "dependabot-alert": {"category": "cleanup", "areas": ["health"], "title": "Handle Dependabot alerts",
@@ -317,37 +319,87 @@ check_funding() {
   [[ -z $out ]] || finding info funding "$repo" "$out"
 }
 
-# check_merge REPO: settings-merge (expected values: README "Set up a new
-# repository", step 6), for every owned repository that is neither a fork nor
-# under `forks:`. The merge settings are read with GraphQL: the REST repository
-# answers null for them to an app token without write access. Writes findings
-# only and always returns 0.
-# shellcheck disable=SC2016 # GraphQL variables, no shell expansion wanted
-MERGE_QUERY='query($owner: String!, $name: String!) {
+# Renovate config files in Renovate's order (the first one found wins). The
+# merge query reads each as alias r<index>.
+RENOVATE_FILES=(
+  renovate.json renovate.json5 .github/renovate.json .github/renovate.json5
+  .gitlab/renovate.json .gitlab/renovate.json5
+  .renovaterc .renovaterc.json .renovaterc.json5
+)
+
+# check_merge REPO PRIVATE: settings-merge (expected values: README "Set up a
+# new repository", step 6) and renovate-automerge (step 3), for every owned
+# repository that is neither a fork nor under `forks:`. One GraphQL query reads
+# the merge settings (the REST repository answers null for them to an app
+# token without write access) and the Renovate config files of the default
+# branch. Without a Renovate config neither allow_auto_merge nor
+# renovate-automerge is checked. PRIVATE "true": under the Free plan a private
+# repository has no rulesets, so no required checks, and GitHub auto-merge
+# would not wait for them: platformAutomerge must be false there, and
+# allow_auto_merge is not wanted. Only top-level keys of the config count
+# (presets in `extends` are not resolved). Writes findings only and always
+# returns 0.
+merge_query() {
+  local i blobs=''
+  for i in "${!RENOVATE_FILES[@]}"; do
+    blobs+=" r$i: object(expression: \"HEAD:${RENOVATE_FILES[i]}\") { ... on Blob { text } }"
+  done
+  # shellcheck disable=SC2016 # GraphQL variables, no shell expansion wanted
+  printf '%s' 'query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
-    deleteBranchOnMerge squashMergeCommitTitle
+    deleteBranchOnMerge squashMergeCommitTitle autoMergeAllowed'"$blobs"'
   }
 }'
+}
+MERGE_QUERY=$(merge_query)
+
+# Problems of a Renovate config (one JSON object on stdin, read with -s; $private
+# is "true" or not). Prints them joined by "; ".
+# shellcheck disable=SC2016 # jq program
+RENOVATE_PROBLEMS='
+  if length != 1 or (.[0] | type) != "object" then error("not one object") else .[0] end |
+  def want(k; v): if .[k] == v then empty else "\(k): got \(.[k] | tojson), want \(v | tojson)" end;
+  [ (if $private == "true" then want("platformAutomerge"; false)
+     elif .platformAutomerge == false then "platformAutomerge: got false, want true"
+     else empty end),
+    want("automergeStrategy"; "rebase") ] | join("; ")'
+
 check_merge() {
-  local body problems
-  body=$(fetch settings-merge "$1" graphql -f query="$MERGE_QUERY" \
-    -f owner="${1%%/*}" -f name="${1#*/}") || return 0
+  local repo=$1 private=${2:-false} body out problems path text
+  body=$(fetch settings-merge "$repo" graphql -f query="$MERGE_QUERY" \
+    -f owner="${repo%%/*}" -f name="${repo#*/}") || return 0
   # shellcheck disable=SC2016 # jq program
-  json_out settings-merge "$1" problems -r \
-    '.data.repository | if . == null then error("no repository") else . end |
+  json_out settings-merge "$repo" out -c --arg private "$private" \
+    --argjson files "$(printf '%s\n' "${RENOVATE_FILES[@]}" | jq -R . | jq -sc .)" \
+    '.data.repository | if . == null then error("no repository") else . end | . as $g |
+     ([range($files | length) as $i | select($g["r\($i)"].text != null) |
+       {path: $files[$i], text: $g["r\($i)"].text}] | first) as $cfg |
      {allow_merge_commit: .mergeCommitAllowed,
       allow_squash_merge: .squashMergeAllowed,
       allow_rebase_merge: .rebaseMergeAllowed,
       delete_branch_on_merge: .deleteBranchOnMerge,
-      squash_merge_commit_title: .squashMergeCommitTitle} as $r |
+      squash_merge_commit_title: .squashMergeCommitTitle,
+      allow_auto_merge: .autoMergeAllowed} as $r |
      {allow_merge_commit: false, allow_squash_merge: true,
        allow_rebase_merge: true, delete_branch_on_merge: true,
-       squash_merge_commit_title: "PR_TITLE"} | to_entries |
+       squash_merge_commit_title: "PR_TITLE"}
+     + (if $cfg != null and $private != "true" then {allow_auto_merge: true} else {} end) |
+     to_entries |
      map(select($r[.key] != .value) |
-       "\(.key): got \($r[.key] | tojson), want \(.value | tojson)") | join("; ")' \
+       "\(.key): got \($r[.key] | tojson), want \(.value | tojson)") | join("; ") |
+     {problems: ., path: $cfg.path, text: $cfg.text}' \
     <<<"$body" || return 0
-  [[ -z $problems ]] || finding red settings-merge "$1" "$problems"
+  problems=$(jq -r .problems <<<"$out")
+  [[ -z $problems ]] || finding red settings-merge "$repo" "$problems"
+  path=$(jq -r '.path // empty' <<<"$out")
+  [[ -n $path ]] || return 0
+  text=$(jq -r .text <<<"$out")
+  if ! problems=$(jq -rs --arg private "$private" "$RENOVATE_PROBLEMS" <<<"$text" 2>/dev/null); then
+    finding red check-failed "$repo" "renovate-automerge: cannot parse $path"
+    return 0
+  fi
+  [[ -z $problems ]] || finding red renovate-automerge "$repo" "$path: $problems"
 }
 
 # check_stale_branches REPO DEFAULT TARGET BRANCHES_FILE: stale-branch. Every
